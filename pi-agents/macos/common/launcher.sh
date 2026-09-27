@@ -138,6 +138,8 @@ install_launchd_one() { # label runner log
     printf '  <key>Label</key><string>%s</string>\n' "$1"
     printf '  <key>ProgramArguments</key><array><string>%s</string></array>\n' "$(xml_escape "$2")"
     printf '  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n'
+    # launchd caps user agents at 60s; the bridge drains for 50s so it finishes before the SIGKILL
+    printf '  <key>ExitTimeOut</key><integer>60</integer>\n'
     printf '  <key>StandardOutPath</key><string>%s</string>\n  <key>StandardErrorPath</key><string>%s</string>\n' "$(xml_escape "$3")" "$(xml_escape "$3")"
     printf '</dict></plist>\n'
   } > "$plist"

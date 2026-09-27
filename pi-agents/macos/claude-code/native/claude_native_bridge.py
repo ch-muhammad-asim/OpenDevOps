@@ -487,6 +487,7 @@ class Config:
         self.timeout = a.timeout
         self.idle_seconds = a.session_idle
         self.max_sessions = a.max_sessions
+        self.drain_seconds = a.drain_seconds
         self.api_key = a.api_key
 
 
@@ -495,6 +496,7 @@ class Registry:
         self.cfg = cfg
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
+        self.closing = False   # set on SIGTERM: refuse new turns, let running ones finish
         self.metrics = {"requests": 0, "errors": 0, "sessions_started": 0, "turns_reused": 0, "started": time.time()}
         threading.Thread(target=self._reaper, daemon=True).start()
 
@@ -639,6 +641,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": {"message": "unauthorized"}})
         if self.path.rstrip("/") != "/v1/chat/completions":
             return self._json(404, {"error": {"message": "not found"}})
+        if self.reg.closing:
+            return self._json(503, {"error": {"message": "bridge is restarting — retry in a few seconds"}})
         try:
             req = json.loads(self.rfile.read(int(self.headers.get("content-length") or "0")).decode())
         except Exception as exc:  # noqa: BLE001
@@ -840,6 +844,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int, default=int(e("CLAUDE_CODE_BRIDGE_TIMEOUT", "600")))
     p.add_argument("--session-idle", type=int, default=int(e("CLAUDE_NATIVE_SESSION_IDLE", "1800")))
     p.add_argument("--max-sessions", type=int, default=int(e("CLAUDE_NATIVE_MAX_SESSIONS", "8")))
+    p.add_argument("--drain-seconds", type=int, default=int(e("CLAUDE_NATIVE_DRAIN_SECONDS", "50")),
+                   help="on SIGTERM, how long to let in-flight turns finish before killing sessions")
     p.add_argument("--api-key", default=e("CLAUDE_CODE_BRIDGE_API_KEY", ""))
     return p
 
@@ -854,17 +860,39 @@ def main(argv: Optional[list[str]] = None) -> None:
     reg = Registry(cfg)
     server = Server((args.host, args.port), reg)
 
-    def _shutdown(signum, _frame):
-        print(f"[claude-native] signal {signum} — shutting down", flush=True)
+    def _drain_then_stop(signum: int) -> None:
+        # Killing sessions straight away cut whatever turn was streaming: pi got half a tool call
+        # and reported "Operation aborted" on edits it never ran. Stop taking new requests (the
+        # 503 above), let in-flight turns finish, then kill. The default 50s sits under launchd's
+        # ExitTimeOut, which is capped at 60s for user agents whatever the plist asks for, and
+        # under systemd's default 90s TimeoutStopSec — past either, the SIGKILL lands first.
+        reg.closing = True
+        deadline = time.time() + max(0, cfg.drain_seconds)
+        busy = [s.id for s in reg.sessions.values() if s.busy]
+        if busy:
+            print(f"[claude-native] signal {signum} — draining {len(busy)} in-flight turn(s), up to {cfg.drain_seconds}s", flush=True)
+        while time.time() < deadline and any(s.busy for s in list(reg.sessions.values())):
+            time.sleep(0.25)
+        left = [s.id for s in reg.sessions.values() if s.busy]
+        print(f"[claude-native] signal {signum} — shutting down"
+              + (f" ({len(left)} turn(s) still running, cut)" if left else ""), flush=True)
         for s in list(reg.sessions.values()):
             s.kill()
-        threading.Thread(target=server.shutdown, daemon=True).start()
+        server.shutdown()
+
+    def _shutdown(signum, _frame):
+        if reg.closing:          # second signal: stop waiting
+            for s in list(reg.sessions.values()):
+                s.kill()
+            threading.Thread(target=server.shutdown, daemon=True).start()
+            return
+        threading.Thread(target=_drain_then_stop, args=(signum,), daemon=True).start()
 
     for name in ("SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), _shutdown)
     print(f"[claude-native] v{BRIDGE_VERSION} listening on http://{args.host}:{args.port}/v1 model={cfg.default_model} "
           f"effort={cfg.effort} connectors={'all' if cfg.allow_all else len(cfg.allowed_tools)} native_tools=on "
-          f"session_idle={cfg.idle_seconds}s max_sessions={cfg.max_sessions}", flush=True)
+          f"session_idle={cfg.idle_seconds}s max_sessions={cfg.max_sessions} drain={cfg.drain_seconds}s", flush=True)
     try:
         server.serve_forever()
     finally:

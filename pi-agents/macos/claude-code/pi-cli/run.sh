@@ -105,6 +105,8 @@ cmd_install_service() {
         printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n'
         printf '  <key>Label</key><string>%s</string>\n  <key>ProgramArguments</key><array><string>%s</string></array>\n' "$LABEL" "$(xml_escape "$SERVICE_DIR/run-upstream.sh")"
         printf '  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n'
+        # launchd caps user agents at 60s; the bridge drains for 50s so it finishes before the SIGKILL
+        printf '  <key>ExitTimeOut</key><integer>60</integer>\n'
         printf '  <key>StandardOutPath</key><string>%s</string>\n  <key>StandardErrorPath</key><string>%s</string>\n</dict></plist>\n' "$(xml_escape "$LOG_FILE")" "$(xml_escape "$LOG_FILE")"
       } > "$plist"
       launchctl bootout "$domain/$LABEL" >/dev/null 2>&1 || true
