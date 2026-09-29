@@ -257,6 +257,10 @@ class Session:
         self.busy = False
         self.pending: dict[str, dict[str, Any]] = {}     # our tool_call id → {"mcp_id", "name", "arguments"}
         self.announced: dict[str, str] = {}              # tool_call ids announced to the client, not yet matched to a shim call
+        # Results pi already sent for calls Claude Code has not dispatched yet. It runs non-read-only
+        # MCP tools one at a time, so with two calls in one message the 2nd reaches the shim only after
+        # the 1st is answered; its result is parked here and handed over the moment it arrives.
+        self.early_results: dict[str, tuple[str, bool]] = {}
         self.call_seq = 0
         self.events: "queue.Queue[dict[str, Any]]" = queue.Queue()
         self.dead = False
@@ -286,6 +290,7 @@ class Session:
             self.events.put(exited)
         self.pending.clear()
         self.announced.clear()
+        self.early_results.clear()
         return dropped
 
     # ── process ──
@@ -372,6 +377,9 @@ class Session:
 
     def deliver_result(self, call_id: str, content: str, is_error: bool = False) -> bool:
         info = self.pending.pop(call_id, None)
+        if not info and call_id in self.announced:
+            self.early_results[call_id] = (content, is_error)
+            return True
         if not info or not self.shim_conn:
             return False
         with self.shim_lock:
@@ -402,6 +410,7 @@ class Session:
         message_done = False
         usage: dict[str, Any] = {}
         recent: list[str] = []                       # last event types, for diagnosing a late announce
+        arrived = 0                                  # announced calls that reached the shim this turn
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -409,7 +418,15 @@ class Session:
             try:
                 ev = self.events.get(timeout=min(remaining, 1.0))
             except queue.Empty:
-                if message_done and host_calls_announced and host_calls_pending_arrival == 0:
+                # All calls in; or, after 1s of quiet, at least one is in and Claude Code is blocked on
+                # it — the rest are dispatched one by one as results come back (see early_results).
+                # Waiting for all of them deadlocked any message with 2+ calls until pi's 300s
+                # timeout ("terminated"), then pi's retry re-seeded the whole history.
+                if message_done and host_calls_announced and (host_calls_pending_arrival == 0 or arrived > 0):
+                    if host_calls_pending_arrival:
+                        print(f"{_ts()} [claude-native] session={self.id} finishing with {host_calls_pending_arrival} of "
+                              f"{len(host_calls_announced)} call(s) not yet dispatched — Claude Code runs them one at a time",
+                              flush=True)
                     yield {"done": "tool_calls", "usage": usage}
                     return
                 continue
@@ -422,6 +439,14 @@ class Session:
                 raise SessionError(f"claude exited (code {ev.get('code')}): {tail[-800:]}", 502)
             if t == "_host_call":
                 call_id = self._match_call(ev)
+                early = self.early_results.pop(call_id, None)
+                if early is not None:
+                    # pi answered this one already, in the same batch as the call before it.
+                    with self.shim_lock:
+                        self.shim_conn.sendall((json.dumps({"op": "result", "id": ev["mcp_id"], "content": early[0],
+                                                            "is_error": early[1]}) + "\n").encode("utf-8"))
+                    continue
+                arrived += 1
                 self.pending[call_id] = {"mcp_id": ev["mcp_id"], "name": ev["name"], "arguments": ev["arguments"]}
                 if call_id in host_calls_announced:
                     if host_calls_pending_arrival > 0:
