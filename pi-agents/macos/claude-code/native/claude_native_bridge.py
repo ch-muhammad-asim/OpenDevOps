@@ -401,6 +401,7 @@ class Session:
         host_calls_pending_arrival = 0
         message_done = False
         usage: dict[str, Any] = {}
+        recent: list[str] = []                       # last event types, for diagnosing a late announce
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -413,15 +414,31 @@ class Session:
                     return
                 continue
             t = ev.get("type")
+            et_trail = (ev.get("event") or {}).get("type") if t == "stream_event" else None
+            recent.append(et_trail or t or "?")
+            del recent[:-12]
             if t == "_exit":
                 tail = "\n".join(self.stderr_tail[-5:])
                 raise SessionError(f"claude exited (code {ev.get('code')}): {tail[-800:]}", 502)
             if t == "_host_call":
                 call_id = self._match_call(ev)
                 self.pending[call_id] = {"mcp_id": ev["mcp_id"], "name": ev["name"], "arguments": ev["arguments"]}
-                if host_calls_pending_arrival > 0:
-                    host_calls_pending_arrival -= 1
-                if message_done and host_calls_pending_arrival == 0:
+                if call_id in host_calls_announced:
+                    if host_calls_pending_arrival > 0:
+                        host_calls_pending_arrival -= 1
+                else:
+                    # Claude called a pi tool whose tool_use block never came through this turn's
+                    # stream, so the client has never heard of it. Previously the turn then ended as
+                    # `tool_calls` with ZERO calls: pi had nothing to run and silently stopped
+                    # ("toolUse []" in its transcript), while this call sat in `pending` forever and
+                    # every later message had to start a new session. Announce it now, complete.
+                    host_calls_announced.append(call_id)
+                    idx = len(host_calls_announced) - 1
+                    print(f"{_ts()} [claude-native] session={self.id} host call {ev['name']} arrived with no streamed "
+                          f"tool_use block — announcing it late (recent events: {' '.join(recent)})", flush=True)
+                    yield {"tool_call": {"id": call_id, "name": ev["name"], "index": idx}}
+                    yield {"tool_args": {"id": call_id, "delta": json.dumps(ev["arguments"]), "index": idx}}
+                if message_done and host_calls_pending_arrival == 0 and host_calls_announced:
                     yield {"done": "tool_calls", "usage": usage}
                     return
                 continue
@@ -449,6 +466,8 @@ class Session:
                     elif d.get("type") == "input_json_delta" and blk.get("id"):
                         blk["json"] += d.get("partial_json", "")
                         yield {"tool_args": {"id": blk["id"], "delta": d.get("partial_json", ""), "index": host_calls_announced.index(blk["id"])}}
+                elif et == "message_start":
+                    message_done = False
                 elif et == "message_stop":
                     message_done = True
                     if host_calls_announced and host_calls_pending_arrival == 0:
