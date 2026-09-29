@@ -89,6 +89,19 @@ def _model_obj(model_id: str) -> dict:
             "context_length": window, "context_window": window}
 
 
+def _ts() -> str:
+    """Local wall-clock timestamp with milliseconds for every log line.
+
+    Without it the log could not say WHEN anything happened: a 6-minute stall before a turn
+    started was indistinguishable from normal traffic.
+    """
+    t = time.time()
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int((t % 1) * 1000):03d}"
+
+
+LOCK_WARN_SECONDS = float(os.environ.get("CLAUDE_NATIVE_LOCK_WARN_SECONDS", "10"))
+
+
 HOST_SERVER = "host"                       # MCP server name → tools appear as mcp__host__<name>
 HOST_PREFIX = f"mcp__{HOST_SERVER}__"
 _EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -532,7 +545,7 @@ class Registry:
                 if s.dead or not (ids & set(s.pending)):
                     continue
                 if norm is not None and len(norm) < len(s.history):
-                    print(f"[claude-native] session={s.id} client compacted "
+                    print(f"{_ts()} [claude-native] session={s.id} client compacted "
                           f"({len(s.history)} → {len(norm)} messages) — starting a fresh session",
                           flush=True)
                     continue
@@ -552,17 +565,85 @@ class Registry:
                     return s
         return None
 
+    def why_no_continuation(self, norm: list[dict[str, Any]], model: str, sig: str) -> str:
+        """Explain a `mode=new` that could have been a continuation.
+
+        A new session re-seeds the WHOLE history into a fresh `claude` process — expensive at a few
+        hundred k tokens — so the log should say which rule refused each live session. The usual
+        culprit is a steering message arriving while the previous turn is still running (busy).
+        """
+        prefix = norm[:-1]
+        counts: dict[str, int] = {}
+        with self.lock:
+            for s in self.sessions.values():
+                if s.dead:
+                    why = "dead"
+                elif s.busy:
+                    why = "busy"
+                elif s.pending:
+                    why = "waiting on tool results"
+                elif s.model != model:
+                    why = "other model"
+                elif s.tools_sig != sig:
+                    why = "other tool set"
+                elif len(s.history) != len(prefix):
+                    why = "history length differs"
+                else:
+                    why = "history text differs"
+                counts[why] = counts.get(why, 0) + 1
+        if not counts:
+            return "no live sessions"
+        return f"no reusable session among {sum(counts.values())} live: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items()))
+
     def start(self, model: str, effort: str, tools: list[dict[str, Any]], system_prompt: str) -> Session:
         with self.lock:
             if len(self.sessions) >= self.cfg.max_sessions:
                 victim = min((s for s in self.sessions.values() if not s.busy), key=lambda s: s.last_used, default=None)
                 if victim:
+                    print(f"{_ts()} [claude-native] session={victim.id} evicted — at max_sessions={self.cfg.max_sessions}, "
+                          f"idle {time.time() - victim.last_used:.0f}s", flush=True)
                     victim.kill()
                     self.sessions.pop(victim.id, None)
             s = Session(self.cfg, model, effort, tools, system_prompt)
             self.sessions[s.id] = s
             self.metrics["sessions_started"] += 1
             return s
+
+    def kill_all(self, grace: float = 5.0) -> None:
+        """Stop every session's `claude` in parallel — SIGTERM all, one shared grace, SIGKILL the rest.
+
+        `Session.kill()` one at a time costs up to 5s each. With 8 sessions plus the 50s drain that
+        is ~90s, past launchd's 60s ExitTimeOut, so launchd SIGKILLed the bridge mid-loop. Each
+        `claude` runs in its own process group (start_new_session=True), so the ones not reached yet
+        survived as orphans under PPID 1 — ~200 MB each, found six of them after a few restarts.
+        """
+        sessions = list(self.sessions.values())
+        groups = []
+        for s in sessions:
+            s.dead = True
+            try:
+                if s.proc.poll() is None:
+                    pgid = os.getpgid(s.proc.pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                    groups.append((s, pgid))
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        deadline = time.time() + grace
+        while time.time() < deadline and any(s.proc.poll() is None for s, _ in groups):
+            time.sleep(0.1)
+        forced = 0
+        for s, pgid in groups:
+            if s.proc.poll() is None:
+                forced += 1
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+        for s in sessions:
+            shutil.rmtree(s.tmp, ignore_errors=True)
+        self.sessions.clear()
+        print(f"{_ts()} [claude-native] stopped {len(groups)} claude process(es)"
+              + (f", {forced} needed SIGKILL" if forced else ""), flush=True)
 
     def drop(self, s: Session) -> None:
         s.kill()
@@ -592,7 +673,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: Any) -> None:
         if "/health" not in (args[0] if args else ""):
-            print(f"[claude-native] {self.address_string()} - {fmt % args}", flush=True)
+            print(f"{_ts()} [claude-native] {self.address_string()} - {fmt % args}", flush=True)
 
     def _json(self, code: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
@@ -670,28 +751,44 @@ class Handler(BaseHTTPRequestHandler):
                 break
         trailing_tools.reverse()
         session: Optional[Session] = None
-        mode = "new"
+        mode, reason = "new", "first turn"
+        t0 = time.monotonic()
         if trailing_tools:
             session = self.reg.find_for_tool_results(trailing_tools, norm)
             mode = "tool_results" if session else "new"
+            if session is None:
+                reason = "tool results matched no live session (bridge restarted, evicted, or client compacted)"
         else:
             session = self.reg.find_for_continuation(norm, model, sig)
             mode = "continue" if session else "new"
+            if session is None and len(norm) > 1:
+                reason = self.reg.why_no_continuation(norm, model, sig)
+        t_route = time.monotonic()
         if session is None:
             session = self.reg.start(model, effort, tools, system_text(req.get("messages") or []))
+        t_spawn = time.monotonic()
         if mode != "new":
             self.reg.metrics["turns_reused"] += 1
 
-        with session.lock:
+        waited = 0.0
+        while not session.lock.acquire(timeout=LOCK_WARN_SECONDS):
+            waited += LOCK_WARN_SECONDS
+            print(f"{_ts()} [claude-native] session={session.id} mode={mode} WAITING {waited:.0f}s for the "
+                  f"session lock — an earlier turn on this session is still running", flush=True)
+        t_lock = time.monotonic()
+        sent_bytes = 0
+        try:
             session.busy = True
             session.last_used = time.time()
             try:
                 if mode == "tool_results":
                     for r in trailing_tools:
+                        sent_bytes += len(r["text"])
                         if not session.deliver_result(str(r.get("tool_call_id")), r["text"]):
-                            print(f"[claude-native] warning: unknown tool_call_id {r.get('tool_call_id')}", flush=True)
+                            print(f"{_ts()} [claude-native] warning: unknown tool_call_id {r.get('tool_call_id')}", flush=True)
                         session.history.append(r)
                 elif mode == "continue":
+                    sent_bytes = len(norm[-1]["text"])
                     session.send_user(norm[-1]["text"], norm[-1].get("images"))
                     session.history.append(norm[-1])
                 else:
@@ -703,9 +800,15 @@ class Handler(BaseHTTPRequestHandler):
                         text = f"<conversation-history>\n{seed}\n</conversation-history>\n\nRespond only to this latest message:\n{latest['text']}"
                     else:
                         text = latest["text"]
+                    sent_bytes = len(text)
                     session.send_user(text, latest.get("images"))
                     session.history = list(norm)
-                print(f"[claude-native] session={session.id} mode={mode} model={model} effort={effort} tools={len(tools)}", flush=True)
+                t_sent = time.monotonic()
+                print(f"{_ts()} [claude-native] session={session.id} mode={mode} model={model} effort={effort} "
+                      f"tools={len(tools)} msgs={len(norm)} sent={sent_bytes / 1024:.1f}KiB "
+                      f"route={(t_route - t0) * 1000:.0f}ms spawn={(t_spawn - t_route) * 1000:.0f}ms "
+                      f"lock={(t_lock - t_spawn) * 1000:.0f}ms send={(t_sent - t_lock) * 1000:.0f}ms"
+                      + (f" reason=\"{reason}\"" if mode == "new" else ""), flush=True)
                 if stream:
                     self._stream(session, model)
                 else:
@@ -724,6 +827,10 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 session.busy = False
                 session.last_used = time.time()
+        finally:
+            session.lock.release()
+            print(f"{_ts()} [claude-native] session={session.id} mode={mode} turn done in "
+                  f"{time.monotonic() - t0:.1f}s (sessions live={len(self.reg.sessions)}/{cfg.max_sessions})", flush=True)
 
     # ── responses ──
     def _frame(self, model: str, delta: dict[str, Any], finish: Optional[str] = None, usage: Optional[dict[str, Any]] = None, cid: str = "") -> bytes:
@@ -788,7 +895,7 @@ class Handler(BaseHTTPRequestHandler):
             # reads the tail of this dead turn and the session hangs forever ("stuck session").
             dropped = session.drain()
             self._record_assistant(session, text, calls)
-            print(f"[claude-native] session={session.id} client disconnected mid-stream — "
+            print(f"{_ts()} [claude-native] session={session.id} client disconnected mid-stream — "
                   f"turn recorded, {dropped} stale event(s) dropped", flush=True)
 
     def _blocking(self, session: Session, model: str) -> None:
@@ -871,27 +978,25 @@ def main(argv: Optional[list[str]] = None) -> None:
         deadline = time.time() + max(0, cfg.drain_seconds)
         busy = [s.id for s in reg.sessions.values() if s.busy]
         if busy:
-            print(f"[claude-native] signal {signum} — draining {len(busy)} in-flight turn(s), up to {cfg.drain_seconds}s", flush=True)
+            print(f"{_ts()} [claude-native] signal {signum} — draining {len(busy)} in-flight turn(s), up to {cfg.drain_seconds}s", flush=True)
         while time.time() < deadline and any(s.busy for s in list(reg.sessions.values())):
             time.sleep(0.25)
         left = [s.id for s in reg.sessions.values() if s.busy]
-        print(f"[claude-native] signal {signum} — shutting down"
+        print(f"{_ts()} [claude-native] signal {signum} — shutting down"
               + (f" ({len(left)} turn(s) still running, cut)" if left else ""), flush=True)
-        for s in list(reg.sessions.values()):
-            s.kill()
+        reg.kill_all()
         server.shutdown()
 
     def _shutdown(signum, _frame):
         if reg.closing:          # second signal: stop waiting
-            for s in list(reg.sessions.values()):
-                s.kill()
+            reg.kill_all(grace=1.0)
             threading.Thread(target=server.shutdown, daemon=True).start()
             return
         threading.Thread(target=_drain_then_stop, args=(signum,), daemon=True).start()
 
     for name in ("SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), _shutdown)
-    print(f"[claude-native] v{BRIDGE_VERSION} listening on http://{args.host}:{args.port}/v1 model={cfg.default_model} "
+    print(f"{_ts()} [claude-native] v{BRIDGE_VERSION} listening on http://{args.host}:{args.port}/v1 model={cfg.default_model} "
           f"effort={cfg.effort} connectors={'all' if cfg.allow_all else len(cfg.allowed_tools)} native_tools=on "
           f"session_idle={cfg.idle_seconds}s max_sessions={cfg.max_sessions} drain={cfg.drain_seconds}s", flush=True)
     try:
