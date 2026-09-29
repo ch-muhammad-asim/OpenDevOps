@@ -12,7 +12,7 @@
 set -euo pipefail
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 [ -f "$HERE/.env" ] && { set -a; . "$HERE/.env"; set +a; }
-MODEL="${PI_CLI_MODEL:-claude-opus-5}"
+MODEL="${PI_CLI_MODEL:-claude-opus-5-5}"
 SETTINGS="$HOME/.pi/agent/settings.json"
 EXT="$HERE/extensions/claude-code"
 BIN_DIR="${PI_CLI_BIN_DIR:-$HOME/.local/bin}"
@@ -74,7 +74,7 @@ if [ "$NO_DEFAULT" -eq 0 ]; then
   # enabledModels is pi's model SCOPE: when it exists, models outside it are ignored — including ours,
   # so a bare `pi` would silently fall back to whatever else is enabled. Put every claude-code model in
   # scope and drop the built-in anthropic entries (same ids, billed as third-party "extra usage").
-  CC_MODELS="$(printf '%s' "${CLAUDE_CODE_BRIDGE_MODELS:-claude-opus-5,claude-opus-5-5,claude-fable-5-1,claude-fable-5,claude-opus-4-8,claude-sonnet-5,claude-sonnet-4-6,claude-haiku-4-5}" | tr ',' '\n' | sed 's#^#claude-code/#' | jq -R . | jq -s .)"
+  CC_MODELS="$(printf '%s' "${CLAUDE_CODE_BRIDGE_MODELS:-claude-opus-5,claude-opus-5-5,claude-fable-5-1,claude-fable-5,claude-opus-4-8,claude-sonnet-5,claude-sonnet-5-5,claude-sonnet-4-6,claude-haiku-4-5}" | tr ',' '\n' | sed 's#^#claude-code/#' | jq -R . | jq -s .)"
   jq --arg e "$EXT" --arg m "$MODEL" --argjson cc "$CC_MODELS" '
       .extensions = ((.extensions // []) + [$e] | unique)
       | .defaultProvider = "claude-code" | .defaultModel = $m
