@@ -33,7 +33,7 @@ LABEL="pi-cli-claude-code"
 LOG_FILE="${PI_CLI_LOG:-$HOME/.pi-cli-claude-code.log}"
 SERVICE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/pi-cli-claude-code"
 # Claude's local tools are pi's job; everything else Claude has (every claude.ai connector) stays on.
-CLAUDE_BUILTINS="Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,LS,Task,TodoWrite,TodoRead,AskUserQuestion,Skill,SlashCommand,KillShell,BashOutput,EnterPlanMode,ExitPlanMode,PowerShell,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,SendMessage,ListAgents,TaskOutput,TaskStop,EnterWorktree,ExitWorktree,PushNotification,Agent,Workflow,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskUpdate"
+CLAUDE_BUILTINS="Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,LS,Task,TodoWrite,TodoRead,AskUserQuestion,Skill,SlashCommand,KillShell,BashOutput,EnterPlanMode,ExitPlanMode,PowerShell,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,SendMessage,ListAgents,TaskOutput,TaskStop,EnterWorktree,ExitWorktree,PushNotification,Agent,Workflow,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskUpdate,ShareOnboardingGuide,DesignSync"
 PI_BIN="${PI_BIN:-$(command -v pi || echo "$HOME/.local/bin/pi")}"
 
 [ "$(uname -s)" = "Linux" ] || { echo "[pi-cli] error: this is the Ubuntu/Linux tree — on macOS use ../../../macos/claude-code/pi-cli/" >&2; exit 1; }
