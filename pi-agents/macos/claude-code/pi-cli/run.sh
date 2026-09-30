@@ -28,7 +28,7 @@ LABEL="com.hermes.claude-code-pi-cli"
 LOG_FILE="${PI_CLI_LOG:-$HOME/.pi-cli-claude-code.log}"
 SERVICE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/pi-cli-claude-code"
 # Claude's local tools are pi's job; everything else Claude has (every claude.ai connector) stays on.
-CLAUDE_BUILTINS="Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,LS,Task,TodoWrite,TodoRead,AskUserQuestion,Skill,SlashCommand,KillShell,BashOutput,EnterPlanMode,ExitPlanMode,PowerShell,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,SendMessage,ListAgents,TaskOutput,TaskStop,EnterWorktree,ExitWorktree,PushNotification"
+CLAUDE_BUILTINS="Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,LS,Task,TodoWrite,TodoRead,AskUserQuestion,Skill,SlashCommand,KillShell,BashOutput,EnterPlanMode,ExitPlanMode,PowerShell,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,SendMessage,ListAgents,TaskOutput,TaskStop,EnterWorktree,ExitWorktree,PushNotification,Agent,Workflow,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskUpdate"
 PI_BIN="${PI_BIN:-$(command -v pi || echo "$HOME/.local/bin/pi")}"
 
 shell_quote() { local q; printf -v q '%q' "$1"; printf '%s' "$q"; }

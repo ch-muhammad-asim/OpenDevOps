@@ -75,7 +75,7 @@ DEFAULT_CONTEXT_WINDOW = 200_000
 DEFAULT_BUILTINS = ("Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,LS,Task,TodoWrite,TodoRead,"
                     "AskUserQuestion,Skill,SlashCommand,KillShell,BashOutput,EnterPlanMode,ExitPlanMode,PowerShell,"
                     "CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,SendMessage,ListAgents,TaskOutput,TaskStop,"
-                    "EnterWorktree,ExitWorktree,PushNotification")
+                    "EnterWorktree,ExitWorktree,PushNotification,Agent,Workflow,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskUpdate")
 
 
 def _model_obj(model_id: str) -> dict:
