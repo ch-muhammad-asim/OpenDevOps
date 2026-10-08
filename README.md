@@ -13,6 +13,11 @@ From a single Windows laptop to a production GKE cluster, with a **security-firs
 
 <br/>
 
+
+<p align="center">
+  <img src="./assets/agent-harness.svg" alt="Animated Agent Harness architecture diagram with OpenDevOps portrait at the bottom" width="800" />
+</p>
+
 [![▶️ Watch the demo on YouTube](https://img.shields.io/badge/▶️%20Watch%20the%20Demo-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=m8k2GGRldiU)
 
 </div>
