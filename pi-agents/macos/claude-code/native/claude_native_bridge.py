@@ -300,7 +300,7 @@ class Session:
         srv.listen(1)
         mcp_cfg = os.path.join(self.tmp, "mcp.json")
         with open(mcp_cfg, "w", encoding="utf-8") as fh:
-            json.dump({"mcpServers": {HOST_SERVER: {"command": self.cfg.python, "args": [SHIM, self.sock_path, self.id]}}}, fh)
+            json.dump({"mcpServers": {HOST_SERVER: {"command": self.cfg.shim_python(), "args": [SHIM, self.sock_path, self.id]}}}, fh)
         cmd = [self.cfg.claude_bin, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                "--include-partial-messages", "--model", self.model, "--effort", self.effort, "--no-session-persistence",
                "--mcp-config", mcp_cfg]
@@ -532,6 +532,7 @@ class Config:
     def __init__(self, a: argparse.Namespace) -> None:
         self.claude_bin = a.claude_bin
         self.python = a.python
+        self._python_pinned = bool(os.environ.get("PYTHON_BIN"))
         self.cwd = a.cwd
         self.default_model = a.model
         self.models = [a.model] + [m for m in _split_csv(a.models) if m != a.model]
@@ -547,6 +548,26 @@ class Config:
         self.max_sessions = a.max_sessions
         self.drain_seconds = a.drain_seconds
         self.api_key = a.api_key
+
+    def shim_python(self) -> str:
+        """The interpreter for mcp_shim.py, resolved per session rather than once at startup.
+
+        The bridge used to call `shutil.which("python3")` at launch and keep the answer for its
+        whole life. A Homebrew Python upgrade (2026-10-10: 3.14.7 -> 3.14.8_2) deleted the old
+        build and the unversioned /opt/homebrew/bin/python3 link, so every new session was handed
+        a path that no longer existed. Claude Code reported it as `posix_spawn 'stdio'` (ENOENT),
+        the `host` server never connected, and pi/Hermes lost every tool. Re-resolve on PATH each
+        time; an explicit PYTHON_BIN is honoured as long as the file is still there.
+        """
+        if self._python_pinned and os.path.isfile(self.python) and os.access(self.python, os.X_OK):
+            return self.python
+        found = shutil.which("python3") or shutil.which("python")
+        if not found:
+            return self.python
+        if found != self.python:
+            print(f"{_ts()} [claude-native] shim interpreter is now {found} (was {self.python})", flush=True)
+            self.python = found
+        return found
 
 
 class Registry:
