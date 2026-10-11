@@ -236,6 +236,12 @@ Anthropic schema translation.
 | 🎬 | **DevOps demo (OpenCode)** | The same three-gate diagnose-and-fix story on **free** models, at $0 inference | [`opencode-demo/`](./opencode-demo) |
 | 🎬 | **SRE demo (Bedrock)** | The same diagnose-and-fix story on Bedrock — **two** gates, not three, because the native path has no Claude Code harness policy to open; RBAC is bound per namespace | [`aws-bedrock/sre-demo/`](./aws-bedrock/sre-demo) |
 
+**Agent workspace tooling:**
+
+| | Tool | Purpose | Guide |
+|---|---|---|---|
+| 🐑 | **Herdr** | Terminal workspace manager for AI coding agents: install on Linux, macOS and Windows, plus Herdr Mobile (Android) over SSH, with a fix for zsh blocking session discovery | [`herdr/`](./herdr) |
+
 ---
 
 ## 🔒 Security-first by design
