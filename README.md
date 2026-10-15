@@ -254,6 +254,14 @@ The repositories are complementary but independent—this directory links to the
 
 ---
 
+## 🤖 Planned project: Docker Agent
+
+Explore **[Docker Agent](https://docs.docker.com/ai/docker-agent/)** for a security-first DevOps/SRE agent: **build and test locally → share on Docker Hub → containerize → deploy on Kubernetes**. The new guide documents the implementation roadmap and distinguishes agent OCI artifacts from runnable container images.
+
+📂 **[Docker Agent project guide](./docker-agent/)** · 🚧 **Status: planning only (not yet built or deployed)**
+
+---
+
 ## 🔒 Security-first by design
 
 This is built the way production infrastructure should be — **least privilege, everywhere**:
