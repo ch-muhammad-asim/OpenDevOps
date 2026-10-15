@@ -244,6 +244,16 @@ Anthropic schema translation.
 
 ---
 
+## 🏭 Related project: DevOps AI Factory
+
+Building an **AI platform on Kubernetes** rather than just deploying a DevOps/SRE agent? The standalone **[DevOps AI Factory](https://github.com/ch-muhammad-asim/devops-ai-factory)** project covers Terragrunt/Terraform on AWS, K3s, GPU and model-serving workloads, and LLM/MCP/agent gateways.
+
+📂 **[Browse the AI Factory guide in OpenDevOps](./devops-ai-factory/)** · 🔗 **[Visit the source repository](https://github.com/ch-muhammad-asim/devops-ai-factory)**
+
+The repositories are complementary but independent—this directory links to the external project and does not vendor its source or deploy it automatically.
+
+---
+
 ## 🔒 Security-first by design
 
 This is built the way production infrastructure should be — **least privilege, everywhere**:
