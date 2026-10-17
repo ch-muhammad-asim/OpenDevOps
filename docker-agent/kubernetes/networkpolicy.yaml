@@ -1,0 +1,48 @@
+# Ingress: deny all in-cluster ingress (`kubectl port-forward` enters via the kubelet and still works).
+# Egress: default-deny, then allow only DNS, the Kubernetes API and HTTPS to the internet (Anthropic, for the bridge sidecar).
+# The IPs below are OrbStack-specific; find yours with the discovery commands in README section G.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oda-agent-deny-ingress
+  namespace: oda-system
+spec:
+  podSelector:
+    matchLabels: {app: oda-agent}
+  policyTypes: [Ingress]
+  ingress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oda-agent-egress-allowlist
+  namespace: oda-system
+spec:
+  podSelector:
+    matchLabels: {app: oda-agent}
+  policyTypes: [Egress]
+  egress:
+    # DNS (CoreDNS in kube-system)
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Kubernetes API (Service VIP and the real endpoint, since CNIs differ on which one they match)
+    - to:
+        - ipBlock: {cidr: 192.168.194.129/32}
+        - ipBlock: {cidr: 192.168.139.2/32}
+      ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 26443}
+    # Anthropic API for the bridge sidecar (HTTPS to the internet only; private ranges excluded).
+    # NetworkPolicy can't match hostnames; use an egress proxy/FQDN policy for tighter control.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 0.0.0.0/8]
+      ports:
+        - {protocol: TCP, port: 443}

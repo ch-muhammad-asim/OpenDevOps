@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.150.0/agent-schema.json
+version: "15"
+metadata:
+  description: Read-only Kubernetes debugging agent (investigates with live, read-only cluster tools)
+  version: "0.2.0"
+
+providers:
+  claude-bridge:
+    api_type: openai_chatcompletions
+    base_url: http://host.docker.internal:18188/v1
+    # bearer key the bridge requires (claude-code-cli-bridge/README.md); pass it as an env var at run time
+    token_key: CLAUDE_BRIDGE_API_KEY
+
+models:
+  # Tool calling needs a backend that returns OpenAI tool_calls; the Claude Code bridge does, the Codex bridge does not
+  claude-bridge:
+    provider: claude-bridge
+    model: claude-haiku-4-5
+
+# Run with --safety restricted: read-only tools auto-approve, everything else is denied.
+# add_memory/update_memory are writes to the agent's own sqlite file (not the cluster),
+# so they are allowed explicitly; delete_memory stays denied.
+permissions:
+  allow:
+    - add_memory
+    - update_memory
+
+agents:
+  root:
+    model: claude-bridge
+    description: Kubernetes SRE investigator (read-only)
+    instruction: |
+      You are a Kubernetes SRE investigator. Diagnose problems by calling your
+      read-only Kubernetes tools (list/get pods, events, logs, resources) before
+      answering; base conclusions on what the tools return and cite the evidence
+      (resource names, event reasons, log lines).
+      You can only read. You cannot create, edit, delete, scale, exec into or
+      restart anything, and you cannot list or read Secrets. When a fix is needed, give
+      the exact kubectl command or manifest change for a human to apply.
+      Use the memory tools to remember durable facts the user asks you to keep
+      (e.g. which namespace they own) and recall them when relevant.
+      Answer concisely.
+    toolsets:
+      - type: think
+      - type: memory
+        path: /data/memory.db
+      - type: mcp
+        command: /usr/local/bin/kubernetes-mcp-server
+        args: ["--config", "/etc/kubernetes-mcp-server/config.toml"]
+
+flavors:
+  # Kubernetes: the Claude Code CLI bridge runs as a sidecar in the same Pod (kubernetes/deployment.yaml)
+  in-pod:
+    providers:
+      claude-bridge:
+        base_url: http://127.0.0.1:18188/v1
+  # Docker Compose: the bridge is the `claude-code-cli-bridge` service (compose.yaml)
+  compose:
+    providers:
+      claude-bridge:
+        base_url: http://claude-code-cli-bridge:18188/v1

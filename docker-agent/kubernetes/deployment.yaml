@@ -1,0 +1,98 @@
+# Read-only Kubernetes SRE agent (serve api) + Claude Code CLI bridge sidecar, in ONE Pod.
+# The agent reaches the bridge on Pod-local 127.0.0.1:18188 (--flavor in-pod); nothing else can.
+# Prereqs: ../k8s-lab/rbac-readonly.yaml (ServiceAccount oda-reader) and the oda-agent-api-key Secret
+# with keys AGENT_API_KEY, CLAUDE_BRIDGE_API_KEY and CLAUDE_CODE_OAUTH_TOKEN (see ../claude-code-cli-bridge/README.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oda-agent
+  namespace: oda-system
+  labels: {app: oda-agent}
+spec:
+  replicas: 1                     # SQLite sessions/memory: one writer only
+  strategy: {type: Recreate}      # RWO volume: never run two Pods at once
+  selector:
+    matchLabels: {app: oda-agent}
+  template:
+    metadata:
+      labels: {app: oda-agent}
+    spec:
+      serviceAccountName: oda-reader
+      automountServiceAccountToken: true   # the SA disables it by default; this Pod needs its read-only token
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: agent
+          image: docker.io/quickbooks2018/opendevops-agent-runtime@sha256:8561da6dd8258ad3fdf3e16b4a3e7f0f3309815e312eed05adc067c36d209d88
+          # $(AGENT_API_KEY) is expanded by the kubelet from the Secret, so the value never appears in the Pod spec
+          args: ["serve", "api", "/app/agent-sre.yaml", "--flavor", "in-pod", "--listen", "0.0.0.0:8080",
+                 "--auth-token", "$(AGENT_API_KEY)", "--session-db", "/data/sessions.db"]
+          env:
+            - name: AGENT_API_KEY
+              valueFrom:
+                secretKeyRef: {name: oda-agent-api-key, key: AGENT_API_KEY}
+            - name: CLAUDE_BRIDGE_API_KEY   # bearer key for the bridge sidecar
+              valueFrom:
+                secretKeyRef: {name: oda-agent-api-key, key: CLAUDE_BRIDGE_API_KEY}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: home, mountPath: /home/nonroot}
+            - {name: data, mountPath: /data}
+            - {name: mcp-config, mountPath: /etc/kubernetes-mcp-server/config.toml, subPath: config.toml, readOnly: true}
+        - name: claude-code-cli-bridge
+          image: docker.io/quickbooks2018/opendevops-agent-runtime@sha256:461a49cf2a0ebbe0279b440235b14dc936e8f3b40c535181b0147c7301439a9d
+          env:
+            - name: CLAUDE_CODE_BRIDGE_API_KEY   # same value the agent sends as CLAUDE_BRIDGE_API_KEY
+              valueFrom:
+                secretKeyRef: {name: oda-agent-api-key, key: CLAUDE_BRIDGE_API_KEY}
+            - name: CLAUDE_CODE_OAUTH_TOKEN      # `claude setup-token`; the claude CLI uses your Claude subscription
+              valueFrom:
+                secretKeyRef: {name: oda-agent-api-key, key: CLAUDE_CODE_OAUTH_TOKEN}
+          # The bridge listens on 127.0.0.1 only, and kubelet probes dial the Pod IP, so check loopback from inside
+          readinessProbe:
+            exec:
+              command: ["/usr/bin/python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 18188), 2)"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/usr/bin/python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 18188), 2)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: bridge-tmp, mountPath: /tmp}
+            - {name: bridge-home, mountPath: /home/nonroot}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: home, emptyDir: {}}
+        - {name: bridge-tmp, emptyDir: {}}
+        - {name: bridge-home, emptyDir: {}}
+        - {name: data, persistentVolumeClaim: {claimName: oda-agent-data}}
+        - {name: mcp-config, configMap: {name: oda-agent-mcp}}

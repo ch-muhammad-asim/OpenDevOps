@@ -1,0 +1,11 @@
+# Sessions (serve api) and agent memory survive Pod restarts. Single replica (SQLite), RWO.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oda-agent-data
+  namespace: oda-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Mi

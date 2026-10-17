@@ -1,0 +1,43 @@
+# Two deliberately broken workloads for the SRE agent to diagnose.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oda-demo
+---
+# 1) ImagePullBackOff: the image tag does not exist
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: oda-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: web
+          image: nginx:faulty
+          ports: [{containerPort: 80}]
+---
+# 2) CrashLoopBackOff: the app exits because a required env var is missing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: oda-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+        - name: api
+          image: busybox:1.37
+          command: ["sh", "-c", "echo 'starting api'; if [ -z \"$DATABASE_URL\" ]; then echo 'FATAL: DATABASE_URL is not set' >&2; exit 1; fi; sleep 3600"]
