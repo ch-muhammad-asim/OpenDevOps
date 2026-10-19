@@ -1,0 +1,11 @@
+*
+!agent.yaml
+!agent-sre.yaml
+!agent-claude-code.yaml
+!claude-code/
+!k8s-mcp/
+!claude-code-cli-bridge/claude_native_bridge.py
+!claude-code-cli-bridge/mcp_shim.py
+!claude-code-cli-bridge/managed-settings.json
+!opencode-cli-bridge/opencode_bridge.py
+!opencode-cli-bridge/opencode.json

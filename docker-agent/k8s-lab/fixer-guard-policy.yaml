@@ -1,0 +1,63 @@
+# Admission guard for the Lead SRE fixer (ServiceAccount oda-fixer). RBAC can't limit WHICH fields a Deployment
+# patch changes, so without this an approved change could mount a Secret, read one via env, or swap the
+# ServiceAccount. This policy lets oda-fixer change only container images, literal env values, resources and
+# replicas; everything security-relevant in the Pod template must stay exactly as it was.
+# Needs Kubernetes 1.30+ (admissionregistration.k8s.io/v1). Cluster-scoped: apply it once, before the fixer.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: oda-fixer-deployment-guard
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: oda-demo}
+    resourceRules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [deployments]
+  matchConditions:
+    - name: only-the-fixer
+      expression: request.userInfo.username == 'system:serviceaccount:oda-system:oda-fixer'
+  variables:
+    - name: new
+      expression: object.spec.template.spec
+    - name: old
+      expression: oldObject.spec.template.spec
+  validations:
+    - expression: >-
+        variables.new.?serviceAccountName.orValue('') == variables.old.?serviceAccountName.orValue('') &&
+        variables.new.?automountServiceAccountToken.orValue(true) == variables.old.?automountServiceAccountToken.orValue(true)
+      message: the fixer may not change the Pod's ServiceAccount or token mounting
+    - expression: >-
+        variables.new.?volumes.orValue([]) == variables.old.?volumes.orValue([]) &&
+        variables.new.?initContainers.orValue([]) == variables.old.?initContainers.orValue([]) &&
+        variables.new.?ephemeralContainers.orValue([]) == variables.old.?ephemeralContainers.orValue([])
+      message: the fixer may not change volumes, init containers or ephemeral containers
+    - expression: >-
+        variables.new.?securityContext.orValue({}) == variables.old.?securityContext.orValue({}) &&
+        variables.new.?hostNetwork.orValue(false) == variables.old.?hostNetwork.orValue(false) &&
+        variables.new.?hostPID.orValue(false) == variables.old.?hostPID.orValue(false) &&
+        variables.new.?hostIPC.orValue(false) == variables.old.?hostIPC.orValue(false) &&
+        variables.new.?nodeName.orValue('') == variables.old.?nodeName.orValue('')
+      message: the fixer may not change Pod security settings, host namespaces or node placement
+    - expression: >-
+        variables.new.containers.all(c, variables.old.containers.exists(o, o.name == c.name &&
+          c.?command.orValue([]) == o.?command.orValue([]) &&
+          c.?args.orValue([]) == o.?args.orValue([]) &&
+          c.?volumeMounts.orValue([]) == o.?volumeMounts.orValue([]) &&
+          c.?securityContext.orValue({}) == o.?securityContext.orValue({})))
+      message: the fixer may only change image, env and resources of existing containers (no new containers, command, mounts or securityContext)
+    - expression: >-
+        variables.new.containers.all(c, !has(c.envFrom) &&
+          c.?env.orValue([]).all(e, !has(e.valueFrom)))
+      message: the fixer may only set literal env values (no envFrom, secretKeyRef or other valueFrom)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: oda-fixer-deployment-guard
+spec:
+  policyName: oda-fixer-deployment-guard
+  validationActions: [Deny]

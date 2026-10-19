@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.150.0/agent-schema.json
+# An on-call team: on_call delegates to log_analyst (sub-agent), and log_analyst can ALSO be served over A2A
+# for external A2A clients:
+#   docker agent run --exec team.yaml --agent on_call "Why has checkout been throwing 500s since around 2 p.m.?"
+#   docker agent serve a2a team.yaml --agent log_analyst --listen 127.0.0.1:8080
+# Both use the Claude Code CLI bridge (../../claude-code-cli-bridge/), reached as the Compose service name.
+version: "15"
+
+providers:
+  claude-bridge:
+    api_type: openai_chatcompletions
+    base_url: http://claude-code-cli-bridge:18188/v1
+    token_key: CLAUDE_BRIDGE_API_KEY
+
+models:
+  haiku:
+    provider: claude-bridge
+    model: claude-haiku-4-5
+
+agents:
+  on_call:
+    model: haiku
+    description: On-call assistant that triages incidents
+    instruction: |
+      You are the on-call SRE assistant. You have NO access to logs and must not guess.
+      Your FIRST action for every question is a transfer_task tool call to agent "log_analyst"
+      with the user's question as the task. Do not write any answer before that call returns.
+      Then reply with: the likely root cause, the evidence the analyst found (quote log lines),
+      and the next 2-3 actions. Be concise. Never claim you changed anything.
+    # Native multi-agent: on_call delegates to log_analyst in the same process (transfer_task).
+    # (A2A between two docker-agent processes doesn't work in v1.150.0: `serve a2a` publishes an A2A v1.0
+    #  agent card / JSON-RPC API, while the `a2a` toolset client speaks v0.3. See ../../README.md → Multi-agent team example.)
+    sub_agents: [log_analyst]
+
+  log_analyst:
+    model: haiku
+    description: Analyzes the checkout service logs below and reports findings with evidence
+    instruction: |
+      You are a log analyst. Answer only from these checkout-service logs (today, UTC):
+        13:52 INFO  deploy checkout v2.3.1 started (change: payment-gateway timeout 5000ms -> 500ms)
+        13:58 INFO  deploy checkout v2.3.1 completed
+        14:01 ERROR POST /checkout 500 payment-gateway: context deadline exceeded after 500ms
+        14:01 WARN  payment-gateway p95 latency 820ms (normal 600-900ms)
+        14:05 ERROR POST /checkout 500 payment-gateway: context deadline exceeded after 500ms (x412 in 5m)
+        14:20 ERROR POST /checkout 500 error rate 31% of requests
+        14:20 INFO  GET /cart 200 error rate 0%
+      Quote the relevant log lines as evidence. Be concise.

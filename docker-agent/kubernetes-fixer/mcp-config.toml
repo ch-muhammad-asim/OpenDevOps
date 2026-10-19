@@ -1,0 +1,15 @@
+# kubernetes-mcp-server config for the Lead SRE fixer: write tools enabled, but only the ones a fix needs.
+# RBAC (../k8s-lab/rbac-fixer.yaml) limits what they can touch; the agent asks a human before every write.
+cluster_provider_strategy = "in-cluster"
+read_only = false
+toolsets = ["core"]
+# Never exposed to the model: shell into containers, start new pods, delete arbitrary resources
+disabled_tools = ["pods_exec", "pods_run", "resources_delete"]
+list_output = "table"
+stateless = true
+log_level = 0
+
+[[denied_resources]]
+group = ""
+version = "v1"
+kind = "Secret"
