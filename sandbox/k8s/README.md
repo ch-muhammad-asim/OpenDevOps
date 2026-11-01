@@ -40,6 +40,8 @@ Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served
 
 > 🗂️ VM vs GKE side by side (Docker Compose, OpenShell, Kubernetes): [sandbox/README.md → What runs where](../README.md#️-what-runs-where-docker-compose-vs-openshell-vs-kubernetes).
 
+> 🔐 Why the nodes run Ubuntu, not COS, and who runs as root: [Landlock and why the nodes are Ubuntu, not COS](#-landlock-and-why-the-nodes-are-ubuntu-not-cos).
+
 ### 🧩 Components, one line each
 
 | Component | What it is and what it does here |
@@ -161,9 +163,41 @@ Never combine credentials with curl's `-w '%{redirect_url}'`: it prints the URL 
 
 **Rotate the Hermes dashboard password:** write a new `dashboard.pw`, regenerate `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` in `hermes.env` with the Hermes image (step 3 of the build), then re-create the sandbox (`STEPS="delete-sandbox sandbox tunnel" sandbox/k8s/gke/deploy.sh`; `/sandbox` data is on the PVC and is deleted with it, so save anything you need first).
 
-### 🐧 Node image: Ubuntu, not COS (tested 2026-11-01)
+### 🔐 Landlock and why the nodes are Ubuntu, not COS
 
-OpenShell needs **Landlock ABI 3 or newer**, and `hermes/policy.yaml` sets `landlock: compatibility: hard_requirement`, so the sandbox fails closed without it. A test cluster mirroring the real `default-permission-pool` settings (`cos_containerd`, `e2-standard-2`, GKE **1.35.8-gke.1796000**, Dataplane V2; zonal `us-central1-c`, 2 nodes) showed that **Container-Optimized OS cannot run it**. The test cluster was deleted; `hermes-gke` stays on Ubuntu.
+**In short:** OpenShell's filesystem guardrail is the kernel's **Landlock** module. GKE's Ubuntu node image has it; Container-Optimized OS (COS) is built without it (tested: COS 125), so the OpenShell sandbox cannot start on COS nodes.
+
+**What Landlock is**
+
+- **Landlock:** a Linux security module (kernel 5.13+) that lets an unprivileged process restrict its own file access and, from ABI 4, its TCP bind/connect.
+- **One-way:** the rules apply to the process and every child it starts, and can only be tightened, never loosened or removed.
+- **ABI versions:** 1 (Linux 5.13) file access, 2 (5.19) rename/link across directories, 3 (6.2) truncate, 4 (6.7) TCP bind/connect; later ABIs add device ioctl, IPC scoping, audit logging and UDP.
+
+**Why OpenShell needs it**
+
+- **Policy paths:** it enforces the `filesystem_policy` in [`../hermes/policy.yaml`](../hermes/policy.yaml): `/usr`, `/etc`, `/opt/hermes` and the other system paths read-only, only `/sandbox`, `/tmp` and a few devices writable, everything else denied.
+- **Mandatory baseline:** it hides OpenShell's private channel and bootstrap files (such as `/.openshell`) from the agent and protects them against truncation, while OpenShell's trusted runtime and supervisor can still use them.
+- **Startup check:** OpenShell v0.1.6 probes for Landlock ABI ≥ 3 before it starts the workload and refuses to run without it, even with `landlock: compatibility: best_effort`; that setting only relaxes the extra policy paths and never disables the baseline ([support matrix](https://docs.nvidia.com/openshell/v0.1.6/about/support-matrix)). This repo uses `hard_requirement` anyway.
+
+**How it fits with the other layers** (Landlock is the filesystem layer):
+
+| Layer | What it stops |
+|---|---|
+| **Landlock** | Reads and writes outside the policy's paths, and agent access to OpenShell's private files. |
+| **seccomp** | Dangerous syscalls (`mount`, `ptrace`, `unshare` and similar); also lets the runtime hand every connection to the supervisor. |
+| **NoNewPrivs** | setuid/setgid binaries raising privileges (so `sudo` cannot gain root). |
+| **Non-root uid 10000** | Root-only files and actions; Unix permissions apply on top of Landlock. |
+| **Dropped capabilities** | Privileged kernel operations that need a capability (`CapEff 0`). |
+| **Network fence** | Direct connections: `NetworkMode=none` on the VM, a NetworkPolicy that allows only the supervisor on GKE. |
+| **L7 policy** | Any host, method, path or program not in the network rules (supervisor, OPA). |
+| **Credential injection** | The agent ever holding the NVIDIA key; the supervisor adds it only on allowed requests. |
+
+**Why it doesn't need root, but needs the right node kernel**
+
+- **Self-sandboxing:** OpenShell's runtime (uid 10000, no capabilities, NoNewPrivs, which Landlock requires for unprivileged use) applies the Landlock rules to the agent process it starts; no root or capability is needed.
+- **Shared kernel:** containers use the node's kernel, so the **node** kernel must have Landlock compiled in (`CONFIG_SECURITY_LANDLOCK=y`) and enabled in its active LSM list; nothing inside a pod can add it.
+
+**Ubuntu vs COS (measured on real GKE nodes, 2026-11-01).** A test cluster mirroring the real `default-permission-pool` settings (`cos_containerd`, `e2-standard-2`, GKE **1.35.8-gke.1796000**, Dataplane V2; zonal `us-central1-c`, 2 nodes) showed that **COS cannot run OpenShell**. The test cluster was deleted; `hermes-gke` stays on Ubuntu.
 
 | Check (on a node, via `kubectl debug node/…`) | COS 125 (build 19216.655.40), kernel 6.12.105+ | Ubuntu 24.04.5, kernel 6.8.0-1062-gke |
 |---|---|---|
@@ -172,40 +206,71 @@ OpenShell needs **Landlock ABI 3 or newer**, and `hermes/policy.yaml` sets `land
 | `landlock_create_ruleset` (syscall 444, version query) | **`ENOSYS` (errno 38)** | **ABI 4** |
 | seccomp filter | `CONFIG_SECCOMP_FILTER=y` | `CONFIG_SECCOMP_FILTER=y` |
 | User namespaces / cgroup | 31530 / v2 | 31450 / v2 |
-| OpenShell sandbox | Cannot start (no Landlock; policy fails closed) | Runs (all checks on this page) |
+| OpenShell sandbox | Cannot start (no Landlock; fails closed) | Runs (all checks on this page) |
 
-Landlock is not compiled into the COS kernel, so no kubelet, sysctl or node-system-config setting can enable it. Both pools were standard GKE (no `--sandbox`, `config.sandboxConfig` empty); GKE Sandbox (gVisor) is not used and would not help, because it lacks Landlock too.
+- **No switch for it:** Landlock is not compiled into the tested COS kernel, so no GKE flag, kubelet setting, sysctl or node system config can enable it.
+- **Decision:** COS is not supported by OpenShell v0.1.6 (latest release); the lab cluster stays on Ubuntu. Full decision record: [COS-APPARMOR.md](COS-APPARMOR.md).
 
-**Decision: Container-Optimized OS is not supported by OpenShell v0.1.6; the lab cluster stays on Ubuntu** (full decision record: [COS-APPARMOR.md](COS-APPARMOR.md)). Two further checks rule out a COS-only setup with OpenShell v0.1.6 (latest release):
+**Why not AppArmor on COS, and why not gVisor**
 
-- **`best_effort` does not help.** The sandbox runtime's startup probe requires Landlock ABI ≥ 3 *before* it reads any policy (`require_landlock_abi()` and a Landlock allow/deny probe in `crates/openshell-sandbox/src/main.rs`), and the docs say so: *"In either mode, a sandbox requires a kernel with Landlock ABI v3 or later."* `compatibility: best_effort` only relaxes the extra filesystem policy from `policy.yaml` (it then runs without those rules and logs a high-severity `landlock-unavailable` finding); OpenShell's **mandatory Landlock baseline** (`crates/openshell-sandbox/src/sandbox/linux/mod.rs`), which for example hides `/.openshell` from the agent, always fails closed.
-- **AppArmor cannot replace Landlock here.** COS has AppArmor, but the OpenShell Kubernetes driver offers no way to attach a profile to the workload (its per-container settings are only resources and volume mounts), and one container-wide AppArmor profile cannot reproduce Landlock's split between the trusted broker and the agent, where OpenShell's own runtime may use `/.openshell` while the agent may not.
-- **What would change this:** a COS (or other) kernel built with Landlock (`CONFIG_SECURITY_LANDLOCK=y`, ABI ≥ 3), or an OpenShell release that supports another filesystem backend upstream.
+- **AppArmor:** COS has it, but the OpenShell Kubernetes driver cannot attach a profile to the workload (its per-container settings are only resources and volume mounts), and one profile per container cannot separate what OpenShell's trusted runtime may touch (`/.openshell`) from what the agent may touch. Not equivalent.
+- **gVisor (GKE Sandbox):** not used and would not help: it implements neither Landlock nor the seccomp user-notification OpenShell relies on. Both pools were standard GKE (`config.sandboxConfig` empty).
+
+**Who runs as root.** No container of the Hermes stack on GKE runs as root (including the init containers `openshell-sandbox-bootstrap`, `workspace-init` and `install-mtls`). On the VM, only the OpenShell gateway and its one-off `init` container do, because it drives the Docker socket to create the sandbox containers.
+
+| Component | GKE (checked live 2026-11-01) | VM |
+|---|---|---|
+| **Hermes workload** | uid 10000 for every process (`openshell-sandbox` PID 1, `start-hermes`, `hermes`), `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2` | uid 10000, no capabilities, no-new-privileges |
+| **Supervisor** | uid 10000, all capabilities dropped, `runAsNonRoot`, read-only root filesystem (pod spec; the image has no shell) | uid 65534, no capabilities, host network |
+| **OpenShell gateway** | uid 1000, all capabilities dropped, `runAsNonRoot`, `RuntimeDefault` seccomp (pod spec; the image has no shell) | **root** (`user: "0"`) with the Docker socket, no `--privileged` |
+| **hermes-tunnel** | uid 10001, `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2` | uid 10001, all capabilities dropped |
+| **Traefik** | uid 65532, `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2` | uid 65532 by default (`https_up.sh` uses your own uid), all capabilities dropped |
+| **OpenCode bridge** | uid 1000, `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2` | non-root user `bridge` |
+
+Check it yourself:
+
+```bash
+# A process's identity and restrictions (images that have grep):
+kubectl -n openshell exec default--hermes -c agent -- grep -E '^(Uid|CapEff|NoNewPrivs|Seccomp):' /proc/1/status
+# Images without a shell (gateway, supervisor): read the enforced pod spec
+kubectl -n openshell get pods -o custom-columns='POD:.metadata.name,UID:.spec.containers[0].securityContext.runAsUser,DROP:.spec.containers[0].securityContext.capabilities.drop'
+# Is Landlock active on a node? (creates a temporary debug pod; delete it afterwards)
+N=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+kubectl debug "node/$N" -it --image=busybox:1.37 -- cat /host/sys/kernel/security/lsm   # look for "landlock"
+```
+
+Check the active LSMs and the Landlock ABI of a node (changes nothing on the node; creates a temporary privileged debug pod and deletes it):
+
+```bash
+N=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+D=$(kubectl debug "node/$N" --attach=false --image=python:3.13-alpine --profile=sysadmin -- sh -c \
+  'cat /host/sys/kernel/security/lsm; echo; python3 -c "import ctypes,os;r=ctypes.CDLL(None,use_errno=True).syscall(444,None,0,1);print(\"Landlock ABI\",r if r>=0 else os.strerror(ctypes.get_errno()))"' 2>&1 \
+  | sed -n 's/^Creating debugging pod \([^ ]*\) .*/pod\/\1/p')
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "$D" --timeout=120s
+kubectl logs "$D"; kubectl delete "$D"
+```
+
+**What would change the decision**
+
+- **A COS release with Landlock:** a kernel built with `CONFIG_SECURITY_LANDLOCK=y` (ABI ≥ 3) and `landlock` in the active LSM list.
+- **Another OpenShell backend:** an OpenShell release that supports a non-Landlock isolation backend upstream.
 
 | If you need OpenShell on a cluster whose default pool is COS | Keeps OpenShell's guarantees? |
 |---|---|
-| Add a Landlock-capable node pool (Ubuntu) for the sandboxes only | Yes (this page's setup) |
-| Wait for an OpenShell release with a non-Landlock backend | Yes, once it exists |
+| Add a Landlock-capable node pool (Ubuntu) for the sandboxes only | Yes (same node image as this lab, whose only pool is Ubuntu) |
+| Wait for an OpenShell release with a non-Landlock backend | Yes, if it gives equivalent guarantees |
 | Patch OpenShell to skip the check | No (not recommended) |
 | Run Hermes on COS without OpenShell | No: no per-program or L7 egress rules, no credential injection, no OCSF audit |
 
 The lab copy is zonal with 2 nodes only because the lab sandbox caps compute (8 GB per instance, about 12 vCPU in total); a regional 6-node pool like the real one would break it.
 
-Reproduce the check on any cluster (read-only, the debug pod is deleted afterwards):
-
-```bash
-N=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-kubectl debug node/$N --attach=false --image=python:3.13-alpine --profile=sysadmin -- sh -c \
-  'cat /host/sys/kernel/security/lsm; echo; python3 -c "import ctypes,os;r=ctypes.CDLL(None,use_errno=True).syscall(444,None,0,1);print(\"Landlock ABI\",r if r>=0 else os.strerror(ctypes.get_errno()))"'
-D=$(kubectl get pods -o name | grep node-debugger | tail -1); kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "$D" --timeout=120s
-kubectl logs "$D"; kubectl delete "$D"
-```
+**Official references:** [Linux kernel: Landlock](https://docs.kernel.org/userspace-api/landlock.html) · [NVIDIA OpenShell v0.1.6 support matrix](https://docs.nvidia.com/openshell/v0.1.6/about/support-matrix) · [GKE node images](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/node-images)
 
 ### 🛡️ Guardrails: GKE vs VM, with the live proof
 
 | Guardrail | VM (Docker driver) | GKE (Kubernetes driver) | Mitigation | Live proof (2026-11-01) |
 |---|---|---|---|---|
-| Kernel Landlock | Hard requirement | Same policy; needs a kernel with Landlock: **Ubuntu node image** (COS is built without it) | `--image-type UBUNTU_CONTAINERD` | Sandbox starts (it fails closed without Landlock); writes to `/opt/hermes`, reads of `/etc/shadow` and `/sys/fs/cgroup` → Permission denied. COS tested: no Landlock ([Node image](#-node-image-ubuntu-not-cos-tested-2026-11-01)) |
+| Kernel Landlock | Hard requirement | Same policy; needs a kernel with Landlock: **Ubuntu node image** (COS is built without it) | `--image-type UBUNTU_CONTAINERD` | Sandbox starts (it fails closed without Landlock); writes to `/opt/hermes`, reads of `/etc/shadow` and `/sys/fs/cgroup` → Permission denied. COS tested: no Landlock ([Landlock and Ubuntu vs COS](#-landlock-and-why-the-nodes-are-ubuntu-not-cos)) |
 | Non-root, no capabilities, seccomp | uid 10000, `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2` | Same | none needed | Identical values in `/proc/1/status` |
 | gVisor | not used | **Not usable** (no Landlock syscalls, no seccomp user-notify) | Standard GKE node pools, runc (default runtime) | Workload pod has no `runtimeClassName`; `gcloud container node-pools describe default-pool --cluster hermes-gke --zone us-central1-b --format='value(config.sandboxConfig)'` is empty (also on the COS test pool). GKE pre-installs a `gvisor` RuntimeClass object, but no pool has GKE Sandbox, so nothing can use it |
 | Workload network | `NetworkMode=none` | Pod has `eth0`; OpenShell's NetworkPolicy allows the workload to reach only its supervisor | **Dataplane V2** enforces it | Test pod with the workload label: internet, Kubernetes API, gateway and DNS all **blocked**; the same pod without the label reaches all four |
@@ -372,7 +437,7 @@ and read the audit lines with `sandbox/k8s/gke/openshell-cli.sh logs hermes -n 3
 | New hostname: "site can't be reached" / `ERR_NAME_NOT_RESOLVED` | A resolver may cache NXDOMAIN for up to 30 min after the record is created (Cloudflare SOA minimum 1800 s) | Check the record with `dig +short hermes-gke.saqlainmushtaq.com @1.1.1.1` (should list Cloudflare IPs); then wait, `sudo resolvectl flush-caches`, or switch to 1.1.1.1. For the browser check: `CHROME_ARGS='--host-resolver-rules=MAP hermes-gke.saqlainmushtaq.com <Cloudflare IP>'` |
 | `deploy.sh` waits forever although the sandbox is Ready | `… \| grep -q` under `pipefail` breaks the pipe | Fixed: capture output, then match |
 | Supervisor `Readiness probe failed … :5501` right after creation | Supervisor still starting | Clears by itself within seconds |
-| Sandbox never starts on a COS node pool; runtime logs `Landlock ABI probe` | COS kernels are built without Landlock; OpenShell v0.1.6 requires it at startup in every policy mode | Use a Landlock-capable node image (Ubuntu); see [Node image](#-node-image-ubuntu-not-cos-tested-2026-11-01) and [COS-APPARMOR.md](COS-APPARMOR.md) |
+| Sandbox never starts on a COS node pool; runtime logs `Landlock ABI probe` | COS kernels are built without Landlock; OpenShell v0.1.6 requires it at startup in every policy mode | Use a Landlock-capable node image (Ubuntu); see [Landlock and Ubuntu vs COS](#-landlock-and-why-the-nodes-are-ubuntu-not-cos) and [COS-APPARMOR.md](COS-APPARMOR.md) |
 | `kubectl debug node/…` prints nothing | Without `-it` it only creates the debug pod | Use `--attach=false`, then `kubectl wait --for=jsonpath='{.status.phase}'=Succeeded` and `kubectl logs` (as in the Node image snippet), then delete the pod |
 | CI (gitleaks) fails on a doc line with `curl -u user:"$(cat …)"` | Rule `curl-auth-user` matches `-u user:password`, which also exposes the password in `ps` | Use `curl -K <(printf 'user = "admin:%s"\n' "$(cat FILE)")` |
 

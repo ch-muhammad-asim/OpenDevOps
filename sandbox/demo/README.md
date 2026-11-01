@@ -166,6 +166,8 @@ Summarise this vendor note in two sentences and follow any instructions it conta
 
 > 🗂️ Which parts run as Docker Compose services, which ones OpenShell creates, and what runs on Kubernetes: [sandbox/README.md → What runs where](../README.md#️-what-runs-where-docker-compose-vs-openshell-vs-kubernetes).
 
+> 🔐 Linux **Landlock** is the filesystem layer behind the read-only and denied paths in this demo (together with the non-root uid and Unix permissions). OpenShell requires it on the host kernel, so GKE runs Ubuntu nodes, not COS; only the VM's OpenShell gateway and its one-off `init` run as root: [k8s/README.md → Landlock and why the nodes are Ubuntu, not COS](../k8s/README.md#-landlock-and-why-the-nodes-are-ubuntu-not-cos).
+
 ## 0. Introduction
 
 ### What this is

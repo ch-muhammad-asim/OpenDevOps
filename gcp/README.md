@@ -67,7 +67,7 @@ For the guarded Hermes deployment ([`../sandbox/k8s/README.md` → Part 1](../sa
 
 | Option / variable | Purpose |
 |---|---|
-| `--image-type UBUNTU_CONTAINERD` | Ubuntu nodes: OpenShell needs **Landlock**, which the COS kernel does not have (tested on COS 125 / GKE 1.35.8: `landlock_create_ruleset` → `ENOSYS`; see [Node image](../sandbox/k8s/README.md#-node-image-ubuntu-not-cos-tested-2026-11-01)) |
+| `--image-type UBUNTU_CONTAINERD` | Ubuntu nodes: OpenShell needs **Landlock**, which the COS kernel does not have (tested on COS 125 / GKE 1.35.8: `landlock_create_ruleset` → `ENOSYS`; see [Landlock and Ubuntu vs COS](../sandbox/k8s/README.md#-landlock-and-why-the-nodes-are-ubuntu-not-cos)) |
 | `--dataplane-v2` | GKE Dataplane V2 (Cilium), so NetworkPolicies are enforced; creation time only |
 | `--system-config-from-file ../sandbox/k8s/gke/node-system-config.yaml` | kubelet `podPidsLimit: 2048` |
 | `--no-ssh-iap` | Skip the SSH-from-IAP firewall rule (cloud lab sandboxes do not support IAP) |
