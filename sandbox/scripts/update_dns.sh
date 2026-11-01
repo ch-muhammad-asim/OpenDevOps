@@ -18,6 +18,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_ip="${HERMES_ORIGIN_IP:-}"; env_host="${HERMES_HOST:-}"; env_zone="${CLOUDFLARE_ZONE:-}"
 # shellcheck source=/dev/null
 [ -r "$HERE/site.env" ] && . "$HERE/site.env"
+SITE_HOST="${HERMES_HOST:-}"  # the host sandbox/site.env describes (the VM)
 HOST="${env_host:-${HERMES_HOST:-hermes.saqlainmushtaq.com}}"
 ZONE="${env_zone:-${CLOUDFLARE_ZONE:-${HOST#*.}}}"
 IP="${env_ip:-${HERMES_ORIGIN_IP:-}}"
@@ -75,4 +76,8 @@ if [ -n "$rec_id" ]; then
 else
   api -X POST --data "$body" "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" >/dev/null
 fi
-echo "Updated: A $HOST -> $IP (proxied). Also set HERMES_ORIGIN_IP=$IP in sandbox/site.env."
+echo "Updated: A $HOST -> $IP (proxied)."
+# site.env describes the VM host only; other hosts (e.g. hermes-gke) are not kept there.
+if [ "$HOST" = "$SITE_HOST" ] && [ "$IP" != "${HERMES_ORIGIN_IP:-}" ]; then
+  echo "Also set HERMES_ORIGIN_IP=$IP in sandbox/site.env."
+fi
