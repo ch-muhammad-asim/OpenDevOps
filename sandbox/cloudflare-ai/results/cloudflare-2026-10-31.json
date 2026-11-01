@@ -1,0 +1,799 @@
+{
+  "started": "2026-10-31 10:53:38",
+  "args": {
+    "models": null,
+    "rounds": 1,
+    "max_tokens": 200,
+    "rpm": 20.0,
+    "out_dir": "results",
+    "stamp": null,
+    "list": false
+  },
+  "catalogue": [
+    {
+      "id": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+      "beta": false,
+      "function_calling": false,
+      "context": "128000",
+      "price": "0.351 per M input tokens; 0.555 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/cloudflare/clairic",
+      "beta": false,
+      "function_calling": false,
+      "context": "65536",
+      "price": "0.1 per M input tokens",
+      "deprecated": false,
+      "status": "not a chat model (Cloudflare task-specific input schema)"
+    },
+    {
+      "id": "@cf/cloudflare/clef",
+      "beta": false,
+      "function_calling": false,
+      "context": "65536",
+      "price": "0.24 per M input tokens",
+      "deprecated": false,
+      "status": "not a chat model (Cloudflare task-specific input schema)"
+    },
+    {
+      "id": "@cf/cloudflare/clef-flash",
+      "beta": false,
+      "function_calling": false,
+      "context": "24576",
+      "price": "0.038 per M input tokens",
+      "deprecated": false,
+      "status": "not a chat model (Cloudflare task-specific input schema)"
+    },
+    {
+      "id": "@cf/cloudflare/clef-omni",
+      "beta": false,
+      "function_calling": false,
+      "context": "65536",
+      "price": "0.15 per M input tokens",
+      "deprecated": false,
+      "status": "not a chat model (Cloudflare task-specific input schema)"
+    },
+    {
+      "id": "@cf/daily-co/phonellm-mini-alpha-2",
+      "beta": false,
+      "function_calling": true,
+      "context": "262140",
+      "price": null,
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+      "beta": false,
+      "function_calling": false,
+      "context": "80000",
+      "price": "0.497 per M input tokens; 4.881 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "0.44 per M input tokens; 1.32 per M output tokens; 0.014 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-v4-pro-0813",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "1.32 per M input tokens; 3.96 per M output tokens; 0.044 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "0.3 per M input tokens; 1.2 per M output tokens; 0.006 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/google/gemma-2b-it-lora",
+      "beta": true,
+      "function_calling": false,
+      "context": "8192",
+      "price": null,
+      "deprecated": false,
+      "status": "not a chat model (LoRA base or safety classifier)"
+    },
+    {
+      "id": "@cf/google/gemma-4-26b-a4b-it",
+      "beta": false,
+      "function_calling": true,
+      "context": "256000",
+      "price": "0.1 per M input tokens; 0.3 per M output tokens; 0.05 per M cached input tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/google/gemma-7b-it-lora",
+      "beta": true,
+      "function_calling": false,
+      "context": "3500",
+      "price": null,
+      "deprecated": false,
+      "status": "not a chat model (LoRA base or safety classifier)"
+    },
+    {
+      "id": "@cf/ibm-granite/granite-4.0-h-micro",
+      "beta": false,
+      "function_calling": true,
+      "context": "131000",
+      "price": null,
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+      "beta": true,
+      "function_calling": false,
+      "context": "8192",
+      "price": null,
+      "deprecated": false,
+      "status": "not a chat model (LoRA base or safety classifier)"
+    },
+    {
+      "id": "@cf/meta/llama-3.1-8b-instruct-fp8",
+      "beta": false,
+      "function_calling": false,
+      "context": "32000",
+      "price": "0.152 per M input tokens; 0.287 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/meta/llama-3.2-11b-vision-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "128000",
+      "price": "0.0485 per M input tokens; 0.676 per M output tokens",
+      "deprecated": false,
+      "status": "needs a one-time licence agreement (send the prompt 'agree')"
+    },
+    {
+      "id": "@cf/meta/llama-3.2-1b-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "60000",
+      "price": "0.027 per M input tokens; 0.201 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/meta/llama-3.2-3b-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "80000",
+      "price": "0.0509 per M input tokens; 0.335 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "beta": false,
+      "function_calling": true,
+      "context": "24000",
+      "price": "0.293 per M input tokens; 2.253 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/meta/llama-4-scout-17b-16e-instruct",
+      "beta": false,
+      "function_calling": true,
+      "context": "131000",
+      "price": "0.27 per M input tokens; 0.85 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/meta/llama-guard-3-8b",
+      "beta": false,
+      "function_calling": false,
+      "context": "131072",
+      "price": "0.484 per M input tokens; 0.03 per M output tokens",
+      "deprecated": false,
+      "status": "not a chat model (LoRA base or safety classifier)"
+    },
+    {
+      "id": "@cf/mistral/mistral-7b-instruct-v0.2-lora",
+      "beta": false,
+      "function_calling": false,
+      "context": "15000",
+      "price": null,
+      "deprecated": false,
+      "status": "not a chat model (LoRA base or safety classifier)"
+    },
+    {
+      "id": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "beta": false,
+      "function_calling": true,
+      "context": "128000",
+      "price": "0.351 per M input tokens; 0.555 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/moonshotai/kimi-k2.6",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "0.95 per M input tokens; 4 per M output tokens; 0.16 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/moonshotai/kimi-k2.7-code",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "0.95 per M input tokens; 4 per M output tokens; 0.19 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/nvidia/nemotron-3-120b-a12b",
+      "beta": false,
+      "function_calling": true,
+      "context": "256000",
+      "price": "0.5 per M input tokens; 1.5 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/openai/gpt-oss-120b",
+      "beta": false,
+      "function_calling": true,
+      "context": "128000",
+      "price": "0.35 per M input tokens; 0.75 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/openai/gpt-oss-20b",
+      "beta": false,
+      "function_calling": true,
+      "context": "128000",
+      "price": "0.2 per M input tokens; 0.3 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/qwen/qwen2.5-coder-32b-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "32768",
+      "price": "0.66 per M input tokens; 1 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/qwen/qwen3-30b-a3b-fp8",
+      "beta": false,
+      "function_calling": true,
+      "context": "32768",
+      "price": "0.0509 per M input tokens; 0.335 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/qwen/qwen3.8-27b",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "0.45 per M input tokens; 3.2 per M output tokens; 0.05 per M cached input tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/qwen/qwq-32b",
+      "beta": false,
+      "function_calling": false,
+      "context": "24000",
+      "price": "0.66 per M input tokens; 1 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/swiss-ai/apertus-v1.5-8b",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": null,
+      "deprecated": false,
+      "status": "probe HTTP 403: {\"errors\":[{\"message\":\"AiError: Ai: This account is not allowed to access @cf/swiss-ai/apertus-v1.5-8b. (3bc564ac-5a05-47a3-a4f0-357e414a0ad"
+    },
+    {
+      "id": "@cf/utter-project/eurollm-9b-it",
+      "beta": false,
+      "function_calling": true,
+      "context": "32000",
+      "price": null,
+      "deprecated": false,
+      "status": "probe HTTP 400: {\"errors\":[{\"message\":\"AiError: AiError: AI model does not have config (15fc976b-c010-4d68-b9e8-25ecf8dee33d)\",\"code\":4003}],\"success\":false"
+    },
+    {
+      "id": "@cf/zai-org/glm-4.7-flash",
+      "beta": false,
+      "function_calling": true,
+      "context": "131072",
+      "price": "0.0605 per M input tokens; 0.4 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/zai-org/glm-5.2",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "1.4 per M input tokens; 4.4 per M output tokens; 0.26 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/zai-org/glm-5.3",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "1.4 per M input tokens; 4.4 per M output tokens; 0.26 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    },
+    {
+      "id": "@cf/zai-org/glm-5.3-flash",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "0.15 per M input tokens; 0.5 per M output tokens; 0.03 per M cached input tokens",
+      "deprecated": false,
+      "status": "paid plan only (Workers Paid)"
+    }
+  ],
+  "results": [
+    {
+      "model": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": null
+        }
+      ],
+      "secs": [
+        0.4877254829989397
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 36,
+      "neurons": 1.27782,
+      "correct_rate": 1.0,
+      "tool_rate": null,
+      "p50": 0.4877254829989397,
+      "max": 0.4877254829989397,
+      "passed": true
+    },
+    {
+      "model": "@cf/daily-co/phonellm-mini-alpha-2",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        0.44121706199803157,
+        0.6389876990069752,
+        0.9781762400016305
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 750,
+      "neurons": 4.827272713184357,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 0.6389876990069752,
+      "max": 0.9781762400016305,
+      "passed": true
+    },
+    {
+      "model": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": null
+        }
+      ],
+      "secs": [
+        5.957562825002242
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 227,
+      "neurons": 89.97087419665974,
+      "correct_rate": 1.0,
+      "tool_rate": null,
+      "p50": 5.957562825002242,
+      "max": 5.957562825002242,
+      "passed": true
+    },
+    {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        3.6161935679992894,
+        2.033470155998657,
+        0.6513870650014724
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 599,
+      "neurons": 11.154545545578003,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 2.033470155998657,
+      "max": 3.6161935679992894,
+      "passed": true
+    },
+    {
+      "model": "@cf/ibm-granite/granite-4.0-h-micro",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": false
+        }
+      ],
+      "secs": [
+        0.7997669730029884,
+        2.1956111249965033
+      ],
+      "errors": [],
+      "notes": [
+        "bad tool call: list_dir \"{\\n  \\\"path\\\": \\\"/etc/hermes\\\"\\n}\""
+      ],
+      "tokens": 297,
+      "neurons": 0.7422231808304787,
+      "correct_rate": 1.0,
+      "tool_rate": 0.0,
+      "p50": 1.4976890489997459,
+      "max": 2.1956111249965033,
+      "passed": false
+    },
+    {
+      "model": "@cf/meta/llama-3.1-8b-instruct-fp8",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": null
+        }
+      ],
+      "secs": [
+        0.6655708309990587
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 30,
+      "neurons": 0.45040089916437864,
+      "correct_rate": 1.0,
+      "tool_rate": null,
+      "p50": 0.6655708309990587,
+      "max": 0.6655708309990587,
+      "passed": true
+    },
+    {
+      "model": "@cf/meta/llama-3.2-1b-instruct",
+      "rounds": [
+        {
+          "correct": false,
+          "tool": null
+        }
+      ],
+      "secs": [
+        0.5030185540017555
+      ],
+      "errors": [],
+      "notes": [
+        "sum: wanted 9120, got '10220'"
+      ],
+      "tokens": 30,
+      "neurons": 0.12110063340514898,
+      "correct_rate": 0.0,
+      "tool_rate": null,
+      "p50": 0.5030185540017555,
+      "max": 0.5030185540017555,
+      "passed": false
+    },
+    {
+      "model": "@cf/meta/llama-3.2-3b-instruct",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": null
+        }
+      ],
+      "secs": [
+        0.30085068000335013
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 54,
+      "neurons": 0.3272779583930969,
+      "correct_rate": 1.0,
+      "tool_rate": null,
+      "p50": 0.30085068000335013,
+      "max": 0.30085068000335013,
+      "passed": true
+    },
+    {
+      "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        0.4184996059993864,
+        1.3811107869987609,
+        0.7121169219972217
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 687,
+      "neurons": 25.44619643688202,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 0.7121169219972217,
+      "max": 1.3811107869987609,
+      "passed": true
+    },
+    {
+      "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        0.40547483199770795,
+        0.6445589349968941,
+        0.713843650999479
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 1388,
+      "neurons": 35.545455157756805,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 0.6445589349968941,
+      "max": 0.713843650999479,
+      "passed": true
+    },
+    {
+      "model": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        2.120519639000122,
+        0.6939503850007895,
+        0.833839712999179
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 327,
+      "neurons": 11.205156326293945,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 0.833839712999179,
+      "max": 2.120519639000122,
+      "passed": true
+    },
+    {
+      "model": "@cf/nvidia/nemotron-3-120b-a12b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        1.8020547599953716,
+        1.124744249995274,
+        1.6958479169989005
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 993,
+      "neurons": 70.893,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 1.6958479169989005,
+      "max": 1.8020547599953716,
+      "passed": true
+    },
+    {
+      "model": "@cf/openai/gpt-oss-120b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        0.7793416889981017,
+        1.0349156560041592,
+        0.8373437810005271
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 578,
+      "neurons": 23.5908260345459,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 0.8373437810005271,
+      "max": 1.0349156560041592,
+      "passed": true
+    },
+    {
+      "model": "@cf/openai/gpt-oss-20b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        0.839757310001005,
+        0.6073965450050309,
+        1.0856166099983966
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 621,
+      "neurons": 13.027259700000002,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 0.839757310001005,
+      "max": 1.0856166099983966,
+      "passed": true
+    },
+    {
+      "model": "@cf/qwen/qwen2.5-coder-32b-instruct",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": null
+        }
+      ],
+      "secs": [
+        0.6152569149999181
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 54,
+      "neurons": 3.394545454545,
+      "correct_rate": 1.0,
+      "tool_rate": null,
+      "p50": 0.6152569149999181,
+      "max": 0.6152569149999181,
+      "passed": true
+    },
+    {
+      "model": "@cf/qwen/qwen3-30b-a3b-fp8",
+      "rounds": [
+        {
+          "correct": false,
+          "tool": true
+        }
+      ],
+      "secs": [
+        2.5003442489978625,
+        1.0665673659968888,
+        1.209361077999347
+      ],
+      "errors": [],
+      "notes": [
+        "sum: wanted 12451, got ''"
+      ],
+      "tokens": 901,
+      "neurons": 15.954434394836426,
+      "correct_rate": 0.0,
+      "tool_rate": 1.0,
+      "p50": 1.209361077999347,
+      "max": 2.5003442489978625,
+      "passed": false
+    },
+    {
+      "model": "@cf/qwen/qwen3.8-27b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        1.7619811719996505,
+        1.5204537979952875,
+        13.47638433600514
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 994,
+      "neurons": 84.91363143920898,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 1.7619811719996505,
+      "max": 13.47638433600514,
+      "passed": true
+    },
+    {
+      "model": "@cf/qwen/qwq-32b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": null
+        }
+      ],
+      "secs": [
+        6.1007196940045105
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 230,
+      "neurons": 19.9818181818,
+      "correct_rate": 1.0,
+      "tool_rate": null,
+      "p50": 6.1007196940045105,
+      "max": 6.1007196940045105,
+      "passed": true
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        12.104238068000996,
+        1.8455912380013615,
+        1.4949105030027567
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 784,
+      "neurons": 14.509,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 1.8455912380013615,
+      "max": 12.104238068000996,
+      "passed": true
+    }
+  ],
+  "result": "completed",
+  "finished": "2026-10-31 10:57:53",
+  "requests_sent": 77,
+  "r429": 0
+}

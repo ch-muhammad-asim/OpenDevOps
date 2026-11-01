@@ -1,0 +1,148 @@
+# Routes for https://hermes.saqlainmushtaq.com (file provider, hot-reloaded).
+#
+#   /v1, /v1/...            -> Hermes API (OpenAI-compatible, Bearer key)  hermes-tunnel:8642
+#   everything else         -> Hermes built-in web UI (login, /chat, /api/*, WebSockets)  hermes-tunnel:9119
+#
+# :443 (websecure): always served.
+# :80  (web): protocol-aware so Cloudflare SSL modes all work without loops:
+#   - Cloudflare says the visitor used HTTPS (X-Forwarded-Proto: https, the
+#     "Flexible" case) -> serve Hermes;
+#   - otherwise -> permanent redirect to https://.
+# X-Forwarded-Proto is only trusted from Cloudflare (traefik.yml
+# forwardedHeaders), and every router also only accepts Cloudflare source IPs,
+# so nobody can bypass Cloudflare or fake the header by hitting the origin IP.
+
+http:
+  routers:
+    # ---- :443 ----------------------------------------------------------------
+    hermes-login:
+      entryPoints: [websecure]
+      rule: "Host(`hermes.saqlainmushtaq.com`) && Path(`/auth/password-login`)"
+      priority: 300
+      middlewares: [cloudflare-only, security-headers, login-ratelimit]
+      service: hermes-dashboard
+      tls: {}
+
+    hermes-api:
+      entryPoints: [websecure]
+      rule: "Host(`hermes.saqlainmushtaq.com`) && (Path(`/v1`) || PathPrefix(`/v1/`))"
+      priority: 200
+      middlewares: [cloudflare-only, security-headers]
+      service: hermes-api
+      tls: {}
+
+    hermes-dashboard:
+      entryPoints: [websecure]
+      rule: "Host(`hermes.saqlainmushtaq.com`)"
+      priority: 100
+      middlewares: [cloudflare-only, security-headers]
+      service: hermes-dashboard
+      tls: {}
+
+    # ---- :80, visitor used HTTPS at Cloudflare (SSL mode "Flexible") ----------
+    hermes-login-flexible:
+      entryPoints: [web]
+      rule: "Host(`hermes.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`) && Path(`/auth/password-login`)"
+      priority: 300
+      middlewares: [cloudflare-only, security-headers, login-ratelimit]
+      service: hermes-dashboard
+
+    hermes-api-flexible:
+      entryPoints: [web]
+      rule: "Host(`hermes.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`) && (Path(`/v1`) || PathPrefix(`/v1/`))"
+      priority: 200
+      middlewares: [cloudflare-only, security-headers]
+      service: hermes-api
+
+    hermes-dashboard-flexible:
+      entryPoints: [web]
+      rule: "Host(`hermes.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)"
+      priority: 100
+      middlewares: [cloudflare-only, security-headers]
+      service: hermes-dashboard
+
+    # ---- :80, plain HTTP -> redirect to HTTPS ---------------------------------
+    hermes-redirect:
+      entryPoints: [web]
+      rule: "Host(`hermes.saqlainmushtaq.com`)"
+      priority: 10
+      middlewares: [cloudflare-only, to-https]
+      # A real service (never called: the middleware answers first). With
+      # noop@internal, Traefik treats the router as internal and skips it in
+      # the access log, hiding blocked :80 requests.
+      service: hermes-dashboard
+
+  middlewares:
+    # Only Cloudflare's edge may reach the origin. Uses the TCP source address
+    # (not X-Forwarded-For). Keep in sync with traefik.yml trustedIPs.
+    # Source: https://www.cloudflare.com/ips/ (checked 2026-10-30).
+    cloudflare-only:
+      ipAllowList:
+        sourceRange:
+          - 173.245.48.0/20
+          - 103.21.244.0/22
+          - 103.22.200.0/22
+          - 103.31.4.0/22
+          - 141.101.64.0/18
+          - 108.162.192.0/18
+          - 190.93.240.0/20
+          - 188.114.96.0/20
+          - 197.234.240.0/22
+          - 198.41.128.0/17
+          - 162.158.0.0/15
+          - 104.16.0.0/13
+          - 104.24.0.0/14
+          - 172.64.0.0/13
+          - 131.0.72.0/22
+          - 2400:cb00::/32
+          - 2606:4700::/32
+          - 2803:f800::/32
+          - 2405:b500::/32
+          - 2405:8100::/32
+          - 2a06:98c0::/29
+          - 2c0f:f248::/32
+
+    to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    # Browser hardening. No full Content-Security-Policy on purpose (it would
+    # break the dashboard SPA); only frame-ancestors, which is safe.
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        # Also send HSTS on the :80 "Flexible" routers: the visitor's
+        # connection to Cloudflare is HTTPS there.
+        forceSTSHeader: true
+        contentTypeNosniff: true
+        customFrameOptionsValue: SAMEORIGIN
+        contentSecurityPolicy: "frame-ancestors 'self'"
+        referrerPolicy: strict-origin-when-cross-origin
+        customResponseHeaders:
+          Server: ""
+          X-Powered-By: ""
+
+    # Slow down password guessing: per real visitor IP (Cloudflare sets
+    # CF-Connecting-IP; the TCP peer is always a shared Cloudflare edge IP).
+    login-ratelimit:
+      rateLimit:
+        average: 10
+        period: 1m
+        burst: 10
+        sourceCriterion:
+          requestHeaderName: CF-Connecting-IP
+
+  services:
+    # hermes-tunnel (sandbox/tunnel) on the private Docker network hermes_edge:
+    # OpenShell port forwards straight to Hermes's own servers (no nginx).
+    hermes-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://hermes-tunnel:9119"
+
+    hermes-api:
+      loadBalancer:
+        servers:
+          - url: "http://hermes-tunnel:8642"

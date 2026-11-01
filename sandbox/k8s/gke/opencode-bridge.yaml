@@ -1,0 +1,176 @@
+# OpenCode bridge (OpenAI-compatible, free OpenCode Zen models) for Hermes.
+# Image mbu7865669/sourcecheck-bridge:1.1.0 runs as user "bridge" (uid/gid
+# 1000, read from the image's /etc/passwd), serves :18383, NO authentication:
+# networkpolicies.yaml admits only OpenShell supervisor pods.
+#
+# The Hermes sandbox policy calls it as host.openshell.internal:18383. OpenShell
+# maps that name to Helm value server.hostGatewayIP, so set that value to this
+# Service's ClusterIP (create this Service first, then read the IP; see
+# ../README.md, Build it, step 4: the `openshell` step of deploy.sh). The port stays 18383 on both sides.
+#
+# No secrets: bridge.env.example has none (OPENCODE_BRIDGE_API_KEY stays unset).
+# The only sensitive state is OpenCode's anonymous client identity
+# (service.json under ~/.config/opencode), kept on the PVC below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencode-bridge
+  namespace: hermes-edge
+data:
+  # From sandbox/opencode/bridge.env.example.
+  BRIDGE_HOST: "0.0.0.0"
+  BRIDGE_PORT: "18383"
+  OPENCODE_BRIDGE_MODEL: opencode/mimo-v2.6-flash-free
+  OPENCODE_BRIDGE_MAX_CONCURRENCY: "1"
+  OPENCODE_BRIDGE_TIMEOUT: "180"
+  OPENCODE_BRIDGE_FREE_ONLY: "1"
+---
+# One disk for both OpenCode dirs (subPaths) instead of two. Default
+# StorageClass standard-rwo (pd-balanced, WaitForFirstConsumer); the PD CSI
+# driver may round 1Gi up to the disk type's minimum size.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opencode-bridge-data
+  namespace: hermes-edge
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opencode-bridge
+  namespace: hermes-edge
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencode-bridge
+  namespace: hermes-edge
+  labels:
+    app.kubernetes.io/name: opencode-bridge
+    app.kubernetes.io/part-of: hermes
+spec:
+  replicas: 1
+  # RWO volume: stop the old pod before starting the new one.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencode-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opencode-bridge
+        app.kubernetes.io/part-of: hermes
+    spec:
+      serviceAccountName: opencode-bridge
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: mbu7865669/sourcecheck-bridge:1.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: opencode-bridge
+          ports:
+            - name: http
+              containerPort: 18383
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Read-only rootfs; OpenCode's writable dirs are volumes below.
+            # If `opencode run` fails writing elsewhere under $HOME, add an
+            # emptyDir for that path (or, last resort, set this to false).
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /home/bridge/.local/share/opencode
+              subPath: state
+            - name: data
+              mountPath: /home/bridge/.config/opencode
+              subPath: config
+            - name: cache
+              mountPath: /home/bridge/.cache
+            - name: local-state
+              mountPath: /home/bridge/.local/state
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: opencode-bridge-data
+        - name: cache
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: local-state
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: work
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+# ClusterIP is what server.hostGatewayIP must point at. Keep this Service
+# (don't delete/recreate it) or the ClusterIP changes and the Helm value
+# must be updated. TODO(apply): after the first apply you may pin the
+# observed IP here as spec.clusterIP so re-creation keeps it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: opencode-bridge
+  namespace: hermes-edge
+  labels:
+    app.kubernetes.io/name: opencode-bridge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: opencode-bridge
+  ports:
+    - name: http
+      port: 18383
+      targetPort: http

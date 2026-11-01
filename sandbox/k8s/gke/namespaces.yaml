@@ -1,0 +1,45 @@
+# Namespaces for the GKE deployment (hermes-gke). Apply first.
+# All four enforce Pod Security "restricted" (cert-manager and Traefik charts
+# run compliant by default; OpenShell's chart is built for restricted).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# OpenShell gateway + per-sandbox supervisor/workload pods (Helm release
+# installed by the other engineer into this namespace, without --create-namespace).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshell
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# hermes-tunnel (OpenShell port forwards) + opencode-bridge.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes-edge
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

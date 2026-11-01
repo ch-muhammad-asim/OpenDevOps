@@ -1,0 +1,45 @@
+# Read-only identity for the SRE agent: get/list/watch in oda-demo only, no Secrets, no exec, no writes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oda-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oda-reader
+  namespace: oda-system
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oda-reader
+  namespace: oda-demo
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, services, endpoints, configmaps, persistentvolumeclaims, serviceaccounts]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oda-reader
+  namespace: oda-demo
+subjects:
+  - kind: ServiceAccount
+    name: oda-reader
+    namespace: oda-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: oda-reader

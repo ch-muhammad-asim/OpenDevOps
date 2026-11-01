@@ -1,0 +1,54 @@
+# Fixer identity for the Lead SRE agent (kubernetes-fixer/): read oda-demo, plus the few writes a fix needs.
+# Allowed writes: patch/update Deployments (image, env, resources), scale them, delete Pods (restart).
+# Not allowed: create or delete Deployments/Services, Secrets (any verb), exec, other namespaces.
+# RBAC can't restrict WHICH fields a patch changes: fixer-guard-policy.yaml (admission) limits Deployment updates
+# to image/env/resources/replicas, so an approved patch can't mount a Secret or swap the ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oda-fixer
+  namespace: oda-system
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oda-fixer
+  namespace: oda-demo
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, services, endpoints, configmaps, persistentvolumeclaims, serviceaccounts]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+  # --- writes (every call also needs a human approval in the agent) ---
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [patch, update]
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    verbs: [get, patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oda-fixer
+  namespace: oda-demo
+subjects:
+  - kind: ServiceAccount
+    name: oda-fixer
+    namespace: oda-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: oda-fixer

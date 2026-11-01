@@ -1,0 +1,38 @@
+# Reference compose file for the OpenCode bridge, matching the live
+# `sourcecheck-bridge` service (service `bridge` in
+# ~/SourceCheck-Ai/docker-compose.yml on the server). Use it to run the bridge
+# on its own, e.g. on a new server:
+#
+#   cp sandbox/opencode/bridge.env.example sandbox/opencode/bridge.env
+#   docker compose -f sandbox/opencode/docker-compose.example.yml up -d
+#   curl -s http://127.0.0.1:18383/health
+#
+# Don't run it next to the SourceCheck stack: both use the container name
+# and port 18383. Full reference: ../ENVIRONMENT.md
+name: opencode-bridge
+
+services:
+  bridge:
+    image: mbu7865669/sourcecheck-bridge:1.1.0
+    container_name: sourcecheck-bridge
+    restart: unless-stopped
+    init: true
+    env_file: bridge.env
+    ports:
+      # Loopback only: OpenShell reaches it as host.openshell.internal
+      # (127.0.0.1). The bridge has no authentication: never publish it on
+      # 0.0.0.0 or [::].
+      - "127.0.0.1:18383:18383"
+    volumes:
+      # OpenCode's session database, and its anonymous client identity.
+      - bridge-state:/home/bridge/.local/share/opencode
+      - bridge-config:/home/bridge/.config/opencode
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bridge-state:
+  bridge-config:

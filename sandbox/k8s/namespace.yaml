@@ -1,0 +1,20 @@
+# 🗂️ Namespace for the NVIDIA API key and the OpenShell provider bootstrap.
+#
+# Holds only: the `nvidia-api-key` Secret, the bootstrap ServiceAccount/RBAC,
+# the bootstrap Job and its NetworkPolicies. Keeping the Secret in its own
+# namespace limits who can read it (namespace-scoped RBAC) and keeps it away
+# from the OpenShell gateway namespace and the OpenShell-managed credential
+# namespace. See sandbox/KUBERNETES.md.
+#
+# Pod Security Admission "restricted" rejects pods that run as root, keep
+# capabilities, allow privilege escalation or lack a seccomp profile.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes
+  labels:
+    app.kubernetes.io/part-of: hermes-sandbox
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

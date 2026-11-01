@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.150.0/agent-schema.json
+version: "15"
+metadata:
+  description: Read-only DevOps/SRE assistant backed by the Claude Code CLI harness
+  version: "0.1.0"
+
+agents:
+  root:
+    description: DevOps/SRE advisor (Claude Code harness)
+    instruction: |
+      Help analyze incidents, Kubernetes events, CI/CD failures and logs
+      provided by the user. Recommend safe diagnostic commands, but do
+      not claim to have inspected live systems. Never change infrastructure.
+      Answer concisely.
+    # docker-agent execs `claude --print --dangerously-skip-permissions ...`;
+    # tool access is locked down by /etc/claude-code/managed-settings.json
+    harness:
+      type: claude-code
+      model: haiku

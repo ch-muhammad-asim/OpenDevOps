@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.150.0/agent-schema.json
+version: "15"
+metadata:
+  description: Read-only DevOps/SRE investigation assistant
+  version: "0.1.0"
+
+providers:
+  # OpenAI-compatible bridges on the host: Claude Code CLI bridge (claude-code-cli-bridge/, key required) and Codex
+  claude-bridge:
+    api_type: openai_chatcompletions
+    base_url: http://host.docker.internal:18188/v1
+    # bearer key the bridge requires (see README.md → Claude Code CLI bridge); pass it as an env var at run time
+    token_key: CLAUDE_BRIDGE_API_KEY
+  codex-bridge:
+    api_type: openai_chatcompletions
+    base_url: http://host.docker.internal:18288/v1
+  # OpenCode CLI bridge (opencode-cli-bridge/): free OpenCode models, text-only (no tool calls)
+  opencode-bridge:
+    api_type: openai_chatcompletions
+    base_url: http://opencode-cli-bridge:18387/v1
+    token_key: OPENCODE_BRIDGE_API_KEY
+
+models:
+  opencode-mimo:
+    provider: opencode-bridge
+    model: opencode/mimo-v2.6-flash-free
+  opencode-deepseek:
+    provider: opencode-bridge
+    model: opencode/deepseek-v4.1-flash-free
+  claude-bridge:
+    provider: claude-bridge
+    model: claude-haiku-4-5
+  codex-bridge:
+    provider: codex-bridge
+    model: gpt-5.6-luna
+  cloud:
+    provider: openai
+    model: gpt-5-mini
+  local:
+    provider: dmr
+    model: ai/smollm2
+    base_url: http://host.docker.internal:12434/engines/v1
+
+agents:
+  root:
+    model: cloud
+    description: DevOps/SRE advisor
+    instruction: |
+      Help analyze incidents, Kubernetes events, CI/CD failures and logs
+      provided by the user. Recommend safe diagnostic commands, but do
+      not claim to have inspected live systems. Never change infrastructure.
+    toolsets:
+      - type: think
+
+flavors:
+  # Token-free testing against Docker Model Runner on the host
+  local:
+    agents:
+      root:
+        model: local
+  # Docker Compose with the OpenCode CLI bridge (opencode-cli-bridge/compose.yaml): MiMo V2.6 Flash (default)
+  opencode:
+    agents:
+      root:
+        model: opencode-mimo
+  # Same, with DeepSeek V4.1 Flash
+  opencode-deepseek:
+    agents:
+      root:
+        model: opencode-deepseek
+  # Docker Compose: the Claude Code CLI bridge is the `claude-code-cli-bridge` service (compose.yaml)
+  compose:
+    providers:
+      claude-bridge:
+        base_url: http://claude-code-cli-bridge:18188/v1
+    agents:
+      root:
+        model: claude-bridge
+  # Authenticated Claude Code / Codex CLIs on the host, via their OpenAI-compatible bridges
+  claude-bridge:
+    agents:
+      root:
+        model: claude-bridge
+  codex-bridge:
+    agents:
+      root:
+        model: codex-bridge

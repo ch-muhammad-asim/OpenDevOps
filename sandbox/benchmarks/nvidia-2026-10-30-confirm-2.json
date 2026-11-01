@@ -1,0 +1,522 @@
+{
+  "started": "2026-10-30 08:22:28",
+  "args": {
+    "models": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "requests": 5,
+    "out_dir": "sandbox/benchmarks",
+    "rpm": 30,
+    "max_tokens": 300,
+    "stamp": null,
+    "confirm_of": "sandbox/benchmarks/nvidia-2026-10-30.json"
+  },
+  "catalogue": [
+    {
+      "id": "01-ai/yi-large",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "adept/fuyu-8b",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "ai21labs/jamba-1.5-large-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "aisingapore/sea-lion-7b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "bigcode/starcoder2-15b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "databricks/dbrx-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "deepseek-ai/deepseek-coder-6.7b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "deepseek-ai/deepseek-v4.1-flash",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/codegemma-1.1-7b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/codegemma-7b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/deplot",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "google/diffusiongemma-26b-a4b-it",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/gemma-2b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/gemma-3-12b-it",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/gemma-3-4b-it",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/gemma-4-31b-it",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "google/recurrentgemma-2b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "ibm/granite-3.0-3b-a800m-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "ibm/granite-3.0-8b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "ibm/granite-34b-code-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "ibm/granite-8b-code-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "meta/codellama-70b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "meta/llama-3.2-11b-vision-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "meta/llama-3.2-90b-vision-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "meta/llama-guard-4-12b",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "meta/llama2-70b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "meta/muse-glimmer-30b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "microsoft/kosmos-2",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "microsoft/phi-3-vision-128k-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "microsoft/phi-3.5-moe-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "minimaxai/minimax-m3.1-flash",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "mistralai/codestral-22b-instruct-v0.1",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "mistralai/mistral-7b-instruct-v0.3",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "mistralai/mistral-large",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "mistralai/mistral-large-2-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "mistralai/mistral-large-4-1t-a52b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "mistralai/mixtral-8x22b-v0.1",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "moonshotai/kimi-k2.6",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nv-mistralai/mistral-nemo-12b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/ai-synthetic-video-detector",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "nvidia/cosmos-reason2-8b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/embed-qa-4",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/ising-calibration-1.5-31b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-51b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/llama-nemotron-embed-vl-1b-v2",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/llama3-chatqa-1.5-70b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3-embed-1b",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-bolt-e4b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-content-safety",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-embed-1b",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-embed-8b",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-4-340b-instruct",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-4-340b-reward",
+      "status": "non-chat",
+      "detail": "reward"
+    },
+    {
+      "id": "nvidia/nemotron-nano-3-30b-a3b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-parse",
+      "status": "non-chat",
+      "detail": "parse/ocr"
+    },
+    {
+      "id": "nvidia/nemotron-parse-2.0",
+      "status": "non-chat",
+      "detail": "parse/ocr"
+    },
+    {
+      "id": "nvidia/neva-22b",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "nvidia/nv-embedqa-mistral-7b-v2",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nvclip",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/riva-translate-4b-instruct",
+      "status": "non-chat",
+      "detail": "translate"
+    },
+    {
+      "id": "nvidia/riva-translate-4b-instruct-v2",
+      "status": "non-chat",
+      "detail": "translate"
+    },
+    {
+      "id": "nvidia/vila",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "poolside/laguna-xs-2.1",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "snowflake/arctic-embed-l",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "stepfun-ai/step-5-preview",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "writer/palmyra-creative-122b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "writer/palmyra-fin-70b-32k",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "writer/palmyra-med-70b",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "writer/palmyra-med-70b-32k",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "z-ai/glm-5.3-flash",
+      "status": "skipped",
+      "detail": null
+    },
+    {
+      "id": "zyphra/zamba2-7b-instruct",
+      "status": "skipped",
+      "detail": null
+    }
+  ],
+  "results": [
+    {
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        1.1512200829965877,
+        1.0225486410054145,
+        0.6195965279985103,
+        1.672118534996116,
+        0.8871418089984218,
+        0.5915912900018157,
+        1.8671666670052218,
+        0.7226882129980368,
+        0.8269919390004361,
+        1.0168856230011443,
+        0.9315504050027812,
+        0.575942647003103,
+        0.588837176997913,
+        0.7125245989955147,
+        1.0961460789985722
+      ],
+      "total": [
+        1.1710465759970248,
+        1.0424205500021344,
+        0.7699318730010418,
+        1.691155822998553,
+        0.9065706019973732,
+        0.7378942139985156,
+        1.8870615800042287,
+        0.7426568750015576,
+        0.9928203980016406,
+        1.0352107579965377,
+        0.9514542590040946,
+        0.7201833630024339,
+        0.6245804380014306,
+        0.7305830019977293,
+        1.2606496129956213
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [],
+      "requests": 16,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 0.8871418089984218,
+      "ttft_p95": 1.730632974598848,
+      "total_p50": 0.9514542590040946,
+      "total_p95": 1.7499275501002558,
+      "qualified": true
+    }
+  ],
+  "events": [],
+  "requests_sent": 17,
+  "r429": 0,
+  "finished": "2026-10-30 08:23:01"
+}

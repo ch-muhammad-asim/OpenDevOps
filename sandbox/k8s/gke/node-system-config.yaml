@@ -1,0 +1,5 @@
+# GKE node system config (gcloud container clusters create --system-config-from-file).
+# The OpenShell Kubernetes driver sets no per-sandbox PID limit (Docker: 2048), so
+# cap every pod on the node at 2048 PIDs to keep fork bombs inside one pod.
+kubeletConfig:
+  podPidsLimit: 2048

@@ -1,0 +1,35 @@
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS fetch
+ARG TARGETARCH
+ARG DOCKER_AGENT_VERSION=v1.150.0
+ARG SHA256_amd64=791fa6bac9f829847f00ab948f838bf54d11e0830988a5e5bce88d65ea65f2d1
+ARG SHA256_arm64=12ae093844531a60f32c344f4afb90bc92a010ea8438a5a760b3e79f8e81c8e7
+ARG CLAUDE_CODE_VERSION=2.1.302
+ARG CLAUDE_SHA256_amd64=60d7eb7f12fbb28a52533fe8be5884097403562aa02dc73991a021c7067e29a5
+ARG CLAUDE_SHA256_arm64=2bd4f4e5ed5cb09955b490098f745321cb5491e7ea8c752ba1e3bb010cdadb10
+RUN apk add --no-cache curl \
+ && curl -fsSLo /docker-agent "https://github.com/docker/docker-agent/releases/download/${DOCKER_AGENT_VERSION}/docker-agent-linux-${TARGETARCH}" \
+ && eval "echo \"\${SHA256_${TARGETARCH}}  /docker-agent\"" | sha256sum -c - \
+ && CLAUDE_ARCH=$([ "$TARGETARCH" = amd64 ] && echo x64 || echo arm64) \
+ && curl -fsSLo /claude "https://downloads.claude.ai/claude-code-releases/${CLAUDE_CODE_VERSION}/linux-${CLAUDE_ARCH}/claude" \
+ && eval "echo \"\${CLAUDE_SHA256_${TARGETARCH}}  /claude\"" | sha256sum -c - \
+ && chmod 0755 /docker-agent /claude \
+ && mkdir -p /claude-home/.claude
+
+# glibc base: the Claude Code native binary is dynamically linked
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=fetch /docker-agent /usr/local/bin/docker-agent
+COPY --from=fetch /claude /usr/local/bin/claude
+COPY --from=fetch --chown=65532:65532 /claude-home/.claude /home/nonroot/.claude
+COPY claude-code/managed-settings.json /etc/claude-code/managed-settings.json
+COPY agent-claude-code.yaml /app/agent.yaml
+ENV HOME=/home/nonroot \
+    CLAUDE_CONFIG_DIR=/home/nonroot/.claude \
+    TELEMETRY_ENABLED=false \
+    DISABLE_AUTOUPDATER=1 \
+    DISABLE_TELEMETRY=1 \
+    DISABLE_ERROR_REPORTING=1
+WORKDIR /home/nonroot
+USER nonroot:nonroot
+EXPOSE 8083
+ENTRYPOINT ["/usr/local/bin/docker-agent"]
+CMD ["serve", "chat", "/app/agent.yaml", "--listen", "0.0.0.0:8083", "--api-key-env", "AGENT_API_KEY", "--safety", "strict"]

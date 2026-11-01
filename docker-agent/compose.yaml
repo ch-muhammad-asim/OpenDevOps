@@ -1,0 +1,53 @@
+# Docker Agent + Claude Code CLI bridge, local-only.
+#   you ─curl─▶ 127.0.0.1:8090 ─▶ agent (serve api, --flavor compose) ─▶ claude-code-cli-bridge:18188 ─▶ Anthropic
+# The bridge publishes no ports: it is reachable only on the `oda` network (by the agent, with its bearer key).
+# On Linux hosts container IPs can be routable from the host itself; the bearer key still protects it.
+# Required env (load from the Keychain, see README.md → Claude Code CLI bridge):
+#   AGENT_API_KEY            bearer key YOU send to the agent
+#   CLAUDE_BRIDGE_API_KEY    bearer key the agent sends to the bridge
+#   CLAUDE_CODE_OAUTH_TOKEN  pre-authenticated Claude token (`claude setup-token`) used by the claude CLI
+name: oda
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  claude-code-cli-bridge:
+    <<: *hardening
+    image: docker.io/quickbooks2018/opendevops-agent-runtime@sha256:461a49cf2a0ebbe0279b440235b14dc936e8f3b40c535181b0147c7301439a9d
+    # 0.0.0.0 inside the container so the agent service can reach it; no `ports:` (not published to the host)
+    command: ["--host", "0.0.0.0", "--port", "18188", "--model", "claude-haiku-4-5", "--models", "claude-haiku-4-5",
+              "--effort", "low", "--cwd", "/home/nonroot", "--max-sessions", "4"]
+    environment:
+      CLAUDE_CODE_BRIDGE_API_KEY: ${CLAUDE_BRIDGE_API_KEY:?load CLAUDE_BRIDGE_API_KEY first}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?load CLAUDE_CODE_OAUTH_TOKEN first}
+    tmpfs: [/tmp, "/home/nonroot:uid=65532,gid=65532"]
+    healthcheck:     # distroless: no curl, so use the image's python
+      test: ["CMD", "/usr/bin/python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 18188), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [oda]
+
+  agent:
+    <<: *hardening
+    image: docker.io/quickbooks2018/opendevops-agent-runtime@sha256:8561da6dd8258ad3fdf3e16b4a3e7f0f3309815e312eed05adc067c36d209d88
+    command: ["serve", "api", "/app/agent.yaml", "--flavor", "compose", "--listen", "0.0.0.0:8080",
+              "--auth-token", "${AGENT_API_KEY:?load AGENT_API_KEY first}", "--session-db", "/data/sessions.db"]
+    environment:
+      CLAUDE_BRIDGE_API_KEY: ${CLAUDE_BRIDGE_API_KEY:?load CLAUDE_BRIDGE_API_KEY first}
+    ports: ["127.0.0.1:8090:8080"]     # loopback only: never reachable from your LAN
+    tmpfs: [/tmp, "/home/nonroot:uid=65532,gid=65532"]
+    volumes: [oda-data:/data]          # sessions survive `docker compose down` (use -v to delete)
+    depends_on:
+      claude-code-cli-bridge: {condition: service_healthy}
+    networks: [oda]
+
+volumes:
+  oda-data:
+
+networks:
+  oda:

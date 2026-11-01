@@ -1,0 +1,153 @@
+# Helm values for traefik/traefik chart 42.0.0 (Traefik v3.7.14).
+#   helm upgrade --install traefik traefik/traefik --version 42.0.0 \
+#     -n traefik -f traefik-values.yaml
+# Mirrors the VM setup (sandbox/traefik/traefik.yml): CRD provider only, no
+# API/dashboard, JSON logs, headers dropped from the access log, X-Forwarded-*
+# trusted from Cloudflare only, unprivileged ports 8000/8443.
+# Routes, middlewares and the TLSOption live in traefik-routes.yaml.
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+deployment:
+  replicas: 1
+
+# Traefik API / dashboard disabled (no api@internal at all).
+api:
+  dashboard: false
+ingressRoute:
+  dashboard:
+    enabled: false
+  healthcheck:
+    enabled: false
+
+rbac:
+  # Roles in the watched namespaces instead of a ClusterRole over all Secrets.
+  namespaced: true
+
+providers:
+  kubernetesCRD:
+    enabled: true
+    allowCrossNamespace: false
+    allowExternalNameServices: false
+    # The cluster-wide "default" TLSOption may only come from this namespace.
+    defaultTLSResourcesNamespace: traefik
+    # Least privilege: watch only these namespaces (with rbac.namespaced, Traefik
+    # gets Roles there and cannot read Secrets anywhere else, e.g. in openshell).
+    namespaces: [hermes-edge, traefik]
+  # Only IngressRoute CRDs are used.
+  kubernetesIngress:
+    enabled: false
+
+log:
+  format: json
+  level: INFO
+
+# One JSON line per request; request headers dropped (no Authorization/cookies).
+accessLog:
+  enabled: true
+  format: json
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+
+# Cloudflare IP ranges (https://www.cloudflare.com/ips/, checked 2026-10-30).
+# Keep in sync with the cloudflare-only Middleware in traefik-routes.yaml and
+# sandbox/traefik/traefik.yml.
+ports:
+  traefik:
+    # Internal: /ping for kubelet probes only; never exposed.
+    expose:
+      default: false
+  web:
+    port: 8000
+    exposedPort: 80
+    expose:
+      default: true
+    # No entryPoint-wide redirect: port 80 is protocol-aware (IngressRoutes).
+    http:
+      redirections:
+        entryPoint: {}
+    forwardedHeaders:
+      trustedIPs: &cloudflare_ips
+        - 173.245.48.0/20
+        - 103.21.244.0/22
+        - 103.22.200.0/22
+        - 103.31.4.0/22
+        - 141.101.64.0/18
+        - 108.162.192.0/18
+        - 190.93.240.0/20
+        - 188.114.96.0/20
+        - 197.234.240.0/22
+        - 198.41.128.0/17
+        - 162.158.0.0/15
+        - 104.16.0.0/13
+        - 104.24.0.0/14
+        - 172.64.0.0/13
+        - 131.0.72.0/22
+        - 2400:cb00::/32
+        - 2606:4700::/32
+        - 2803:f800::/32
+        - 2405:b500::/32
+        - 2405:8100::/32
+        - 2a06:98c0::/29
+        - 2c0f:f248::/32
+      insecure: false
+  websecure:
+    port: 8443
+    exposedPort: 443
+    expose:
+      default: true
+    http:
+      # Drop X_Forwarded_Proto-style alias headers (header spoofing).
+      aliasHeadersStrategy: delete
+      tls:
+        enabled: true
+    forwardedHeaders:
+      trustedIPs: *cloudflare_ips
+      insecure: false
+  metrics:
+    expose:
+      default: false
+
+# The chart schema has aliasHeadersStrategy for websecure only; set it for
+# web as a static flag (Traefik v3.7.12+).
+additionalArguments:
+  - "--entryPoints.web.http.aliasHeadersStrategy=delete"
+
+# GKE external passthrough Network LB. externalTrafficPolicy=Local keeps the
+# real client (Cloudflare edge) source IP, which the cloudflare-only
+# ipAllowList and forwardedHeaders.trustedIPs depend on. With "Cluster" the
+# source would be SNATed to a node IP and every request would get 403.
+service:
+  enabled: true
+  spec:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+
+# Hardening (VM: non-root, read-only rootfs, cap_drop ALL, no-new-privileges).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 256Mi
+
+# Not persisted: certificates come from cert-manager Secrets, no ACME in Traefik.
+persistence:
+  enabled: false

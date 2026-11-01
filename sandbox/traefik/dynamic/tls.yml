@@ -1,0 +1,36 @@
+# TLS settings for :443. Applies to every router (the "default" options).
+#
+# The certificate itself: Traefik's built-in self-signed default certificate,
+# unless scripts/https_up.sh found a Cloudflare Origin Certificate and wrote
+# dynamic/tls-origin.yml (generated, git-ignored).
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      # sniStrict stays false: with the built-in default certificate no
+      # certificate matches the hostname, and sniStrict would refuse
+      # Cloudflare's handshake. Unknown hostnames still get no route (404).
+      sniStrict: false
+      cipherSuites:
+        # TLS 1.2 only; TLS 1.3 suites are not configurable (all are strong).
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+      curvePreferences:
+        - X25519
+        - CurveP256
+      # Optional extra hardening: Cloudflare Authenticated Origin Pulls (mTLS),
+      # so only Cloudflare can complete a TLS handshake with this origin.
+      #   1. Download the Cloudflare origin-pull CA into the TLS folder:
+      #        curl -fsSL -o ~/.config/hermes-sandbox/tls/origin-pull-ca.pem \
+      #          https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
+      #   2. Uncomment below, then enable "Authenticated Origin Pulls" in
+      #      Cloudflare (SSL/TLS -> Origin Server). Enable it in Cloudflare
+      #      only AFTER this is live, or every request fails.
+      # clientAuth:
+      #   caFiles:
+      #     - /etc/traefik/certs/origin-pull-ca.pem
+      #   clientAuthType: RequireAndVerifyClientCert

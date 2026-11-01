@@ -1,0 +1,26 @@
+# 🧩 kubectl apply -k sandbox/k8s
+#
+# Deploys the namespace, least-privilege RBAC, NetworkPolicies and the
+# provider-bootstrap Job (+ its script as a ConfigMap).
+#
+# Deliberately NOT included:
+#   - secret.example.yaml   placeholder; applying it would overwrite the real
+#                           key. Create the Secret with kubectl from stdin.
+#   - examples/             the less-preferable env-var (secretKeyRef) variant.
+# Render/validate without a cluster: kubectl kustomize sandbox/k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - networkpolicy.yaml
+  - provider-bootstrap-job.yaml
+configMapGenerator:
+  - name: hermes-provider-bootstrap-script
+    namespace: hermes
+    files:
+      - provider-bootstrap.sh
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/part-of: hermes-sandbox

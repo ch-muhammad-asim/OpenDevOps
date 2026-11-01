@@ -1,0 +1,25 @@
+# Origin certificate for hermes-gke.saqlainmushtaq.com. Lives in hermes-edge
+# because the IngressRoute's tls.secretName must be in its own namespace.
+# Publicly trusted (Let's Encrypt), so it also satisfies Cloudflare SSL mode
+# "Full (strict)"; the zone setting itself is NOT changed by this deployment.
+# Start with letsencrypt-staging; once Ready, change issuerRef.name to
+# letsencrypt-prod and re-apply (then delete Secret hermes-gke-tls to force a
+# fresh prod issuance if cert-manager doesn't re-issue on its own).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hermes-gke-tls
+  namespace: hermes-edge
+spec:
+  secretName: hermes-gke-tls
+  dnsNames:
+    - hermes-gke.saqlainmushtaq.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  # No duration/renewBefore: Let's Encrypt sets the lifetime; cert-manager
+  # renews at 2/3 of it.

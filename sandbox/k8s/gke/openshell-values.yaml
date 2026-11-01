@@ -1,0 +1,53 @@
+# NVIDIA OpenShell gateway on GKE: values for the Helm chart
+#   oci://ghcr.io/nvidia/openshell/helm-chart --version 0.1.6
+# The chart installs the gateway (StatefulSet) with the Kubernetes compute
+# driver; per sandbox the driver creates a Sandbox CR (Agent Sandbox CRD), a
+# separate supervisor Pod, a workload Pod, NetworkPolicies and a /sandbox PVC.
+# See ../README.md (GKE section) for why each value is set.
+
+server:
+  logLevel: info
+  # Same as the VM (OPENSHELL_TELEMETRY_ENABLED=false).
+  telemetryEnabled: false
+  # Hermes image's own user; matches policy.yaml process.run_as_user.
+  sandboxUid: "10000"
+  sandboxGid: "10000"
+  # /sandbox (incl. /sandbox/hermes) persists on a PVC per sandbox.
+  workspaceDefaultStorageSize: "5Gi"
+  workspaceStorageClass: "standard-rwo"
+  dataStorageClass: "standard-rwo"
+  # runc only: GKE Sandbox (gVisor) lacks Landlock and seccomp user-notify.
+  defaultRuntimeClassName: ""
+  enableUserNamespaces: false
+  # Maps host.openshell.internal (policy rule opencode_bridge) to the in-cluster
+  # OpenCode bridge Service ClusterIP. Set at install time with
+  #   --set server.hostGatewayIP=$(kubectl -n hermes-edge get svc opencode-bridge -o jsonpath='{.spec.clusterIP}')
+  hostGatewayIP: ""
+  drivers:
+    kubernetes:
+      allowDriverConfig: false
+      resourceAdmission:
+        enabled: true
+      workspaceMode: shared
+  disableTls: false
+  auth:
+    # Never accept unauthenticated users on a cluster network (the VM relied on
+    # a loopback-only listener instead).
+    allowUnauthenticatedUsers: false
+  tls:
+    # CLI clients (hermes-tunnel, provider bootstrap) authenticate with the
+    # client certificate the PKI hook writes to openshell-client-tls.
+    enableMtls: true
+
+# The chart's sandbox SSH ingress NetworkPolicy (gateway -> sandbox only).
+networkPolicy:
+  enabled: true
+
+# Built-in PKI hook: server cert + client CA + client cert Secrets, generated
+# in-cluster; key material never appears in Helm history.
+pkiInitJob:
+  enabled: true
+
+agentSandbox:
+  preflight:
+    enabled: true

@@ -1,0 +1,67 @@
+# Traefik: public HTTPS entry point for Hermes behind Cloudflare.
+#
+#   sandbox/scripts/https_up.sh        # preferred (checks, then starts this)
+#   docker compose -f sandbox/traefik/docker-compose.yml up -d
+#
+# Publishes host ports 80 and 443 and forwards to the hermes-tunnel container
+# over the private hermes_edge network (Traefik can't reach the gateway). Routes live in dynamic/*.yml.
+#
+# Note: ports published by Docker bypass UFW. Only Cloudflare's IP ranges get
+# a response (ipAllowList in dynamic/hermes.yml); the AWS security group must
+# allow TCP 80 and 443.
+name: hermes-traefik
+
+services:
+  traefik:
+    # Pinned v3 stable, past a 2-week supply-chain cooldown.
+    image: traefik:v3.7.15
+    container_name: hermes-traefik
+    restart: unless-stopped
+    # Non-root. https_up.sh sets your own uid/gid so Traefik can read an
+    # optional origin key that is chmod 600 in your home directory.
+    user: "${TRAEFIK_UID:-65532}:${TRAEFIK_GID:-65532}"
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    ports:
+      # Unprivileged container ports, published as the standard ones.
+      - "80:8000"
+      - "443:8443"
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      # Optional Cloudflare Origin Certificate (origin.pem + origin.key).
+      # May be empty; https_up.sh creates the folder (mode 700) if missing.
+      - type: bind
+        source: ${TRAEFIK_TLS_DIR:-${HOME}/.config/hermes-sandbox/tls}
+        target: /etc/traefik/certs
+        read_only: true
+        bind:
+          create_host_path: false
+    # Hardening: no Linux capabilities, no privilege gain through setuid,
+    # read-only root filesystem, bounded resources. No Docker socket.
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+    mem_limit: 256m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--configFile=/etc/traefik/traefik.yml"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - edge
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  # Created by sandbox/tunnel/docker-compose.yml (start the tunnel first).
+  edge:
+    name: hermes_edge
+    external: true

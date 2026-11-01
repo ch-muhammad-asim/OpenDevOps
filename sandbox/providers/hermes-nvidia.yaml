@@ -1,0 +1,37 @@
+# OpenShell provider profile: NVIDIA API Catalog (build.nvidia.com) for Hermes.
+#
+# OpenShell keeps the real NVIDIA_API_KEY outside the sandbox. Hermes only
+# sees a placeholder; the supervisor adds the real key to requests that match
+# the endpoint below, and nothing else can use it.
+#
+#   openshell profile lint   -f sandbox/providers/hermes-nvidia.yaml
+#   openshell profile import -f sandbox/providers/hermes-nvidia.yaml
+#   read -rs NVIDIA_API_KEY; export NVIDIA_API_KEY
+#   openshell provider create --name nvidia --type hermes-nvidia --from-existing
+#   openshell sandbox provider attach hermes nvidia --wait
+id: hermes-nvidia
+display_name: NVIDIA API Catalog (Hermes)
+description: NVIDIA-hosted models for Hermes Agent, OpenAI-compatible API
+category: inference
+inference_capable: true
+credentials:
+  - name: api_key
+    description: NVIDIA API key (nvapi-...)
+    env_vars: [NVIDIA_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+discovery:
+  credentials: [api_key]
+endpoints:
+  # Only the OpenAI-style chat and model-list routes, enforced (not audit).
+  - host: integrate.api.nvidia.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: /v1/chat/completions }
+      - allow: { method: GET, path: /v1/models }
+# Hermes's bundled Python (programs it starts inherit this, see SECURITY.md R5).
+binaries:
+  - /opt/hermes/tools/python-3.14.9+20261021-linux-x64/bin/python3.14

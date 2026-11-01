@@ -1,0 +1,64 @@
+# Security boundary: the MOST access the Hermes sandbox may ever have.
+#
+# `scripts/policy_check.sh` uses the OpenShell policy prover to prove that
+# hermes/policy.yaml stays inside this boundary, and that risky edits do not.
+# Change this file only through a reviewed pull request: it is the guardrail.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  # Today this mirrors the policy exactly (least privilege), so check #1 is
+  # an identity check; its value is catching FUTURE edits to policy.yaml.
+  read_only:
+    - /bin
+    - /usr
+    - /lib
+    - /lib64
+    - /etc
+    - /proc
+    - /dev/urandom
+    - /var/log
+    - /opt/hermes
+    - /opt/hermes-sandbox
+  read_write:
+    - /tmp
+    - /dev/null
+    - /dev/ptmx
+    - /dev/pts
+
+landlock:
+  compatibility: hard_requirement
+
+process:
+  run_as_user: "10000"
+  run_as_group: "10000"
+
+network_policies:
+  # The policy file's only destination: the OpenCode bridge, OpenAI-style
+  # read and chat routes only, called by Hermes's Python. The nvidia provider
+  # adds the NVIDIA API at runtime (rule nvidia_api below).
+  opencode_bridge:
+    endpoints:
+      - host: host.openshell.internal
+        port: 18383
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: /v1/models }
+          - allow: { method: POST, path: /v1/chat/completions }
+          - allow: { method: GET, path: /health }
+    binaries:
+      - path: /opt/hermes/tools/python-3.14.9+20261021-linux-x64/bin/python3.14
+  # NVIDIA API Catalog, contributed at runtime by the `nvidia` OpenShell
+  # provider (providers/hermes-nvidia.yaml). Same two routes, same binary.
+  nvidia_api:
+    endpoints:
+      - host: integrate.api.nvidia.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: /v1/chat/completions }
+          - allow: { method: GET, path: /v1/models }
+    binaries:
+      - path: /opt/hermes/tools/python-3.14.9+20261021-linux-x64/bin/python3.14

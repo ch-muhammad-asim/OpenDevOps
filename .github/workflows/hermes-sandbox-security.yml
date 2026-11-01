@@ -1,0 +1,58 @@
+name: hermes sandbox security
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - sandbox/**
+      - .github/workflows/hermes-sandbox-security.yml
+  pull_request:
+    paths:
+      - sandbox/**
+      - .github/workflows/hermes-sandbox-security.yml
+  # Weekly image scan: new CVEs appear even when the code does not change.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per event, so a push never cancels the weekly image scan.
+  group: hermes-sandbox-security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Shift-left gate: secrets, Dockerfile + shell lint, HIGH/CRITICAL
+  # misconfigurations, and the OpenShell policy prover. Any finding fails.
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Static security checks (sandbox/scripts/scan.sh)
+        env:
+          SKIP_IMAGES: "1"
+          PROVER_DIR: ${{ runner.temp }}/bin
+        run: sandbox/scripts/scan.sh
+
+  # Image CVEs + SBOM. Report-only: upstream image CVEs are tracked in
+  # sandbox/SECURITY.md (risk register), not silently failed or ignored.
+  images:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the tunnel image
+        run: docker build -t hermes-tunnel:0.1.6 sandbox/tunnel
+      - name: Image scans and SBOM
+        env:
+          REPORTS: ${{ runner.temp }}/reports
+          PROVER_DIR: ${{ runner.temp }}/bin
+        run: sandbox/scripts/scan.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hermes-sandbox-security-reports
+          path: ${{ runner.temp }}/reports
+          retention-days: 30

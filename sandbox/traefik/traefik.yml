@@ -1,0 +1,97 @@
+# Traefik static configuration (read once at startup).
+#
+# Traffic path:
+#   browser --HTTPS--> Cloudflare edge --HTTP(S)--> Traefik :80/:443
+#     --> hermes-tunnel :9119 dashboard / :8642 API (OpenShell forwards) --> Hermes
+#
+# Cloudflare's edge holds the browser-trusted certificate. On :443 Traefik
+# serves its built-in self-signed default certificate (good for Cloudflare
+# SSL mode "Full"), or a Cloudflare Origin Certificate when
+# scripts/https_up.sh finds one (then "Full (strict)" works too).
+#
+# No Let's Encrypt / ACME, no API tokens, no Docker socket: routes come from
+# the files in dynamic/ only.
+#
+# Note: Traefik reads its static config from ONE source only (this file, OR
+# CLI flags, OR env vars), so everything static lives here.
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+log:
+  level: INFO
+  format: json
+
+# One JSON line per request on stdout (rotated by Docker's json-file driver).
+# Request headers are dropped from the log so Authorization / cookies never
+# land in it.
+accessLog:
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+
+# The container runs as an unprivileged user, so it listens on high ports;
+# docker-compose.yml publishes them as host ports 80 and 443.
+entryPoints:
+  web:
+    address: ":8000"
+    # Only Cloudflare may tell us the original scheme / client IP. From any
+    # other source Traefik overwrites X-Forwarded-* itself, so a direct caller
+    # cannot fake "X-Forwarded-Proto: https".
+    forwardedHeaders:
+      trustedIPs: &cloudflare_ips
+        # Cloudflare IP ranges, source: https://www.cloudflare.com/ips/
+        # (https://www.cloudflare.com/ips-v4 and /ips-v6, checked 2026-10-30).
+        # Keep in sync with dynamic/hermes.yml (cloudflare-only middleware).
+        - 173.245.48.0/20
+        - 103.21.244.0/22
+        - 103.22.200.0/22
+        - 103.31.4.0/22
+        - 141.101.64.0/18
+        - 108.162.192.0/18
+        - 190.93.240.0/20
+        - 188.114.96.0/20
+        - 197.234.240.0/22
+        - 198.41.128.0/17
+        - 162.158.0.0/15
+        - 104.16.0.0/13
+        - 104.24.0.0/14
+        - 172.64.0.0/13
+        - 131.0.72.0/22
+        - 2400:cb00::/32
+        - 2606:4700::/32
+        - 2803:f800::/32
+        - 2405:b500::/32
+        - 2405:8100::/32
+        - 2a06:98c0::/29
+        - 2c0f:f248::/32
+    http:
+      # Drop headers like X_Forwarded_Proto that a backend could read as
+      # X-Forwarded-Proto (header spoofing).
+      aliasHeadersStrategy: delete
+    # No entryPoint-wide redirect here: port 80 is protocol-aware (see
+    # dynamic/hermes.yml) so Cloudflare "Flexible" mode cannot loop.
+
+  websecure:
+    address: ":8443"
+    forwardedHeaders:
+      trustedIPs: *cloudflare_ips
+    http:
+      aliasHeadersStrategy: delete
+      tls: {}
+
+  # Health check only; not published by docker-compose.yml.
+  ping:
+    address: ":8082"
+
+ping:
+  entryPoint: ping
+
+# The Traefik API/dashboard is intentionally NOT enabled (no `api:` section).
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true

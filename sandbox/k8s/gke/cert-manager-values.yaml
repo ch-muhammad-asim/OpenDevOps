@@ -1,0 +1,37 @@
+# Helm values for jetstack/cert-manager chart v1.21.2 (cert-manager v1.21.2).
+#   helm upgrade --install cert-manager jetstack/cert-manager --version v1.21.2 \
+#     -n cert-manager -f cert-manager-values.yaml
+crds:
+  # Install and keep the CRDs with the release (helm uninstall leaves them).
+  enabled: true
+  keep: true
+
+# DNS-01 self-check against public resolvers (avoids any cluster/VPC DNS view
+# of saqlainmushtaq.com). Cloudflare-proxied records don't affect TXT lookups.
+dns01RecursiveNameservers: "1.1.1.1:53,8.8.8.8:53"
+dns01RecursiveNameserversOnly: true
+
+# Small single-node cluster: modest requests, bounded memory.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+webhook:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+cainjector:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+prometheus:
+  enabled: false

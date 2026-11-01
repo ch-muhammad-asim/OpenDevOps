@@ -1,0 +1,110 @@
+# 🧱 NetworkPolicies for the `hermes` namespace.
+#
+# 1. default-deny: no ingress or egress for any pod unless allowed below.
+# 2. provider-bootstrap: DNS + the OpenShell gateway Service only. The
+#    bootstrap never talks to NVIDIA; it hands the key to the gateway.
+# 3. nvidia-api-egress: DNS + TCP 443 for pods labelled
+#    `hermes.opendevops.io/nvidia-egress: "true"` (for example a one-request
+#    verification pod running sandbox/scripts/nvidia_bench.py).
+#
+# ⚠️ Kubernetes NetworkPolicy matches IPs/CIDRs, never hostnames. It cannot
+# say "integrate.api.nvidia.com only". Policy 3 therefore allows 443 to public
+# IPs (private/link-local/metadata ranges excluded). To pin the hostname use a
+# CNI with FQDN policy (for example CiliumNetworkPolicy `toFQDNs`, see
+# sandbox/KUBERNETES.md) or an egress proxy. Inside OpenShell sandboxes the
+# hostname/method/path control is OpenShell's own policy
+# (sandbox/providers/hermes-nvidia.yaml: POST /v1/chat/completions,
+# GET /v1/models on integrate.api.nvidia.com:443).
+#
+# ⚠️ These objects do nothing unless the CNI enforces NetworkPolicy (Calico,
+# Cilium, ...); the API server accepts them either way. Verify enforcement on
+# your cluster. (Tested on kind v0.30.0 / kindnetd v20250512: external egress
+# was enforced, but traffic to the API server ClusterIP was not blocked. The
+# bootstrap pod mounts no API token, so it has nothing to authenticate with.)
+#
+# Adjust the gateway selectors if OpenShell is not the Helm release
+# `openshell` in namespace `openshell` serving on 8080.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: hermes
+  labels:
+    app.kubernetes.io/part-of: hermes-sandbox
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: provider-bootstrap-egress
+  namespace: hermes
+  labels:
+    app.kubernetes.io/part-of: hermes-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-provider-bootstrap
+  policyTypes: ["Egress"]
+  egress:
+    # Cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # OpenShell gateway (Helm chart defaults: release/namespace `openshell`, port 8080)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshell
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openshell
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nvidia-api-egress
+  namespace: hermes
+  labels:
+    app.kubernetes.io/part-of: hermes-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      hermes.opendevops.io/nvidia-egress: "true"
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # integrate.api.nvidia.com:443. Replace 0.0.0.0/0 with NVIDIA's published
+    # ranges if you can maintain them; the exceptions keep in-cluster, private
+    # and cloud-metadata (169.254.169.254) addresses out.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - { protocol: TCP, port: 443 }

@@ -1,0 +1,25 @@
+# Default resources for containers in namespace openshell that set none (the
+# per-sandbox supervisor pods run BestEffort otherwise and are first to be
+# evicted / OOM-killed on the single e2-standard-8 node).
+#
+# Defaults apply ONLY to containers with no request/limit set; the Hermes
+# workload container (requests=limits 2 CPU / 4Gi) is untouched. No max/min/
+# maxLimitRequestRatio on purpose, so nothing is rejected at admission.
+# Note: a container that sets only limits gets requests=limits (Kubernetes
+# rule, independent of this object); one that sets only requests gets the
+# default limit below, which must then be >= its request or the pod is
+# rejected (applies only if such a container requests more than 1 CPU/512Mi).
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: container-defaults
+  namespace: openshell
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: "1"
+        memory: 512Mi

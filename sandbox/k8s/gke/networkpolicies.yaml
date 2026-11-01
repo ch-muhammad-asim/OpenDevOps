@@ -1,0 +1,251 @@
+# NetworkPolicies (enforced by GKE Dataplane V2) for namespaces hermes-edge and
+# traefik. Nothing here for namespace openshell: the OpenShell chart and its
+# Kubernetes driver manage their own policies there.
+#
+# Pod labels used:
+#   traefik pods          app.kubernetes.io/name=traefik (chart default)
+#   hermes-tunnel         app.kubernetes.io/name=hermes-tunnel
+#   opencode-bridge       app.kubernetes.io/name=opencode-bridge
+#   OpenShell gateway     app.kubernetes.io/name=openshell (chart selector labels)
+#   OpenShell supervisors openshell.ai/component=supervisor (per-sandbox pods,
+#                         openshell-driver-kubernetes 0.1.6 sandbox_runtime.rs)
+#                         app.kubernetes.io/name=openshell-supervisor (shared
+#                         pool, only with supervisor_topology="gateway")
+# kube-dns: GKE runs kube-dns in kube-system with label k8s-app=kube-dns
+# (NodeLocal DNSCache, if enabled, also uses that label).
+
+# ============================ hermes-edge =====================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: hermes-edge
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Traefik -> hermes-tunnel dashboard/API ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-tunnel-ingress-from-traefik
+  namespace: hermes-edge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-tunnel
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 9119
+        - protocol: TCP
+          port: 8642
+---
+# hermes-tunnel -> OpenShell gateway gRPC (port forwards ride on it) + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-tunnel-egress
+  namespace: hermes-edge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-tunnel
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshell
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openshell
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: node-local-dns   # GKE NodeLocal DNSCache answers the kube-dns IP
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# OpenShell supervisor pods (which open all policy-approved sandbox egress)
+# -> bridge. The bridge has no auth, so nothing else may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opencode-bridge-ingress-from-supervisors
+  namespace: hermes-edge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencode-bridge
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshell
+          podSelector:
+            matchLabels:
+              openshell.ai/component: supervisor
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshell
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openshell-supervisor
+      ports:
+        - protocol: TCP
+          port: 18383
+---
+# Bridge -> OpenCode Zen (HTTPS, public internet only) + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opencode-bridge-egress
+  namespace: hermes-edge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencode-bridge
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # No in-VPC / metadata targets (RFC1918, link-local incl.
+              # 169.254.169.254, CGNAT).
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: node-local-dns   # GKE NodeLocal DNSCache answers the kube-dns IP
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# ============================== traefik =======================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: traefik
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# LB traffic (source = Cloudflare edge IPs, preserved by
+# externalTrafficPolicy=Local) on the container ports. Open to all sources
+# here; Traefik's cloudflare-only ipAllowList filters per request.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: traefik-egress
+  namespace: traefik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  policyTypes: [Egress]
+  egress:
+    # Backends.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hermes-edge
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: hermes-tunnel
+      ports:
+        - protocol: TCP
+          port: 9119
+        - protocol: TCP
+          port: 8642
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: node-local-dns   # GKE NodeLocal DNSCache answers the kube-dns IP
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server (Traefik watches IngressRoutes, Services,
+    # EndpointSlices, Secrets). Dataplane V2 matches the real control-plane
+    # endpoint, not the kubernetes Service ClusterIP.
+    # TODO(apply): narrow to the control-plane IP:
+    #   gcloud container clusters describe hermes-gke --zone us-central1-b \
+    #     --format='value(endpoint)'      -> replace 0.0.0.0/0 with <IP>/32
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443

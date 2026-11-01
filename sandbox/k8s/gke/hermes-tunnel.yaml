@@ -1,0 +1,194 @@
+# hermes-tunnel: OpenShell CLI 0.1.6 holding two port forwards into the Hermes
+# sandbox (built from sandbox/tunnel/Dockerfile, entrypoint.sh unchanged):
+#   :9119 Hermes dashboard (web UI, /chat, WebSockets)
+#   :8642 Hermes API (OpenAI-compatible, Bearer key)
+# Traefik (namespace traefik) reaches it via Service hermes-tunnel.
+#
+# Gateway: https://openshell.openshell.svc.cluster.local:8080 (gRPC, mTLS).
+# How the 0.1.6 CLI finds its mTLS material (crates/openshell-cli/src/tls.rs):
+# there are NO cert flags / OPENSHELL_TLS_* env vars for the client. It reads
+#   $XDG_CONFIG_HOME/openshell/gateways/<name>/mtls/{ca.crt,tls.crt,tls.key}
+# where <name> = $OPENSHELL_GATEWAY when set (else a mangled endpoint URL).
+# No stored gateway metadata is needed when OPENSHELL_GATEWAY_ENDPOINT is set.
+# So: OPENSHELL_GATEWAY=gke, XDG_CONFIG_HOME=/tmp/.config, and an init
+# container copies the client bundle into /tmp/.config/openshell/gateways/gke/mtls
+# (writable emptyDir owned by uid 10001; the CLI also writes other state there).
+#
+# TODO(apply): the client bundle is Secret "openshell-client-tls"
+# (ca.crt/tls.crt/tls.key; chart value server.tls.clientTlsSecretName, created
+# by the chart's pkiInitJob) in namespace openshell. Secrets can't be mounted
+# across namespaces: copy it into hermes-edge as "openshell-client-tls" with
+# the `tunnel` step of deploy.sh (../README.md, Build it, step 4), and re-copy after any OpenShell PKI rotation.
+# The gateway maps this client cert to a user only while mTLS user auth is on
+# (default when a client CA is set and no OIDC issuer is configured).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes-tunnel
+  namespace: hermes-edge
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-tunnel
+  namespace: hermes-edge
+  labels:
+    app.kubernetes.io/name: hermes-tunnel
+    app.kubernetes.io/part-of: hermes
+spec:
+  replicas: 1
+  # Forwards are per-process; never run two tunnels against one sandbox.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-tunnel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes-tunnel
+        app.kubernetes.io/part-of: hermes
+    spec:
+      serviceAccountName: hermes-tunnel
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Copies the OpenShell client bundle into the writable config dir with
+        # 0600 keys. Same image (has /bin/sh, cp); no extra image to trust.
+        - name: install-mtls
+          image: ${REGISTRY}/hermes-tunnel:0.1.6
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              d=/tmp/.config/openshell/gateways/gke/mtls
+              mkdir -p "$d"
+              chmod 700 /tmp/.config /tmp/.config/openshell /tmp/.config/openshell/gateways /tmp/.config/openshell/gateways/gke "$d"
+              for f in ca.crt tls.crt tls.key; do
+                cp "/run/openshell-client/$f" "$d/$f"
+                chmod 600 "$d/$f"
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: openshell-client-tls
+              mountPath: /run/openshell-client
+              readOnly: true
+      containers:
+        - name: tunnel
+          image: ${REGISTRY}/hermes-tunnel:0.1.6
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENSHELL_GATEWAY_ENDPOINT
+              value: https://openshell.openshell.svc.cluster.local:8080
+            # Gateway name: selects .../gateways/gke/mtls for the client bundle.
+            - name: OPENSHELL_GATEWAY
+              value: gke
+            # entrypoint.sh exports HOME=/tmp; pin XDG explicitly to match.
+            - name: XDG_CONFIG_HOME
+              value: /tmp/.config
+            - name: SANDBOX_NAME
+              value: hermes
+            - name: DASHBOARD_PORT
+              value: "9119"
+            - name: API_PORT
+              value: "8642"
+            - name: HEALTH_INTERVAL
+              value: "15"
+            # Pod IP only is reachable in-cluster; NetworkPolicy restricts callers.
+            - name: BIND_ADDRESS
+              value: 0.0.0.0
+          ports:
+            - name: dashboard
+              containerPort: 9119
+            - name: api
+              containerPort: 8642
+          # The forwards need a few seconds after start (and a running sandbox).
+          startupProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: dashboard
+            periodSeconds: 10
+            failureThreshold: 3
+          # TCP checks only: entrypoint.sh already restarts hung forwards
+          # (WebSocket/health probes); a restart here would drop every chat.
+          livenessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: openshell-client-tls
+          secret:
+            secretName: openshell-client-tls
+            # Group-readable via fsGroup 10001 (files are root-owned).
+            defaultMode: 0440
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-tunnel
+  namespace: hermes-edge
+  labels:
+    app.kubernetes.io/name: hermes-tunnel
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hermes-tunnel
+  ports:
+    - name: dashboard
+      port: 9119
+      targetPort: dashboard
+    - name: api
+      port: 8642
+      targetPort: api

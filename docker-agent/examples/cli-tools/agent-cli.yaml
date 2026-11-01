@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/docker-agent/v1.150.0/agent-schema.json
+# An SRE agent that uses your real CLIs (kubectl here; helm, aws, terraform work the same way).
+# Needs an image WITH a shell and the CLIs (our distroless runtime images have neither): see README.md →
+# "Give the agent your CLIs". Tested with alpine/k8s + a read-only kubeconfig, Claude via the Compose bridge.
+version: "15"
+providers:
+  claude-bridge:
+    api_type: openai_chatcompletions
+    base_url: http://claude-code-cli-bridge:18188/v1     # the Compose bridge (network oda_oda)
+    token_key: CLAUDE_BRIDGE_API_KEY
+models:
+  claude: {provider: claude-bridge, model: claude-haiku-4-5}
+
+# Who decides what runs: a deny rule always wins, then ask/allow rules, then the safety mode. Patterns: tool name, or shell:cmd=<glob>.
+permissions:
+  allow:
+    - k8s_pods                          # the script tool below
+    - "shell:cmd=kubectl get *"         # NOTE: also matches "kubectl get secrets": RBAC must forbid what you don't want
+    - "shell:cmd=kubectl logs *"
+  deny:
+    - "shell:cmd=*kubectl delete*"
+
+agents:
+  root:
+    model: claude
+    safety: restricted                  # unattended: classifier-safe calls run, anything else not allowed above is denied
+    instruction: You are an SRE assistant. Use your tools to inspect namespace oda-demo. Be concise.
+    toolsets:
+      # Safest way to expose a CLI: a named, fixed command. The model only fills the declared args, which arrive
+      # as environment variables ($namespace), never pasted into the command line.
+      - type: script
+        shell:
+          k8s_pods:
+            description: List pods in a namespace
+            cmd: kubectl get pods -n "$namespace" -o wide
+            args:
+              namespace: {type: string, description: Kubernetes namespace}
+            required: [namespace]
+      # A general shell: powerful, so it's gated by the permission rules above and the safety mode.
+      - type: shell

@@ -1,0 +1,45 @@
+# Let's Encrypt ClusterIssuers, DNS-01 via Cloudflare.
+# Token: Secret cloudflare-api-token (key api-token) in namespace cert-manager
+# (the cluster resource namespace for ClusterIssuers). It is the DNS-edit token
+# also used by sandbox/scripts/update_dns.sh; created by the `certmanager` step of deploy.sh (../README.md, Kubernetes Secrets).
+# Use letsencrypt-staging first; switch certificate.yaml to letsencrypt-prod
+# once the staging certificate is issued.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # TODO(apply): optional contact address for expiry notices, e.g.
+    # email: <ops mailbox>  (omitted: Let's Encrypt no longer sends expiry mail).
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - saqlainmushtaq.com
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - saqlainmushtaq.com
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

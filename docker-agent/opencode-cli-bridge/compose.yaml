@@ -1,0 +1,53 @@
+# Docker Agent + OpenCode CLI bridge (free OpenCode models), local-only.
+#   you ─curl─▶ 127.0.0.1:8093 ─▶ agent (serve api, --flavor opencode) ─▶ opencode-cli-bridge:18387 ─▶ OpenCode free tier
+# The bridge publishes no ports and needs no model credentials (the OpenCode free tier is anonymous).
+# Required env (load from the Keychain, see ../README.md → OpenCode CLI bridge):
+#   AGENT_API_KEY             bearer key YOU send to the agent
+#   OPENCODE_BRIDGE_API_KEY   bearer key the agent sends to the bridge
+name: oda-opencode
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  opencode-cli-bridge:
+    <<: *hardening
+    image: docker.io/quickbooks2018/opendevops-agent-runtime@sha256:93f5e691269475c8119d52e946a570c012d12d475ae81230eff3be3bad9384e4
+    # 0.0.0.0 inside the container so the agent service can reach it; no `ports:` (not published to the host)
+    command: ["--host", "0.0.0.0", "--port", "18387", "--model", "opencode/mimo-v2.6-flash-free", "--free-only",
+              "--cwd", "/home/nonroot/workspace", "--max-images", "0", "--max-concurrency", "2", "--timeout", "180"]
+    environment:
+      OPENCODE_BRIDGE_API_KEY: ${OPENCODE_BRIDGE_API_KEY:?load OPENCODE_BRIDGE_API_KEY first}
+    # tmpfs HOME: a fresh OpenCode client identity on every start; the workspace is an empty tmpfs too
+    tmpfs: [/tmp, "/home/nonroot:uid=65532,gid=65532", "/home/nonroot/workspace:uid=65532,gid=65532"]
+    healthcheck:     # distroless: no curl, so use the image's python
+      test: ["CMD", "/usr/bin/python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 18387), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 150s   # startup runs opencode --version, run --help and free-model discovery
+    networks: [oda-opencode]
+
+  agent:
+    <<: *hardening
+    image: docker.io/quickbooks2018/opendevops-agent-runtime@sha256:0e3d6795d2850cbb2035b765806ad02a2b6fdb652c4c594d8ebca88984f437ed
+    # ODA_OPENCODE_FLAVOR: opencode (MiMo V2.6 Flash, default) | opencode-deepseek (DeepSeek V4.1 Flash)
+    command: ["serve", "api", "/app/agent.yaml", "--flavor", "${ODA_OPENCODE_FLAVOR:-opencode}", "--listen", "0.0.0.0:8080",
+              "--auth-token", "${AGENT_API_KEY:?load AGENT_API_KEY first}", "--session-db", "/data/sessions.db"]
+    environment:
+      OPENCODE_BRIDGE_API_KEY: ${OPENCODE_BRIDGE_API_KEY:?load OPENCODE_BRIDGE_API_KEY first}
+    ports: ["127.0.0.1:8093:8080"]     # loopback only: never reachable from your LAN
+    tmpfs: [/tmp, "/home/nonroot:uid=65532,gid=65532"]
+    volumes: [oda-opencode-data:/data]
+    depends_on:
+      opencode-cli-bridge: {condition: service_healthy}
+    networks: [oda-opencode]
+
+volumes:
+  oda-opencode-data:
+
+networks:
+  oda-opencode:

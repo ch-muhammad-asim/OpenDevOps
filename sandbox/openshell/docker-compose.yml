@@ -1,0 +1,65 @@
+# OpenShell gateway (Docker compute driver), pinned to v0.1.6.
+#
+# Based on deploy/docker/ in NVIDIA/OpenShell at tag v0.1.6. Runs without
+# sudo: the Docker daemon creates /var/lib/openshell on first start.
+#
+#   docker compose -f sandbox/openshell/docker-compose.yml up -d
+#   openshell gateway add http://127.0.0.1:8080 --local --name hermes-gw
+#
+# Sandboxes are created by the gateway (`openshell sandbox create`), not by
+# this file. See ../README.md.
+name: openshell
+
+services:
+  gateway:
+    image: &gateway-image ghcr.io/nvidia/openshell/gateway:${OPENSHELL_VERSION:-0.1.6}
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # Clear the image CMD (--bind-address 0.0.0.0 --port 8080): CLI flags beat
+    # the TOML, and the sandbox supervisors need the gateway.toml listeners.
+    command: []
+    # Root inside the container only, to write /var/lib/openshell and use the
+    # Docker socket (Docker-outside-of-Docker, no --privileged).
+    user: "0"
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same absolute path on host and in container: the supervisor binary is
+      # extracted here and handed to the host daemon as a bind-mount source.
+      - &openshell-data
+        type: bind
+        source: /var/lib/openshell
+        target: /var/lib/openshell
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ./gateway.toml
+        target: /etc/openshell/gateway.toml
+        read_only: true
+    environment:
+      OPENSHELL_GATEWAY_CONFIG: /etc/openshell/gateway.toml
+      OPENSHELL_DB_URL: "sqlite:/var/lib/openshell/gateway.db?mode=rwc"
+      XDG_DATA_HOME: /var/lib/openshell
+      HOME: /var/lib/openshell
+      OPENSHELL_TELEMETRY_ENABLED: "false"
+    logging: &rotated-logs
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Writes the sandbox JWT signing keys once; existing keys are kept.
+  init:
+    image: *gateway-image
+    user: "0"
+    restart: "no"
+    command: ["generate-certs", "--output-dir", "/var/lib/openshell/tls"]
+    environment:
+      HOME: /var/lib/openshell
+    logging: *rotated-logs
+    volumes:
+      - *openshell-data

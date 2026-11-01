@@ -1,0 +1,11 @@
+# ClusterIP only: reach it with `kubectl port-forward` (binds 127.0.0.1 on your machine).
+apiVersion: v1
+kind: Service
+metadata:
+  name: oda-agent
+  namespace: oda-system
+spec:
+  type: ClusterIP
+  selector: {app: oda-agent}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

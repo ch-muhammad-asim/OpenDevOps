@@ -1,0 +1,51 @@
+# Seed config for Hermes inside the OpenShell sandbox. start-hermes copies it
+# to $HERMES_HOME/config.yaml only when none exists, so dashboard edits persist
+# on the hermes-data volume.
+#
+# Default model: chosen by sandbox/scripts/nvidia_bench.py (see
+# sandbox/benchmarks/): 100% correct answers and tool calls over 5 rounds,
+# lowest latency. The key comes from the OpenShell `nvidia` provider
+# (sandbox/scripts/set_nvidia_key.sh); Hermes only sees a placeholder.
+model:
+  provider: nvidia
+  default: nvidia/nemotron-3.5-super-vl-120b-a12b
+  base_url: https://integrate.api.nvidia.com/v1
+  key_env: NVIDIA_API_KEY
+# `nvidia` is a built-in Hermes provider (reads NVIDIA_API_KEY); it is reached
+# through the `_provider_nvidia` rule the OpenShell provider adds at runtime.
+providers:
+  opencode-bridge:
+    name: OpenCode Bridge (free models)
+    # Reached through the `opencode_bridge` rule in policy.yaml.
+    base_url: http://host.openshell.internal:18383/v1
+    # The bridge has no auth; Hermes still wants a key variable to exist.
+    key_env: OPENCODE_BRIDGE_API_KEY
+    api_mode: chat_completions
+    default_model: opencode/mimo-v2.6-flash-free
+    discover_models: true
+# Tried in order when the default model errors, times out or is rate-limited.
+# Both passed the same 5-round benchmark (different model families).
+fallback_providers:
+  - provider: nvidia
+    model: openai/gpt-oss-20b
+    base_url: https://integrate.api.nvidia.com/v1
+    key_env: NVIDIA_API_KEY
+    api_mode: chat_completions
+  - provider: nvidia
+    model: meta/muse-glimmer-30b
+    base_url: https://integrate.api.nvidia.com/v1
+    key_env: NVIDIA_API_KEY
+    api_mode: chat_completions
+# Hermes's own guard for dangerous commands. On unattended surfaces (the API,
+# demo scripts) nobody can approve, so fail closed after 45 s instead of the
+# default 300 s; still enough time to approve in the web chat.
+approvals:
+  timeout: 45
+# Dashboard WebSocket keepalive. Hermes pings every socket and closes it
+# ("1011 keepalive ping timeout") when no pong arrives in time. Behind
+# Cloudflare + Traefik + the OpenShell tunnel the default 20 s deadline was
+# too tight and killed healthy chat sockets (2026-10-30). Ping every 25 s
+# (well under Cloudflare's 100 s idle limit) and allow 90 s for the pong.
+dashboard:
+  ws_ping_interval: 25
+  ws_ping_timeout: 90

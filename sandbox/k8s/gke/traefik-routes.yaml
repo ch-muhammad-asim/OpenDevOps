@@ -1,0 +1,237 @@
+# Traefik CRDs for https://hermes-gke.saqlainmushtaq.com (ported from the VM's
+# sandbox/traefik/dynamic/hermes.yml + tls.yml).
+#
+#   /auth/password-login   -> dashboard, login rate limit       hermes-tunnel:9119
+#   /v1, /v1/...           -> Hermes API (own Bearer key)        hermes-tunnel:8642
+#   everything else        -> dashboard + basic auth + Hermes's own login  hermes-tunnel:9119
+#
+# websecure (:443): always served, certificate from Secret hermes-gke-tls
+# (cert-manager, certificate.yaml).
+# web (:80): protocol-aware like the VM: X-Forwarded-Proto https (Cloudflare
+# "Flexible") -> serve; otherwise -> permanent redirect to https.
+# X-Forwarded-Proto is trusted only from Cloudflare (traefik-values.yaml), and
+# every route also requires a Cloudflare source IP.
+#
+# WebSockets: Traefik proxies Upgrade natively; none of these middlewares
+# (ipAllowList, headers, basicAuth, rateLimit) touch Upgrade/Connection. The
+# browser sends basic-auth credentials on the WebSocket handshake too
+# (same origin), so /api/ws keeps working behind basicAuth.
+#
+# Everything except the TLSOption lives in hermes-edge, so IngressRoutes only
+# reference same-namespace Middlewares, Services and Secrets
+# (providers.kubernetesCRD.allowCrossNamespace=false).
+
+# ---- TLS options (cluster-wide "default", applies to every router) ----------
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  namespace: traefik
+spec:
+  minVersion: VersionTLS12
+  # The cert matches the hostname, but Cloudflare always sends SNI anyway;
+  # kept false like the VM so a missing/renewing cert never breaks handshakes.
+  sniStrict: false
+  cipherSuites:
+    # TLS 1.2 only; TLS 1.3 suites are not configurable (all are strong).
+    - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+    - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+    - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+  curvePreferences:
+    - X25519
+    - CurveP256
+---
+# ---- Middlewares --------------------------------------------------------------
+# Only Cloudflare's edge may reach the origin (TCP source address, preserved by
+# externalTrafficPolicy=Local). Source: https://www.cloudflare.com/ips/
+# (checked 2026-10-30). Keep in sync with traefik-values.yaml trustedIPs.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: cloudflare-only
+  namespace: hermes-edge
+spec:
+  ipAllowList:
+    sourceRange:
+      - 173.245.48.0/20
+      - 103.21.244.0/22
+      - 103.22.200.0/22
+      - 103.31.4.0/22
+      - 141.101.64.0/18
+      - 108.162.192.0/18
+      - 190.93.240.0/20
+      - 188.114.96.0/20
+      - 197.234.240.0/22
+      - 198.41.128.0/17
+      - 162.158.0.0/15
+      - 104.16.0.0/13
+      - 104.24.0.0/14
+      - 172.64.0.0/13
+      - 131.0.72.0/22
+      - 2400:cb00::/32
+      - 2606:4700::/32
+      - 2803:f800::/32
+      - 2405:b500::/32
+      - 2405:8100::/32
+      - 2a06:98c0::/29
+      - 2c0f:f248::/32
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: to-https
+  namespace: hermes-edge
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+# Browser hardening. No full CSP on purpose (would break the dashboard SPA).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: hermes-edge
+spec:
+  headers:
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    # Also on the :80 "Flexible" routes (visitor-to-Cloudflare is HTTPS there).
+    forceSTSHeader: true
+    contentTypeNosniff: true
+    customFrameOptionsValue: SAMEORIGIN
+    contentSecurityPolicy: "frame-ancestors 'self'"
+    referrerPolicy: strict-origin-when-cross-origin
+    customResponseHeaders:
+      Server: ""
+      X-Powered-By: ""
+---
+# Slow down password guessing, per real visitor IP (CF-Connecting-IP; the TCP
+# peer is always a shared Cloudflare edge IP).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: login-ratelimit
+  namespace: hermes-edge
+spec:
+  rateLimit:
+    average: 10
+    period: 1m
+    burst: 10
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
+---
+# Extra layer in front of the dashboard (Hermes's own login still applies).
+# Secret hermes-dashboard-basic-auth (namespace hermes-edge) holds key "users"
+# in htpasswd format; created by the `edge` step of deploy.sh; rotate as in ../README.md, How to log in (never on a command line).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: dashboard-basic-auth
+  namespace: hermes-edge
+spec:
+  basicAuth:
+    secret: hermes-dashboard-basic-auth
+    realm: hermes
+    # Don't forward the basic-auth Authorization header to Hermes.
+    removeHeader: true
+---
+# ---- :443 ---------------------------------------------------------------------
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: hermes-websecure
+  namespace: hermes-edge
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`) && Path(`/auth/password-login`)
+      priority: 300
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+        - name: login-ratelimit
+        - name: dashboard-basic-auth
+      services:
+        - name: hermes-tunnel
+          port: 9119
+    # API: no basic auth (it has its own Bearer key, and basicAuth would
+    # clash with the Authorization: Bearer header).
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`) && (Path(`/v1`) || PathPrefix(`/v1/`))
+      priority: 200
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: hermes-tunnel
+          port: 8642
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`)
+      priority: 100
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+        - name: dashboard-basic-auth
+      services:
+        - name: hermes-tunnel
+          port: 9119
+  tls:
+    secretName: hermes-gke-tls
+    # TLSOption "default" (namespace traefik) applies automatically.
+---
+# ---- :80, visitor used HTTPS at Cloudflare (SSL mode "Flexible") --------------
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: hermes-web-flexible
+  namespace: hermes-edge
+spec:
+  entryPoints: [web]
+  routes:
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`) && Path(`/auth/password-login`)
+      priority: 300
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+        - name: login-ratelimit
+        - name: dashboard-basic-auth
+      services:
+        - name: hermes-tunnel
+          port: 9119
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`) && (Path(`/v1`) || PathPrefix(`/v1/`))
+      priority: 200
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: hermes-tunnel
+          port: 8642
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      priority: 100
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+        - name: dashboard-basic-auth
+      services:
+        - name: hermes-tunnel
+          port: 9119
+    # ---- :80, plain HTTP -> redirect to HTTPS ---------------------------------
+    # The service is never called (the redirect answers first); a real service
+    # keeps blocked :80 requests in the access log.
+    - kind: Rule
+      match: Host(`hermes-gke.saqlainmushtaq.com`)
+      priority: 10
+      middlewares:
+        - name: cloudflare-only
+        - name: to-https
+      services:
+        - name: hermes-tunnel
+          port: 9119

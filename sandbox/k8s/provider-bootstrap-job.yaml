@@ -1,0 +1,157 @@
+# 🚀 One-shot Job: copy the NVIDIA key from the Kubernetes Secret into the
+# OpenShell gateway's credential store as the `nvidia` provider.
+#
+# RECOMMENDED PATTERN (not an OpenShell feature): OpenShell v0.1.6 providers
+# cannot reference an existing Kubernetes Secret. Credentials reach the
+# gateway only through `openshell provider create|update` (or the SDK/gRPC
+# API); the gateway then stores them in its own backend (encrypted database,
+# or the native `kubernetes-secrets` / `vault` credential drivers). This Job
+# bridges the two. See sandbox/KUBERNETES.md, "Native vs pattern".
+#
+# Security properties:
+#   - key mounted as a read-only file (defaultMode 0400; 0440 root:fsGroup
+#     in practice, see the volume below), never an env var
+#   - non-root, read-only root filesystem, no capabilities, seccomp
+#     RuntimeDefault, no privilege escalation, no API token mounted
+#   - egress limited by networkpolicy.yaml to DNS + the OpenShell gateway
+#   - the script never prints the key (provider-bootstrap.sh)
+#
+# Before applying:
+#   1. Build/pin an image that contains the `openshell` CLI v0.1.6 and a POSIX
+#      shell, and replace `image:` below with its digest (KUBERNETES.md).
+#   2. Set GATEWAY_URL and the OIDC values for your gateway.
+#   3. Create the Secrets/ConfigMaps it mounts (KUBERNETES.md, step 2).
+# Re-run (rotation): kubectl -n hermes delete job hermes-provider-bootstrap --ignore-not-found
+#                    kubectl apply -k sandbox/k8s
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hermes-provider-bootstrap
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: hermes-provider-bootstrap
+    app.kubernetes.io/part-of: hermes-sandbox
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes-provider-bootstrap
+        app.kubernetes.io/part-of: hermes-sandbox
+    spec:
+      serviceAccountName: hermes-provider-bootstrap
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          # Placeholder: your image with the openshell v0.1.6 CLI, pinned by digest
+          # (registry.example.com/platform/openshell-cli@sha256:...).
+          image: registry.example.com/platform/openshell-cli:0.1.6
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/opt/bootstrap/provider-bootstrap.sh"]
+          env:
+            - name: HOME
+              value: /home/bootstrap
+            - name: NVIDIA_API_KEY_FILE
+              value: /var/run/secrets/nvidia/api-key
+            - name: GATEWAY_URL
+              value: https://openshell.openshell.svc.cluster.local:8080
+            - name: GATEWAY_NAME
+              value: k8s
+            - name: GATEWAY_CA_FILE
+              value: /etc/openshell/gateway-ca/ca.crt
+            - name: OIDC_ISSUER
+              value: ""  # e.g. https://idp.example.com/realms/openshell
+            - name: OIDC_CLIENT_ID
+              value: openshell-provider-bootstrap
+            - name: OIDC_AUDIENCE
+              value: ""
+            - name: OIDC_CLIENT_SECRET_FILE
+              value: /var/run/secrets/openshell-oidc/client-secret
+            - name: PROVIDER
+              value: nvidia
+            - name: PROFILE_FILE
+              value: /etc/openshell/profiles/hermes-nvidia.yaml
+            - name: SANDBOX_NAME
+              value: ""  # e.g. hermes, to attach the provider after creating it
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          volumeMounts:
+            - name: nvidia-api-key
+              mountPath: /var/run/secrets/nvidia
+              readOnly: true
+            - name: openshell-oidc
+              mountPath: /var/run/secrets/openshell-oidc
+              readOnly: true
+            - name: gateway-ca
+              mountPath: /etc/openshell/gateway-ca
+              readOnly: true
+            - name: provider-profile
+              mountPath: /etc/openshell/profiles
+              readOnly: true
+            - name: bootstrap-script
+              mountPath: /opt/bootstrap
+              readOnly: true
+            - name: home
+              mountPath: /home/bootstrap
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # The key: whole-directory mount (no subPath) so kubelet refreshes it.
+        # With fsGroup 65532 the kubelet adds group read: the file is
+        # effectively 0440 root:65532 (owner root, readable by this pod's
+        # group, no world bits). Without fsGroup it would be 0400 root:root
+        # and unreadable to the non-root container.
+        - name: nvidia-api-key
+          secret:
+            secretName: nvidia-api-key
+            defaultMode: 0400
+            items:
+              - key: api-key
+                path: api-key
+        # OIDC client secret for the gateway login (only when OIDC_ISSUER is set).
+        - name: openshell-oidc
+          secret:
+            secretName: openshell-provider-bootstrap-oidc
+            defaultMode: 0400
+            optional: true
+        # Private CA of the gateway TLS certificate (public data, a ConfigMap).
+        - name: gateway-ca
+          configMap:
+            name: openshell-gateway-ca
+            optional: true
+        # sandbox/providers/hermes-nvidia.yaml, imported if the gateway lacks it.
+        - name: provider-profile
+          configMap:
+            name: hermes-nvidia-profile
+            optional: true
+        - name: bootstrap-script
+          configMap:
+            name: hermes-provider-bootstrap-script
+            defaultMode: 0555
+        # CLI state (gateway metadata, OIDC token): memory-backed, dies with the pod.
+        - name: home
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi

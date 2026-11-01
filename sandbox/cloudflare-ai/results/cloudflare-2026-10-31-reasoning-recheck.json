@@ -1,0 +1,484 @@
+{
+  "started": "2026-10-31 11:31:10",
+  "args": {
+    "models": "@cf/qwen/qwen3-30b-a3b-fp8,@cf/google/gemma-4-26b-a4b-it,@cf/zai-org/glm-4.7-flash",
+    "rounds": 3,
+    "max_tokens": 1500,
+    "rpm": 20.0,
+    "out_dir": "results",
+    "stamp": "2026-10-31-reasoning-recheck",
+    "list": false
+  },
+  "catalogue": [
+    {
+      "id": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+      "beta": false,
+      "function_calling": false,
+      "context": "128000",
+      "price": "0.351 per M input tokens; 0.555 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/cloudflare/clairic",
+      "beta": false,
+      "function_calling": false,
+      "context": "65536",
+      "price": "0.1 per M input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/cloudflare/clef",
+      "beta": false,
+      "function_calling": false,
+      "context": "65536",
+      "price": "0.24 per M input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/cloudflare/clef-flash",
+      "beta": false,
+      "function_calling": false,
+      "context": "24576",
+      "price": "0.038 per M input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/cloudflare/clef-omni",
+      "beta": false,
+      "function_calling": false,
+      "context": "65536",
+      "price": "0.15 per M input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/daily-co/phonellm-mini-alpha-2",
+      "beta": false,
+      "function_calling": true,
+      "context": "262140",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+      "beta": false,
+      "function_calling": false,
+      "context": "80000",
+      "price": "0.497 per M input tokens; 4.881 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "0.44 per M input tokens; 1.32 per M output tokens; 0.014 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-v4-pro-0813",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "1.32 per M input tokens; 3.96 per M output tokens; 0.044 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "0.3 per M input tokens; 1.2 per M output tokens; 0.006 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/google/gemma-2b-it-lora",
+      "beta": true,
+      "function_calling": false,
+      "context": "8192",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/google/gemma-4-26b-a4b-it",
+      "beta": false,
+      "function_calling": true,
+      "context": "256000",
+      "price": "0.1 per M input tokens; 0.3 per M output tokens; 0.05 per M cached input tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/google/gemma-7b-it-lora",
+      "beta": true,
+      "function_calling": false,
+      "context": "3500",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/ibm-granite/granite-4.0-h-micro",
+      "beta": false,
+      "function_calling": true,
+      "context": "131000",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+      "beta": true,
+      "function_calling": false,
+      "context": "8192",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-3.1-8b-instruct-fp8",
+      "beta": false,
+      "function_calling": false,
+      "context": "32000",
+      "price": "0.152 per M input tokens; 0.287 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-3.2-11b-vision-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "128000",
+      "price": "0.0485 per M input tokens; 0.676 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-3.2-1b-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "60000",
+      "price": "0.027 per M input tokens; 0.201 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-3.2-3b-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "80000",
+      "price": "0.0509 per M input tokens; 0.335 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "beta": false,
+      "function_calling": true,
+      "context": "24000",
+      "price": "0.293 per M input tokens; 2.253 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-4-scout-17b-16e-instruct",
+      "beta": false,
+      "function_calling": true,
+      "context": "131000",
+      "price": "0.27 per M input tokens; 0.85 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/meta/llama-guard-3-8b",
+      "beta": false,
+      "function_calling": false,
+      "context": "131072",
+      "price": "0.484 per M input tokens; 0.03 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/mistral/mistral-7b-instruct-v0.2-lora",
+      "beta": false,
+      "function_calling": false,
+      "context": "15000",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "beta": false,
+      "function_calling": true,
+      "context": "128000",
+      "price": "0.351 per M input tokens; 0.555 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/moonshotai/kimi-k2.6",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "0.95 per M input tokens; 4 per M output tokens; 0.16 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/moonshotai/kimi-k2.7-code",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "0.95 per M input tokens; 4 per M output tokens; 0.19 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/nvidia/nemotron-3-120b-a12b",
+      "beta": false,
+      "function_calling": true,
+      "context": "256000",
+      "price": "0.5 per M input tokens; 1.5 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/openai/gpt-oss-120b",
+      "beta": false,
+      "function_calling": true,
+      "context": "128000",
+      "price": "0.35 per M input tokens; 0.75 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/openai/gpt-oss-20b",
+      "beta": false,
+      "function_calling": true,
+      "context": "128000",
+      "price": "0.2 per M input tokens; 0.3 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/qwen/qwen2.5-coder-32b-instruct",
+      "beta": false,
+      "function_calling": false,
+      "context": "32768",
+      "price": "0.66 per M input tokens; 1 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/qwen/qwen3-30b-a3b-fp8",
+      "beta": false,
+      "function_calling": true,
+      "context": "32768",
+      "price": "0.0509 per M input tokens; 0.335 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/qwen/qwen3.8-27b",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "0.45 per M input tokens; 3.2 per M output tokens; 0.05 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/qwen/qwq-32b",
+      "beta": false,
+      "function_calling": false,
+      "context": "24000",
+      "price": "0.66 per M input tokens; 1 per M output tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/swiss-ai/apertus-v1.5-8b",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/utter-project/eurollm-9b-it",
+      "beta": false,
+      "function_calling": true,
+      "context": "32000",
+      "price": null,
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/zai-org/glm-4.7-flash",
+      "beta": false,
+      "function_calling": true,
+      "context": "131072",
+      "price": "0.0605 per M input tokens; 0.4 per M output tokens",
+      "deprecated": false,
+      "status": "available"
+    },
+    {
+      "id": "@cf/zai-org/glm-5.2",
+      "beta": false,
+      "function_calling": true,
+      "context": "262144",
+      "price": "1.4 per M input tokens; 4.4 per M output tokens; 0.26 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/zai-org/glm-5.3",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "1.4 per M input tokens; 4.4 per M output tokens; 0.26 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    },
+    {
+      "id": "@cf/zai-org/glm-5.3-flash",
+      "beta": false,
+      "function_calling": true,
+      "context": "1048576",
+      "price": "0.15 per M input tokens; 0.5 per M output tokens; 0.03 per M cached input tokens",
+      "deprecated": false,
+      "status": null
+    }
+  ],
+  "results": [
+    {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        },
+        {
+          "correct": true,
+          "tool": true
+        },
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        2.6479424479985028,
+        3.6380711550009437,
+        1.754141225006606,
+        6.133382667998376,
+        4.244691136002075,
+        0.8670879889978096,
+        4.192615074003697,
+        5.4342912009960855,
+        1.22799813200254
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 1968,
+      "neurons": 38.14545559883118,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 3.6380711550009437,
+      "max": 6.133382667998376,
+      "passed": true
+    },
+    {
+      "model": "@cf/qwen/qwen3-30b-a3b-fp8",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        },
+        {
+          "correct": true,
+          "tool": true
+        },
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        4.238488620998396,
+        1.6386190430057468,
+        1.4085334129995317,
+        2.363164248999965,
+        1.6473441039997851,
+        1.0018632680003066,
+        2.712691114000336,
+        1.6532307320012478,
+        1.7265449890037416
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 3422,
+      "neurons": 69.77466201782227,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 1.6532307320012478,
+      "max": 4.238488620998396,
+      "passed": true
+    },
+    {
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "rounds": [
+        {
+          "correct": true,
+          "tool": true
+        },
+        {
+          "correct": true,
+          "tool": true
+        },
+        {
+          "correct": true,
+          "tool": true
+        }
+      ],
+      "secs": [
+        4.739287624004646,
+        2.2531581400035066,
+        2.325224205000268,
+        6.543799888997455,
+        2.0975349249929423,
+        2.271698960001231,
+        6.438631634999183,
+        1.6385126410023076,
+        1.5067770540044876
+      ],
+      "errors": [],
+      "notes": [],
+      "tokens": 2732,
+      "neurons": 57.29720000000001,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "p50": 2.271698960001231,
+      "max": 6.543799888997455,
+      "passed": true
+    }
+  ],
+  "result": "completed",
+  "probe_neurons": 1.0592086421966553,
+  "probe_tokens": 68,
+  "finished": "2026-10-31 11:33:00",
+  "requests_sent": 31,
+  "r429": 0
+}

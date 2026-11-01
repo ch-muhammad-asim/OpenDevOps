@@ -1,0 +1,56 @@
+# 👤 Least-privilege identity for the OpenShell provider bootstrap Job.
+#
+# - The ServiceAccount does not auto-mount an API token: the Job reads the key
+#   from a Secret *volume*, which the kubelet mounts on the pod's behalf, so
+#   the pod itself needs no Kubernetes API access at all.
+# - The Role still pins this identity to `get` on exactly ONE Secret
+#   (resourceNames: nvidia-api-key). No list/watch (list would return every
+#   Secret's data in the namespace), no create/update/delete. It bounds any
+#   API-based reader you add later (for example a sidecar that watches the
+#   Secret) and lets you audit the grant with `kubectl auth can-i`.
+#
+# Verify (expect yes / no / no):
+#   kubectl auth can-i get secret/nvidia-api-key -n hermes \
+#     --as=system:serviceaccount:hermes:hermes-provider-bootstrap
+#   kubectl auth can-i list secrets -n hermes \
+#     --as=system:serviceaccount:hermes:hermes-provider-bootstrap
+#   kubectl auth can-i get secret/other -n hermes \
+#     --as=system:serviceaccount:hermes:hermes-provider-bootstrap
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes-provider-bootstrap
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: hermes-provider-bootstrap
+    app.kubernetes.io/part-of: hermes-sandbox
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nvidia-api-key-reader
+  namespace: hermes
+  labels:
+    app.kubernetes.io/part-of: hermes-sandbox
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["nvidia-api-key"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hermes-provider-bootstrap-nvidia-api-key
+  namespace: hermes
+  labels:
+    app.kubernetes.io/part-of: hermes-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nvidia-api-key-reader
+subjects:
+  - kind: ServiceAccount
+    name: hermes-provider-bootstrap
+    namespace: hermes

@@ -1,0 +1,1132 @@
+{
+  "started": "2026-10-30 08:02:44",
+  "args": {
+    "models": null,
+    "requests": 3,
+    "out_dir": "sandbox/benchmarks",
+    "rpm": 30,
+    "max_tokens": 300,
+    "stamp": null,
+    "confirm_of": null
+  },
+  "catalogue": [
+    {
+      "id": "01-ai/yi-large",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '23bd454d-b225-49a3-8118-582a62fc51b8': Not found for account '***'"
+    },
+    {
+      "id": "adept/fuyu-8b",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "ai21labs/jamba-1.5-large-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '6497fc2b-7ff8-4019-8946-123dccbfc863': Not found for account '***'"
+    },
+    {
+      "id": "aisingapore/sea-lion-7b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '02f84bf4-c1a1-489b-a9de-ac3e8dcdec14': Not found for account '***'"
+    },
+    {
+      "id": "bigcode/starcoder2-15b",
+      "status": "error",
+      "detail": "HTTP 404: 404 page not found\n"
+    },
+    {
+      "id": "databricks/dbrx-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '3d6c2ff8-8bfc-4d10-8fd0-b7337288e869': Not found for account '***'"
+    },
+    {
+      "id": "deepseek-ai/deepseek-coder-6.7b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'e503b15c-62b0-4d69-b532-a88f0bfa2656': Not found for account '***'"
+    },
+    {
+      "id": "deepseek-ai/deepseek-v4.1-flash",
+      "status": "timeout",
+      "detail": "timeout: The read operation timed out"
+    },
+    {
+      "id": "google/codegemma-1.1-7b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'e2d298c5-204e-4213-b921-9f492cc9011b': Not found for account '***'"
+    },
+    {
+      "id": "google/codegemma-7b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '7dfc10a8-3cc4-448e-97c1-2213308dc222': Not found for account '***'"
+    },
+    {
+      "id": "google/deplot",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "google/diffusiongemma-26b-a4b-it",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "google/gemma-2b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '04174188-f742-4069-9e72-d77c2b77d3cb': Not found for account '***'"
+    },
+    {
+      "id": "google/gemma-3-12b-it",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'ee47df99-c92b-4dc9-b3a7-f3fb0f087b73': Not found for account '***'"
+    },
+    {
+      "id": "google/gemma-3-4b-it",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'c322f327-55a3-4af3-a91f-c757e2b8b135': Not found for account '***'"
+    },
+    {
+      "id": "google/gemma-4-31b-it",
+      "status": "timeout",
+      "detail": "timeout: The read operation timed out"
+    },
+    {
+      "id": "google/recurrentgemma-2b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '2f495340-a99f-4b4b-89bd-1beb003dd896': Not found for account '***'"
+    },
+    {
+      "id": "ibm/granite-3.0-3b-a800m-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '67324577-3f91-4aa6-b750-97468262530d': Not found for account '***'"
+    },
+    {
+      "id": "ibm/granite-3.0-8b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '5a24a4f0-2d59-46b3-ac65-42307f2633d1': Not found for account '***'"
+    },
+    {
+      "id": "ibm/granite-34b-code-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '4df48b4f-e3c5-4ade-82c7-c06b65e25d18': Not found for account '***'"
+    },
+    {
+      "id": "ibm/granite-8b-code-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'af7b6f03-f615-4c5f-86c6-388bd35cede0': Not found for account '***'"
+    },
+    {
+      "id": "meta/codellama-70b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'f6b06895-d073-4714-8bb2-26c09e9f6597': Not found for account '***'"
+    },
+    {
+      "id": "meta/llama-3.2-11b-vision-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function id '9fa6fd04-ba2c-4bb3-90b7-ede407a9290f' version 'null': Specified function in account '***'2fddadfb-7e76-4c8a-9b82-f7d3fab94471': Not found for account '***'"
+    },
+    {
+      "id": "meta/muse-glimmer-30b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "microsoft/kosmos-2",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "microsoft/phi-3-vision-128k-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '20f2537e-8593-4eb9-ad40-60eee3bbaa55': Not found for account '***'"
+    },
+    {
+      "id": "microsoft/phi-3.5-moe-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'e6cab982-62f4-481e-9a7a-3dedb87dbd01': Not found for account '***'"
+    },
+    {
+      "id": "minimaxai/minimax-m3.1-flash",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "mistralai/codestral-22b-instruct-v0.1",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '9a10b012-e6df-46fd-83b2-700dcbc75814': Not found for account '***'"
+    },
+    {
+      "id": "mistralai/mistral-7b-instruct-v0.3",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'cd89bd68-13e3-47a9-861e-9a62e6e14b05': Not found for account '***'"
+    },
+    {
+      "id": "mistralai/mistral-large",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '767b5b9a-3f9d-4c1d-86e8-fa861988cee7': Not found for account '***'"
+    },
+    {
+      "id": "mistralai/mistral-large-2-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '7fadd4de-e22a-48e4-90e9-f02ef14a74b9': Not found for account '***'"
+    },
+    {
+      "id": "mistralai/mistral-large-4-1t-a52b",
+      "status": "timeout",
+      "detail": "timeout: The read operation timed out"
+    },
+    {
+      "id": "mistralai/mixtral-8x22b-v0.1",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '39655fc1-9ebc-4b24-963e-6915ea6680de': Not found for account '***'"
+    },
+    {
+      "id": "moonshotai/kimi-k2.6",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '23d4f03a-b8a6-4adb-a183-7daa083a09cc': Not found for account '***'"
+    },
+    {
+      "id": "nv-mistralai/mistral-nemo-12b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'f8c05193-d2e2-4f0f-bb4d-7ad70070002b': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/ai-synthetic-video-detector",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "nvidia/cosmos-reason2-8b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'e199b43b-6c62-4a63-9379-f60e1a953236': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/embed-qa-4",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/ising-calibration-1.5-31b",
+      "status": "timeout",
+      "detail": "timeout: The read operation timed out"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-51b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '5beba52c-65a9-4f46-8cd9-656689a1b205': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '9b96341b-9791-4db9-a00d-4e43aa192a39': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '84bf12ff-edbd-4435-baea-0fa6a7453d2e': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/llama-nemotron-embed-vl-1b-v2",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/llama3-chatqa-1.5-70b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '46594287-38b9-481c-a37f-baa02f2d3ba1': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '5aa06dd2-0a02-4a5d-be4c-bf88e956965d': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/nemotron-3-embed-1b",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'ac74040f-9fc9-4c5e-ac74-279ba5161d69': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-bolt-e4b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-content-safety",
+      "status": "non-chat",
+      "detail": "guard/safety"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-embed-1b",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-embed-8b",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "nvidia/nemotron-4-340b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'b0fcd392-e905-4ab4-8eb9-aeae95c30b37': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/nemotron-4-340b-reward",
+      "status": "non-chat",
+      "detail": "reward"
+    },
+    {
+      "id": "nvidia/nemotron-nano-3-30b-a3b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '2b2dcd47-c858-425a-9c04-4cacf2eac993': Not found for account '***'"
+    },
+    {
+      "id": "nvidia/nemotron-parse",
+      "status": "non-chat",
+      "detail": "parse/ocr"
+    },
+    {
+      "id": "nvidia/nemotron-parse-2.0",
+      "status": "non-chat",
+      "detail": "parse/ocr"
+    },
+    {
+      "id": "nvidia/neva-22b",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "nvidia/nv-embedqa-mistral-7b-v2",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/nvclip",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "nvidia/riva-translate-4b-instruct",
+      "status": "non-chat",
+      "detail": "translate"
+    },
+    {
+      "id": "nvidia/riva-translate-4b-instruct-v2",
+      "status": "non-chat",
+      "detail": "translate"
+    },
+    {
+      "id": "nvidia/vila",
+      "status": "non-chat",
+      "detail": "vision-only"
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "status": "available",
+      "detail": null
+    },
+    {
+      "id": "poolside/laguna-xs-2.1",
+      "status": "error",
+      "detail": "HTTP 200: {\"message\": \"ResourceExhausted: Worker local total request limit reached (94/32)\", \"type\": \"internal_server_error\", \"code\": 500}"
+    },
+    {
+      "id": "snowflake/arctic-embed-l",
+      "status": "non-chat",
+      "detail": "embedding"
+    },
+    {
+      "id": "stepfun-ai/step-5-preview",
+      "status": "timeout",
+      "detail": "stream read timeout"
+    },
+    {
+      "id": "writer/palmyra-creative-122b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '00bdd0a7-e38f-4423-9007-c4d8730a3f78': Not found for account '***'"
+    },
+    {
+      "id": "writer/palmyra-fin-70b-32k",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '316490c6-f1ed-41f9-9da8-3fa9e885653b': Not found for account '***'"
+    },
+    {
+      "id": "writer/palmyra-med-70b",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'aab71274-5281-4941-b0b8-20f339d1fc7e': Not found for account '***'"
+    },
+    {
+      "id": "writer/palmyra-med-70b-32k",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function 'd6faa974-3591-49a4-963d-97221d074b2e': Not found for account '***'"
+    },
+    {
+      "id": "z-ai/glm-5.3-flash",
+      "status": "timeout",
+      "detail": "timeout: The read operation timed out"
+    },
+    {
+      "id": "zyphra/zamba2-7b-instruct",
+      "status": "not-enabled",
+      "detail": "{\"status\":404,\"title\":\"Not Found\",\"detail\":\"Function '8378ffb2-51b0-4140-9684-dda1889373e6': Not found for account '***'"
+    }
+  ],
+  "results": [
+    {
+      "model": "google/diffusiongemma-26b-a4b-it",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": false,
+          "follow_up": false
+        }
+      ],
+      "ttft": [
+        9.097633803001372,
+        1.0523297309991904,
+        21.03755228699447,
+        12.806359710004472,
+        3.37150585600466,
+        7.2353765020016,
+        4.787871721993724,
+        0.8891433249955298
+      ],
+      "total": [
+        9.097661311003321,
+        1.052368992997799,
+        21.03757678999682,
+        12.806381476999377,
+        3.371552465003333,
+        7.235399277000397,
+        4.7878943159958,
+        0.8891836699986015
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [
+        "no tool_call returned"
+      ],
+      "requests": 9,
+      "correct_rate": 1.0,
+      "tool_rate": 0.6666666666666666,
+      "tool_call_only_rate": 0.6666666666666666,
+      "ttft_p50": 6.011624111997662,
+      "ttft_p95": 18.15663488504797,
+      "total_p50": 6.011646796498098,
+      "total_p95": 18.156658430447717,
+      "qualified": false
+    },
+    {
+      "model": "meta/muse-glimmer-30b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        10.968038444996637,
+        5.525300399000116,
+        8.191227973999048,
+        3.452259318997676,
+        2.7952696639986243,
+        4.297301480000897,
+        6.0416127019998385,
+        5.22325609499967,
+        15.247406460999628
+      ],
+      "total": [
+        10.968121155994595,
+        5.525398963000043,
+        10.314050923996547,
+        3.598206570997718,
+        2.9564274590011337,
+        5.759978212001442,
+        6.245289751997916,
+        5.22335584499524,
+        15.564204079993942
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [],
+      "requests": 10,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 5.525300399000116,
+      "ttft_p95": 13.53565925459843,
+      "total_p50": 5.759978212001442,
+      "total_p95": 13.725770910394202,
+      "qualified": true
+    },
+    {
+      "model": "minimaxai/minimax-m3.1-flash",
+      "rounds": [
+        {
+          "correct": false,
+          "tool_call": false,
+          "follow_up": false
+        }
+      ],
+      "ttft": [],
+      "total": [],
+      "errors": 1,
+      "timeouts": 1,
+      "r429": 0,
+      "notes": [
+        "stopped after round 1 (failure)",
+        "sum timeout",
+        "tool err None: url error: [Errno -3] Temporary failure in name resolution"
+      ],
+      "requests": 3,
+      "correct_rate": 0.0,
+      "tool_rate": 0.0,
+      "tool_call_only_rate": 0.0,
+      "ttft_p50": null,
+      "ttft_p95": null,
+      "total_p50": null,
+      "total_p95": null,
+      "qualified": false
+    },
+    {
+      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": false,
+          "follow_up": false
+        }
+      ],
+      "ttft": [
+        45.97545889399771
+      ],
+      "total": [
+        48.870250164000026
+      ],
+      "errors": 0,
+      "timeouts": 1,
+      "r429": 0,
+      "notes": [
+        "stopped after round 1 (failure)",
+        "tool timeout"
+      ],
+      "requests": 3,
+      "correct_rate": 1.0,
+      "tool_rate": 0.0,
+      "tool_call_only_rate": 0.0,
+      "ttft_p50": 45.97545889399771,
+      "ttft_p95": 45.97545889399771,
+      "total_p50": 48.870250164000026,
+      "total_p95": 48.870250164000026,
+      "qualified": false
+    },
+    {
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        6.822063740997692,
+        1.271243596005661,
+        1.8801013010015595,
+        5.333700174000114,
+        2.1720338009981788,
+        1.3869929730062722,
+        1.0337968029998592,
+        5.835996458998125,
+        1.4673432359995786
+      ],
+      "total": [
+        6.848827713998617,
+        1.5398594040016178,
+        2.6292986370026483,
+        5.358207577999565,
+        2.19601624400093,
+        1.8263535980004235,
+        1.0627602669992484,
+        5.836163961997954,
+        2.282297842000844
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [],
+      "requests": 10,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 1.8801013010015595,
+      "ttft_p95": 6.427636828197865,
+      "total_p50": 2.282297842000844,
+      "total_p95": 6.443762213198351,
+      "qualified": true
+    },
+    {
+      "model": "nvidia/nemotron-3.5-bolt-e4b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        0.4266716530037229,
+        0.8832655110018095,
+        0.4057698809992871,
+        0.446051068000088,
+        0.8140779550012667,
+        2.526683905001846,
+        0.3703777970004012,
+        0.8260208069987129,
+        0.4416254470052081
+      ],
+      "total": [
+        0.5013962439988973,
+        0.8834064990005572,
+        0.9256171439992613,
+        0.4763066980012809,
+        0.8141924720039242,
+        2.7535884989993065,
+        0.43999083699600305,
+        0.826118185002997,
+        0.6656235769987688
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [],
+      "requests": 10,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 0.446051068000088,
+      "ttft_p95": 1.869316547401831,
+      "total_p50": 0.8141924720039242,
+      "total_p95": 2.022399956999288,
+      "qualified": true
+    },
+    {
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "rounds": [
+        {
+          "correct": false,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        0.8943643720049295,
+        5.919891417004692
+      ],
+      "total": [
+        3.455056440005137,
+        0.8945256020015222,
+        6.5014546169986716
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [
+        "stopped after round 1 (failure)",
+        "sum: empty content, tokens spent on reasoning"
+      ],
+      "requests": 4,
+      "correct_rate": 0.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 3.4071278945048107,
+      "ttft_p95": 5.668615064754704,
+      "total_p50": 3.455056440005137,
+      "total_p95": 6.196814799299318,
+      "qualified": false
+    },
+    {
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        1.4676969880019897,
+        0.7444665570001234,
+        0.6778430960039259,
+        2.0546837170040817,
+        6.545441939997545,
+        5.628467074995569,
+        5.966954721996444,
+        1.0652218229952268,
+        0.7462341069985996
+      ],
+      "total": [
+        1.4877928839996457,
+        0.7446923980023712,
+        0.8158389340023859,
+        2.054765064000094,
+        6.545590693000122,
+        6.052004038996529,
+        5.986980138994113,
+        1.0653102779979235,
+        0.9289134080026997
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [],
+      "requests": 10,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 1.4676969880019897,
+      "ttft_p95": 6.314047052797105,
+      "total_p50": 1.4877928839996457,
+      "total_p95": 6.348156031398685,
+      "qualified": true
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "rounds": [
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        },
+        {
+          "correct": true,
+          "tool_call": true,
+          "follow_up": true
+        }
+      ],
+      "ttft": [
+        17.26641167300113,
+        5.4256187949940795,
+        5.149665512995853,
+        5.86819231199479,
+        0.8781564730015816,
+        6.028148422003142,
+        1.5071900490002008,
+        1.0335515160040813,
+        3.4356011929994565
+      ],
+      "total": [
+        17.29219265300344,
+        5.498374889997649,
+        5.834904893999919,
+        5.8886511889941175,
+        1.0262572709980304,
+        6.823289726999064,
+        1.549005009001121,
+        1.4432930420007324,
+        4.034982018005394
+      ],
+      "errors": 0,
+      "timeouts": 0,
+      "r429": 0,
+      "notes": [],
+      "requests": 10,
+      "correct_rate": 1.0,
+      "tool_rate": 1.0,
+      "tool_call_only_rate": 1.0,
+      "ttft_p50": 5.149665512995853,
+      "ttft_p95": 12.771106372601931,
+      "total_p50": 5.498374889997649,
+      "total_p95": 13.104631482601686,
+      "qualified": true
+    }
+  ],
+  "events": [],
+  "requests_sent": 120,
+  "r429": 0,
+  "finished": "2026-10-30 08:17:07",
+  "exit_reason": "completed",
+  "confirmation": {
+    "files": [
+      "nvidia-2026-10-30-confirm.json",
+      "nvidia-2026-10-30-confirm-2.json"
+    ],
+    "args": {
+      "models": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "requests": 5,
+      "out_dir": "sandbox/benchmarks",
+      "rpm": 30,
+      "max_tokens": 300,
+      "stamp": null,
+      "confirm_of": "sandbox/benchmarks/nvidia-2026-10-30.json"
+    },
+    "results": [
+      {
+        "model": "meta/muse-glimmer-30b",
+        "rounds": [
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          }
+        ],
+        "ttft": [
+          20.103113104996737,
+          17.72284791900165,
+          16.02126502199826,
+          8.388383976998739,
+          3.942750922993582,
+          2.8967906839970965,
+          4.2625699039999745,
+          4.931375462998403,
+          4.306508560999646,
+          3.383644199006085,
+          3.679524216997379,
+          4.2136913889989955,
+          5.1123889009977574,
+          2.132372068997938,
+          8.467634537999402
+        ],
+        "total": [
+          20.544634682999458,
+          17.798600796006212,
+          17.37263151699881,
+          8.509298457000114,
+          4.056584710000607,
+          3.5101176499956637,
+          4.377010814998357,
+          5.050689779003733,
+          5.40724414500437,
+          3.38368666000315,
+          3.916588227999455,
+          5.303671447996749,
+          5.596195439000439,
+          2.255082355994091,
+          9.624791679998452
+        ],
+        "errors": 0,
+        "timeouts": 0,
+        "r429": 0,
+        "notes": [],
+        "requests": 16,
+        "correct_rate": 1.0,
+        "tool_rate": 1.0,
+        "tool_call_only_rate": 1.0,
+        "ttft_p50": 4.306508560999646,
+        "ttft_p95": 18.43692747480018,
+        "total_p50": 5.303671447996749,
+        "total_p95": 18.622410962104187,
+        "qualified": true
+      },
+      {
+        "model": "openai/gpt-oss-20b",
+        "rounds": [
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          }
+        ],
+        "ttft": [
+          3.5100115979948896,
+          1.1336643829999957,
+          1.2483789230027469,
+          3.755232490002527,
+          1.6973927629951504,
+          0.978514117996383,
+          2.3523346450019744,
+          1.867364694000571,
+          2.065737837998313,
+          1.9895634790009353,
+          1.1290256430002046,
+          1.6716270520046237,
+          2.3645514950039797,
+          1.9995614119980019,
+          1.7086252250010148
+        ],
+        "total": [
+          3.562617755997053,
+          1.3650310200027889,
+          2.0431473450007616,
+          3.8367280700040283,
+          2.0946965989933233,
+          1.6419773160014302,
+          2.352555156998278,
+          2.1783573540014913,
+          2.629374096999527,
+          2.0313938649997,
+          1.419227429003513,
+          2.4761845090033603,
+          2.4013536170023144,
+          2.135981471998093,
+          2.521311386000889
+        ],
+        "errors": 0,
+        "timeouts": 0,
+        "r429": 0,
+        "notes": [],
+        "requests": 16,
+        "correct_rate": 1.0,
+        "tool_rate": 1.0,
+        "tool_call_only_rate": 1.0,
+        "ttft_p50": 1.867364694000571,
+        "ttft_p95": 3.583577865597181,
+        "total_p50": 2.1783573540014913,
+        "total_p95": 3.6448508501991457,
+        "qualified": true
+      },
+      {
+        "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "rounds": [
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          },
+          {
+            "correct": true,
+            "tool_call": true,
+            "follow_up": true
+          }
+        ],
+        "ttft": [
+          1.1512200829965877,
+          1.0225486410054145,
+          0.6195965279985103,
+          1.672118534996116,
+          0.8871418089984218,
+          0.5915912900018157,
+          1.8671666670052218,
+          0.7226882129980368,
+          0.8269919390004361,
+          1.0168856230011443,
+          0.9315504050027812,
+          0.575942647003103,
+          0.588837176997913,
+          0.7125245989955147,
+          1.0961460789985722
+        ],
+        "total": [
+          1.1710465759970248,
+          1.0424205500021344,
+          0.7699318730010418,
+          1.691155822998553,
+          0.9065706019973732,
+          0.7378942139985156,
+          1.8870615800042287,
+          0.7426568750015576,
+          0.9928203980016406,
+          1.0352107579965377,
+          0.9514542590040946,
+          0.7201833630024339,
+          0.6245804380014306,
+          0.7305830019977293,
+          1.2606496129956213
+        ],
+        "errors": 0,
+        "timeouts": 0,
+        "r429": 0,
+        "notes": [],
+        "requests": 16,
+        "correct_rate": 1.0,
+        "tool_rate": 1.0,
+        "tool_call_only_rate": 1.0,
+        "ttft_p50": 0.8871418089984218,
+        "ttft_p95": 1.730632974598848,
+        "total_p50": 0.9514542590040946,
+        "total_p95": 1.7499275501002558,
+        "qualified": true
+      }
+    ],
+    "probes": [
+      {
+        "id": "meta/muse-glimmer-30b",
+        "status": "available",
+        "detail": null
+      },
+      {
+        "id": "nvidia/nemotron-3.5-bolt-e4b",
+        "status": "timeout",
+        "detail": "timeout: The read operation timed out"
+      },
+      {
+        "id": "openai/gpt-oss-20b",
+        "status": "available",
+        "detail": null
+      },
+      {
+        "id": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "status": "available",
+        "detail": null
+      }
+    ],
+    "requests_sent": 51,
+    "r429": 0,
+    "events": [],
+    "reason": "completed"
+  },
+  "requests_sent_incl_confirmation": 171
+}

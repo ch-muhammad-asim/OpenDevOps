@@ -1,0 +1,43 @@
+# Lead SRE "fixer" agent: the same Pod as ../kubernetes/ (agent + Claude Code CLI bridge sidecar, same images and hardening),
+# renamed to oda-agent-fixer, running as ServiceAccount oda-fixer (../k8s-lab/rbac-fixer.yaml) with
+# write-capable MCP tools and agent-sre-fixer.yaml mounted from a ConfigMap (no image rebuild).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../kubernetes
+nameSuffix: -fixer
+# Relabel to app=oda-agent-fixer. Selectors are patched explicitly below: `includeSelectors: true` would also
+# rewrite the NetworkPolicy's CoreDNS peer selector (kube-dns pods don't carry app=oda-agent-fixer) and break DNS.
+labels:
+  - pairs: {app: oda-agent-fixer}
+    includeTemplates: true
+# Replaces the base's MCP ConfigMap with the fixer's MCP config AND agent config. Both ride on the base's
+# existing mcp-config volume (a ConfigMap generated only here wouldn't get its hashed name rewritten in the
+# Deployment). Any change gets a new hashed name and rolls the Pod.
+configMapGenerator:
+  - name: oda-agent-mcp
+    behavior: replace
+    files:
+      - config.toml=mcp-config.toml
+      - agent-sre-fixer.yaml
+patches:
+  - target: {kind: Deployment, name: oda-agent}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/serviceAccountName
+        value: oda-fixer
+      - op: replace
+        path: /spec/template/spec/containers/0/args/2
+        value: /etc/oda-agent/agent-sre-fixer.yaml
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value: {name: mcp-config, mountPath: /etc/oda-agent/agent-sre-fixer.yaml, subPath: agent-sre-fixer.yaml, readOnly: true}
+  - target: {kind: Deployment, name: oda-agent}
+    patch: |-
+      - {op: replace, path: /spec/selector/matchLabels/app, value: oda-agent-fixer}
+  - target: {kind: Service, name: oda-agent}
+    patch: |-
+      - {op: replace, path: /spec/selector/app, value: oda-agent-fixer}
+  - target: {kind: NetworkPolicy}
+    patch: |-
+      - {op: replace, path: /spec/podSelector/matchLabels/app, value: oda-agent-fixer}
