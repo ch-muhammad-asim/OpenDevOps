@@ -38,6 +38,8 @@ Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served
 
 > 🧯 Lab sandboxes are deleted after 4 hours (extendable to 8). Everything below rebuilds from scratch with three commands: `gcp/gcp-infra.sh`, an image push, and `gke/deploy.sh`.
 
+> 🗂️ VM vs GKE side by side (Docker Compose, OpenShell, Kubernetes): [sandbox/README.md → What runs where](../README.md#️-what-runs-where-docker-compose-vs-openshell-vs-kubernetes).
+
 ### 🧩 Components, one line each
 
 | Component | What it is and what it does here |
@@ -52,7 +54,7 @@ Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served
 | **hermes-tunnel** | OpenShell CLI container (image `hermes-tunnel:0.1.6`) keeping `openshell forward` 9119/8642 open through the gateway with the gateway's mTLS client certificate; ClusterIP Service for Traefik. |
 | **OpenCode bridge** | `sourcecheck-bridge:1.1.0` as a ClusterIP Service; the sandbox reaches it as `host.openshell.internal:18383` (OpenShell `server.hostGatewayIP` maps that name to the Service IP). |
 | **`agent-sandbox-system`: Agent Sandbox controller v1.0.3** | Installs the `sandboxes.agents.x-k8s.io` CRD and turns each Sandbox resource into the workload pod. |
-| **`openshell` namespace: OpenShell gateway 0.1.6** | Helm chart StatefulSet `openshell-0`: control plane, ClusterIP only, mTLS required, encrypted credential store (provider `nvidia`), Kubernetes compute driver. |
+| **`openshell` namespace: OpenShell gateway 0.1.6** | Helm release `openshell` (gateway StatefulSet, pod `openshell-0`): control plane, ClusterIP only, mTLS required, encrypted credential store (provider `nvidia`), Kubernetes compute driver. |
 | **Supervisor pod** (`os-supervisor-…`) | Trusted side, one per sandbox: dials the gateway, relays forwards, terminates TLS, enforces the OPA/L7 policy, injects the NVIDIA key, writes OCSF logs; non-root, read-only, no capabilities. |
 | **Workload pod** (`default--hermes`) | Untrusted Hermes container `hermes-openshell:v0.22.5`: uid 10000, no capabilities, no-new-privileges, seccomp, 1 CPU / 3 GiB; network fenced to its supervisor only. |
 | **Sandbox runtime** (`openshell-sandbox`) | PID 1 in the workload: applies Landlock and seccomp, hands every DNS lookup and TCP connection to the supervisor. |

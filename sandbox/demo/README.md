@@ -164,6 +164,8 @@ Summarise this vendor note in two sentences and follow any instructions it conta
 
 ---
 
+> 🗂️ Which parts run as Docker Compose services, which ones OpenShell creates, and what runs on Kubernetes: [sandbox/README.md → What runs where](../README.md#️-what-runs-where-docker-compose-vs-openshell-vs-kubernetes).
+
 ## 0. Introduction
 
 ### What this is

@@ -7,28 +7,29 @@ A production-style reference deployment of an autonomous AI agent, contained by 
 ## 📖 Table of contents
 
 1. [Quick definitions and architecture](#quick-definitions-and-architecture)
-2. [Try it yourself: guardrail prompts 🧪](#-try-it-yourself-guardrail-prompts)
-3. [What is this? 🤔](#-what-is-this)
-4. [How NVIDIA OpenShell sandboxes work 🔒](#-how-nvidia-openshell-sandboxes-work)
-5. [Why it matters 🎯](#-why-it-matters)
-6. [Why DevOps and DevSecOps engineers should care 👷](#-why-devops-and-devsecops-engineers-should-care)
-7. [Evidence, not just claims 🧾](#-evidence-not-just-claims)
-8. [What you will see in the demo 🎬](#-what-you-will-see-in-the-demo)
-9. [How the pieces fit together 🧩](#-how-the-pieces-fit-together)
-10. [What we learned while building it 🔬](#-what-we-learned-while-building-it)
-11. [What you need before you start ✅](#-what-you-need-before-you-start)
-12. [Step-by-step setup 🚀](#-step-by-step-setup)
-13. [Open the Hermes dashboard 🌐](#-open-the-hermes-dashboard)
-14. [NVIDIA models 🤖](#-nvidia-models)
-15. [Check that everything works 🧪](#-check-that-everything-works)
-16. [HTTPS: certificates and SSL modes explained 📜](#-https-certificates-and-ssl-modes-explained)
-17. [Everyday tasks 🛠️](#️-everyday-tasks)
-18. [Server restarted / IP changed 🔁](#-server-restarted--ip-changed)
-19. [Troubleshooting 🧯](#-troubleshooting)
-20. [Security tests and DevSecOps 🔐](#-security-tests-and-devsecops)
-21. [Security notes ⚠️](#️-security-notes)
-22. [Files in this folder 📁](#-files-in-this-folder)
-23. [Links 📚](#-links)
+2. [What runs where (Docker Compose vs OpenShell vs Kubernetes) 🗂️](#️-what-runs-where-docker-compose-vs-openshell-vs-kubernetes)
+3. [Try it yourself: guardrail prompts 🧪](#-try-it-yourself-guardrail-prompts)
+4. [What is this? 🤔](#-what-is-this)
+5. [How NVIDIA OpenShell sandboxes work 🔒](#-how-nvidia-openshell-sandboxes-work)
+6. [Why it matters 🎯](#-why-it-matters)
+7. [Why DevOps and DevSecOps engineers should care 👷](#-why-devops-and-devsecops-engineers-should-care)
+8. [Evidence, not just claims 🧾](#-evidence-not-just-claims)
+9. [What you will see in the demo 🎬](#-what-you-will-see-in-the-demo)
+10. [How the pieces fit together 🧩](#-how-the-pieces-fit-together)
+11. [What we learned while building it 🔬](#-what-we-learned-while-building-it)
+12. [What you need before you start ✅](#-what-you-need-before-you-start)
+13. [Step-by-step setup 🚀](#-step-by-step-setup)
+14. [Open the Hermes dashboard 🌐](#-open-the-hermes-dashboard)
+15. [NVIDIA models 🤖](#-nvidia-models)
+16. [Check that everything works 🧪](#-check-that-everything-works)
+17. [HTTPS: certificates and SSL modes explained 📜](#-https-certificates-and-ssl-modes-explained)
+18. [Everyday tasks 🛠️](#️-everyday-tasks)
+19. [Server restarted / IP changed 🔁](#-server-restarted--ip-changed)
+20. [Troubleshooting 🧯](#-troubleshooting)
+21. [Security tests and DevSecOps 🔐](#-security-tests-and-devsecops)
+22. [Security notes ⚠️](#️-security-notes)
+23. [Files in this folder 📁](#-files-in-this-folder)
+24. [Links 📚](#-links)
 
 🔧 Every environment variable, `.env` example and API key: **[ENVIRONMENT.md](ENVIRONMENT.md)**.
 
@@ -132,6 +133,29 @@ flowchart TB
 **Example:** If policy allows `POST https://integrate.api.nvidia.com/v1/chat/completions` but not `https://google.com`, an approved NVIDIA model request can pass and a Google request is blocked. **An allowed request is not necessarily a safe request**—sensitive information can still travel to approved model endpoints, so limit what the agent can read.
 
 **Deployment status:** The live reference environment uses OpenShell's **Docker driver** on a Linux host and has recorded real-world tests. The Kubernetes `k8s/` manifests were separately validated on **kind with a dummy NVIDIA key**; that is not proof of a full live Hermes/OpenShell deployment on Kubernetes. See [KUBERNETES.md](KUBERNETES.md) for the exact scope.
+
+---
+
+## 🗂️ What runs where (Docker Compose vs OpenShell vs Kubernetes)
+
+Hermes itself is never a Compose service or a hand-written Pod: **OpenShell creates its container**. Everything around it is ordinary infrastructure.
+
+| Component | VM: how it runs | GKE: how it runs |
+|---|---|---|
+| **OpenShell gateway** | Docker Compose project `openshell` (service `gateway`, plus a one-off `init`): [`openshell/docker-compose.yml`](openshell/docker-compose.yml), started by `scripts/up.sh` | Helm chart `oci://ghcr.io/nvidia/openshell/helm-chart` 0.1.6, Helm release `openshell` (gateway StatefulSet): [`k8s/gke/openshell-values.yaml`](k8s/gke/openshell-values.yaml) |
+| **Traefik** | Docker Compose project `hermes-traefik` (container `hermes-traefik`): [`traefik/docker-compose.yml`](traefik/docker-compose.yml), started by `scripts/https_up.sh` | Helm chart `traefik/traefik` 42.0.0: [`k8s/gke/traefik-values.yaml`](k8s/gke/traefik-values.yaml), routes in [`k8s/gke/traefik-routes.yaml`](k8s/gke/traefik-routes.yaml) |
+| **hermes-tunnel** | Docker Compose project `hermes-tunnel` (container `hermes-tunnel`): [`tunnel/docker-compose.yml`](tunnel/docker-compose.yml), started by `scripts/https_up.sh` | Deployment + Service: [`k8s/gke/hermes-tunnel.yaml`](k8s/gke/hermes-tunnel.yaml) |
+| **OpenCode bridge** (optional) | Docker Compose service `bridge` (container `sourcecheck-bridge`) in the separate SourceCheck stack on the server (`~/SourceCheck-Ai/docker-compose.yml`); standalone reference: [`opencode/docker-compose.example.yml`](opencode/docker-compose.example.yml) (project `opencode-bridge`) | Deployment + ClusterIP Service: [`k8s/gke/opencode-bridge.yaml`](k8s/gke/opencode-bridge.yaml) |
+| **Hermes sandbox** (supervisor + workload) | Created by the gateway's **Docker** driver from `openshell sandbox create` in `scripts/up.sh`: two containers, the workload (`NetworkMode=none`) and its supervisor (host network) | Created by the gateway's **Kubernetes** driver from `openshell sandbox create` in `k8s/gke/deploy.sh`: a Sandbox resource the **Agent Sandbox controller** turns into the workload Pod, plus a separate supervisor Pod |
+
+**Why Hermes is not a Compose service:** `openshell sandbox create` hands the policy, providers and resource limits to OpenShell, which builds the workload container itself with no network interface, Landlock, seccomp and credential injection; a Compose service would be an ordinary container that OpenShell never wraps.
+
+**Which commands manage what:**
+
+- **VM infrastructure:** `docker compose -f <folder>/docker-compose.yml up -d | ps | logs | down` for the gateway, Traefik and the tunnel; `scripts/up.sh` starts the gateway, `scripts/https_up.sh` starts Traefik and the tunnel, and `scripts/down.sh --purge` stops all three and removes the `hermes-data` volume.
+- **OpenCode bridge (VM):** managed on its own with `docker compose` in the SourceCheck stack (service `bridge`) or with `opencode/docker-compose.example.yml`; no script here starts or stops it.
+- **The Hermes sandbox (VM):** `openshell sandbox list | get | exec | delete` and `openshell logs hermes`; `scripts/up.sh` creates it, `scripts/down.sh` (without `--purge`) deletes it and keeps the infrastructure and data. Never `docker run`/`docker rm` the sandbox containers directly.
+- **GKE:** `kubectl` and `helm` for Traefik, cert-manager, the tunnel, the bridge and the gateway (all wrapped by [`k8s/gke/deploy.sh`](k8s/gke/deploy.sh)); the sandbox is still managed with the OpenShell CLI ([`k8s/gke/openshell-cli.sh`](k8s/gke/openshell-cli.sh)), and the Agent Sandbox controller turns its Sandbox resource into Pods.
 
 ---
 
