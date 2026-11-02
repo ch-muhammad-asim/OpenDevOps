@@ -6,7 +6,7 @@ kind: Kustomization
 #
 # WHY THIS EXISTS
 # Sonnet 4.5 is the deployment's designed default and stays the default in the base.
-# Some AI cloud lab sandbox accounts are provisioned WITHOUT an AWS Marketplace
+# Some AI-enabled lab sandbox accounts are provisioned WITHOUT an AWS Marketplace
 # subscription for it, and the subscription cannot be added from inside the account:
 #
 #   InvokeModel  -> AccessDeniedException: Model access is denied ... required AWS

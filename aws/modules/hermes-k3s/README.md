@@ -15,7 +15,7 @@ terragrunt apply --working-dir hermes-k3s
 ## ❓ Why this exists instead of `modules/eks`
 
 cloud lab sandboxes deny `eks:CreateCluster` through an AWS Organizations SCP
-(`p-2nwbuy01`) — an org-level explicit deny that a member account cannot override.
+— an org-level explicit deny that a member account cannot override.
 `ec2:RunInstances` at `t3.medium` **is** permitted. Everything above the cluster
 layer is identical either way, and the Hermes bridge is byte-identical: boto3's
 default credential chain resolves EKS Pod Identity on EKS and the **EC2 instance

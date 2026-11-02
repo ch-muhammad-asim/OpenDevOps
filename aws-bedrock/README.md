@@ -8,7 +8,7 @@ Messages API. This path uses no Claude Code CLI and no Claude subscription sessi
 
 ```text
 Target environment
-  AWS account:  637423440646
+  AWS account:  <AWS_ACCOUNT_ID>
   Region:       us-east-1
   EKS cluster:  cloudgeeks-eks-dev
   Model:        us.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -304,7 +304,7 @@ two which are deliberate:
 ## ⚠️ Bedrock model access is per-account — Sonnet 4.5 may be unavailable
 
 Claude Sonnet 4.5 is this deployment's designed default and remains the default in the
-base manifests. **Some AI cloud lab sandbox accounts are provisioned without an AWS
+base manifests. **Some AI-enabled lab sandbox accounts are provisioned without an AWS
 Marketplace subscription for it**, and the subscription cannot be added from inside the
 account:
 
@@ -350,13 +350,13 @@ the single source of truth.
 
 ## ⚠️ EKS SCP denial — current state
 
-The sandbox's AWS Organizations SCP (`p-2nwbuy01`) explicitly denies `eks:CreateCluster`.
+An AWS Organizations Service Control Policy (SCP) on the lab sandbox explicitly denies `eks:CreateCluster`.
 
 **IAM permissions are correct** — the `allow_all` policy grants EKS via `NotAction` (confirmed via `simulate-principal-policy`). The SCP deny overrides this at the Organizations level and **cannot be bypassed from within the account**.
 
 Verified denied across: all Kubernetes versions (1.30–1.36), both `authenticationMode` values, tagged/untagged, EKS Auto Mode, both regions, and two cluster names. No cluster is pre-provisioned in any region.
 
-**Resolution:** The lab provider's org admin must modify SCP `p-2nwbuy01` to allow `eks:CreateCluster`. Member accounts cannot read or modify the policy.
+**Resolution:** The organization's admin must change the Service Control Policy that denies `eks:CreateCluster`; member accounts can't read or change it.
 
 **Current deployment:** Uses [`aws/modules/hermes-k3s`](../aws/modules/hermes-k3s/) as a drop-in substitute. `ec2:RunInstances` at `t3.medium` is permitted. The EKS path in `modules/eks` is fully functional and should be used once the SCP is lifted — everything layered above the cluster is identical either way.
 
@@ -376,7 +376,7 @@ Infra first, then the agent — the full runbook is in
 # 5. Demo      kubectl apply -k sre-demo/k3s
 ```
 
-### IAM summary (account `637423440646`)
+### IAM summary (lab sandbox account)
 
 | Permission | Source | Status |
 |---|---|---|
@@ -388,7 +388,7 @@ Infra first, then the agent — the full runbook is in
 
 ## ✅ Verified deployed state
 
-Deployed and validated end to end in account `637423440646` / `us-east-1`:
+Deployed and validated end to end in a lab sandbox account in `us-east-1`:
 
 | Check | Result |
 | --- | --- |

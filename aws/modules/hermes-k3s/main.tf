@@ -2,9 +2,9 @@
 # Hermes agent - single-node k3s on EC2
 #
 # WHY THIS EXISTS INSTEAD OF modules/eks:
-# The *AI* cloud lab sandbox (the Bedrock-enabled one) denies
+# The AI-enabled lab sandbox (the Bedrock-enabled one) denies
 # eks:CreateCluster through an AWS Organizations service control policy
-# (p-2nwbuy01). That is an org-level explicit deny: the account's IAM user is
+# (SCP). That is an org-level explicit deny: the account's IAM user is
 # *allowed* the action by its identity policy, but an SCP deny cannot be overridden
 # from inside the member account, and it is unconditional - verified against every
 # supported Kubernetes version, both authentication modes, tagged requests and EKS

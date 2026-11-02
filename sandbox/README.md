@@ -49,7 +49,7 @@ A production-style reference deployment of an autonomous AI agent, contained by 
 |---|---|
 | **Browser / API client** | A person's browser using the Hermes dashboard, or a program calling the `/v1` API with Hermes's Bearer key. |
 | **Cloudflare edge** | Proxied DNS and browser-trusted HTTPS (WE1 certificate) in front of the server; it redirects `http` to `https` and forwards requests to the origin over HTTPS. |
-| **Linux server / Docker host** | The Linux VM running Docker and every container shown inside the server box; SSH and the lab terminal are outside this diagram's scope. |
+| **Linux server / Docker host** | The Linux VM running Docker and every container shown inside the server box; SSH and the hosting platform's web terminal are outside this diagram's scope. |
 | **Traefik** (`hermes-traefik`) | The only public door (host `:80`→container `:8000`, host `:443`→container `:8443`), non-root and read-only with no Docker socket; it accepts only Cloudflare IPs and routes `/v1` and `/v1/*` to the API (`:8642`) and everything else to the dashboard (`:9119`). |
 | **`hermes_edge` network** | A user-defined Docker bridge network (`172.31.250.0/24`) whose only members are Traefik and hermes-tunnel; restricted membership, not Docker `internal`, so members keep outbound NAT. |
 | **hermes-tunnel** | A container with only the OpenShell CLI that keeps two `openshell forward` SSH tunnels open (`:9119` dashboard, `:8642` API) through the gateway, listening on `172.31.250.10` only. |
@@ -86,7 +86,7 @@ A production-style reference deployment of an autonomous AI agent, contained by 
 
 ### Architecture at a glance
 
-This is the single architecture diagram for this deployment. It covers the Hermes stack only; host infrastructure (SSH on `:22` and the lab provider's web terminal on `:31297`) is out of scope. It was checked against the live server on 2026-11-01 (`docker inspect`, gateway and supervisor logs, effective policy, in-sandbox probes). **Thick arrows** are inbound web/API traffic, **solid arrows** are Hermes's outbound connections, **dotted arrows** are control-plane or denied paths, and the **plain line** is the persistent volume.
+This is the single architecture diagram for this deployment. It covers the Hermes stack only; host infrastructure (SSH on `:22` and the hosting platform's web terminal on `:31297`) is out of scope. It was checked against the live server on 2026-11-01 (`docker inspect`, gateway and supervisor logs, effective policy, in-sandbox probes). **Thick arrows** are inbound web/API traffic, **solid arrows** are Hermes's outbound connections, **dotted arrows** are control-plane or denied paths, and the **plain line** is the persistent volume.
 
 ```mermaid
 flowchart TB

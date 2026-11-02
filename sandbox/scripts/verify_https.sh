@@ -464,7 +464,7 @@ if [ "$chat_ran" = 1 ]; then
     cleanup_sessions
   else
     info "remove the test chat session on the server with:"
-    info "  ssh cloud_user@$ORIGIN_IP 'cd ~/OpenDevOps && sandbox/scripts/verify_https.sh --cleanup'"
+    info "  ssh <user>@$ORIGIN_IP 'cd ~/OpenDevOps && sandbox/scripts/verify_https.sh --cleanup'"
   fi
 else
   info "no chat sessions created"

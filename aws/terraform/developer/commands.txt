@@ -5,7 +5,7 @@ aws configure --profile $PROFILE_NAME
 aws sts get-caller-identity --profile $PROFILE_NAME
 
 [profile developer]
-role_arn = arn:aws:iam::263392498268:role/eks-developers
+role_arn = arn:aws:iam::<AWS_ACCOUNT_ID>:role/eks-developers
 source_profile = asim
 
 # verify the role

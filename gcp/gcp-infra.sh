@@ -11,7 +11,7 @@
 #  Idempotent: every step checks for the resource first, so a re-run after a
 #  partial failure (or an interrupted sandbox) continues instead of erroring out.
 #
-#  Sized for the GCP cloud lab sandbox (~8 vCPU per region):
+#  Sized to stay small (~8 vCPU per region):
 #  a ZONAL cluster with 3 × e2-medium on-demand nodes = 6 vCPU. A regional
 #  cluster would place 3 nodes per zone (12 vCPU) and fail to create.
 # ──────────────────────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ DATAPLANE_V2="${DATAPLANE_V2:-0}"
 SYSTEM_CONFIG="${SYSTEM_CONFIG:-}"
 # Pin a GKE version (must be valid in RELEASE_CHANNEL), e.g. 1.35.8-gke.1796000. Empty = channel default.
 CLUSTER_VERSION="${CLUSTER_VERSION:-}"
-# The SSH-from-IAP rule; cloud lab sandboxes do not support IAP, so skip it there.
+# The SSH-from-IAP rule; skip it in projects without IAP.
 SSH_IAP_RULE="${SSH_IAP_RULE:-1}"
 # APIs to enable (override to enable fewer, e.g. in a locked-down sandbox).
 GCP_APIS="${GCP_APIS:-container.googleapis.com artifactregistry.googleapis.com compute.googleapis.com iamcredentials.googleapis.com}"
@@ -63,7 +63,7 @@ Options:
   --num-nodes <n>      Default: $NUM_NODES
   --image-type <t>     Node image, e.g. UBUNTU_CONTAINERD (default: GKE default, COS)
   --dataplane-v2       Create the cluster with GKE Dataplane V2 (enforced NetworkPolicy)
-  --no-ssh-iap         Skip the SSH-from-IAP firewall rule (the lab sandbox has no IAP)
+  --no-ssh-iap         Skip the SSH-from-IAP firewall rule (projects without IAP)
   --system-config-from-file <f>  kubelet/sysctl node config (e.g. podPidsLimit)
   --master-networks <cidr[,cidr]>
                        Authorized networks for the control plane.
@@ -71,8 +71,7 @@ Options:
   --dry-run            Print the gcloud commands without running them
   -h, --help           This help
 
-Teardown: the lab sandbox auto-wipes the whole project (~4h), so no
-cleanup is normally needed. Outside a sandbox, delete in reverse order:
+Teardown: delete in reverse order:
   gcloud container clusters delete <cluster> --zone <zone>
   gcloud compute firewall-rules delete <vpc>-allow-internal <vpc>-allow-ssh-iap
   gcloud compute networks subnets delete <subnet> --region <region>

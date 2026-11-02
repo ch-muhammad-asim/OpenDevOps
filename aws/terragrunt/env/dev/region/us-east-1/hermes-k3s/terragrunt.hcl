@@ -2,7 +2,7 @@
 # Hermes agent - single-node k3s cluster on EC2
 #
 # Substitute for the eks unit in accounts whose SCP denies eks:CreateCluster - the
-# AI cloud lab sandbox does (p-2nwbuy01, an AWS Organizations explicit deny
+# AI-enabled lab sandbox does (an AWS Organizations explicit deny
 # that a member account cannot override). Deploy the eks unit instead wherever it is
 # permitted; everything layered on top is identical either way.
 #

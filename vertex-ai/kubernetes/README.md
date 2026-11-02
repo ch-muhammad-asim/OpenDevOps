@@ -77,7 +77,7 @@ and the container receives it back from that Secret.
 | Variable | Example | Notes |
 | --- | --- | --- |
 | `PROJECT_ID` | `my-gcp-project` | `gcloud config get-value project` if already set |
-| `PROJECT_NUMBER` | `830787271677` | **Derive, never type** — see below. Feeds the WI binding and the SA annotation |
+| `PROJECT_NUMBER` | `<PROJECT_NUMBER>` | **Derive, never type** — see below. Feeds the WI binding and the SA annotation |
 | `CLUSTER_NAME` | `gke-cluster` | Must match the provisioned cluster exactly |
 | `ZONE` *or* `REGION` | `us-central1-a` / `us-west1` | **Pick the one matching your cluster.** A zonal cluster queried with `--region` returns `NOT_FOUND` |
 | `NAMESPACE` | `devops-agent` | Hardcoded in every manifest **and inside the WI principal string** — changing it requires redoing the IAM binding |

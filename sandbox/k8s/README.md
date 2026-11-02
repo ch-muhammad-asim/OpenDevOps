@@ -4,39 +4,23 @@ Two parts: **Part 1** is the live, verified deployment of Hermes inside NVIDIA O
 
 > 📘 **Full guide:** [`../KUBERNETES.md`](../KUBERNETES.md): why each piece exists, file mount vs env var, hardening, production secret sources (KMS, External Secrets, Vault), rotation and verification. This README is the short map of this folder.
 
-> 🧪 **Status:** Part 1 runs on GKE (verified 2026-11-01, lab sandbox). Part 2's bootstrap Job was validated on a local kind cluster with a **dummy** key (see [Validation](#-validation)). The VM demo at `hermes.saqlainmushtaq.com` uses OpenShell's **Docker** driver and is separate.
+> 🧪 **Status:** Part 1 runs on GKE (verified 2026-11-02). Part 2's bootstrap Job was validated on a local kind cluster with a **dummy** key (see [Validation](#-validation)). The VM demo at `hermes.saqlainmushtaq.com` uses OpenShell's **Docker** driver and is separate.
 
 ---
 
-## ⚠️ Lab limits (GCP cloud lab sandbox): read before creating anything
+## 📏 Sizing
 
-> 🛑 **Incident, 2026-11-01:** The lab provider shut down the sandbox project `playground-s-11-3347b3d1` at 16:21 (PKT) for *"detected misuse: you consumed too much Compute memory"*. The planned `e2-standard-8` GKE node never ran (the lab's machine-type allowlist rejected it), but throwaway VMs created to discover the allowlist did, the largest being `e2-custom-8-32768` (32 GiB). That broke the sandbox's **8 GB per instance** limit. Everything in the project was lost.
-
-**Documented sandbox limits** (from the lab provider's GCP sandbox documentation; the list can change, so check it first):
-
-| Limit | Value |
-|---|---|
-| Memory per instance | **8 GB** (this includes GKE nodes) |
-| CPUs | 12 across all instances and regions (the project also showed 8 per region) |
-| Instances | 10 in total |
-| Machine families | E2, N1, N2, C2, N2D; the org policy `custom.machineTypeWhitelist` narrows this further (seen allowed: `e2-standard-2`; seen denied: `e2-standard-4`, `e2-standard-8`) |
-| GKE | Standard clusters only, **no Autopilot** |
-| Other | No GPUs, no quota changes, Cloud Storage 1024 MB, the sandbox is deleted after 4 hours |
-
-**Rules for this repo:**
-- Never create probe or test VMs to find limits. Use the docs and read-only commands (`gcloud compute machine-types list`, `gcloud compute regions describe`, org-policy reads where permitted).
-- Use the smallest machine type that fits. Nothing above the `e2-standard-2` class (2 vCPU, 8 GB) without explicit approval.
-- Ask the owner before creating any cloud resource in a sandbox.
-
-**Safe sizing for Hermes + OpenShell on GKE** (used for the live build, within every limit above): 2 × `e2-standard-2` Ubuntu nodes (4 vCPU and 16 GB in total, 8 GB per node), with Hermes capped at 1 CPU / 3 GiB. Measured on the VM, the whole stack idles at about 1.4 GB (Hermes 715 MiB, bridge 291 MiB, gateway 161 MiB, Traefik 128 MiB, supervisor 54 MiB, tunnel 10 MiB).
+- **What this setup needs:** a GKE Standard cluster with 2 × `e2-standard-2` Ubuntu nodes (about 4 vCPU and 16 GB in total, 8 GB per node), autoscaling off; an upgrade may briefly add one surge node (6 vCPU). Hermes is capped at 1 CPU / 3 GiB.
+- **Measured footprint:** the whole stack idles at about 1.4 GB (Hermes 715 MiB, bridge 291 MiB, gateway 161 MiB, Traefik 128 MiB, supervisor 54 MiB, tunnel 10 MiB).
+- **Before creating anything:** check your project's quotas and org policies with read-only commands (`gcloud compute regions describe us-central1`, `gcloud compute project-info describe`, `gcloud resource-manager org-policies list`).
 
 ---
 
-## ☸️ Part 1: Hermes in NVIDIA OpenShell on GKE (live lab deployment)
+## ☸️ Part 1: Hermes in NVIDIA OpenShell on GKE (live deployment)
 
 Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served at **https://hermes-gke.saqlainmushtaq.com** through Cloudflare and Traefik. The guardrail policy is the same file as on the VM ([`../hermes/policy.yaml`](../hermes/policy.yaml)). First built on **2026-11-01**; rebuilt from scratch in a fresh lab project on **2026-11-02** with the commands on this page (zone `us-central1-c` after a `us-central1-b` capacity stockout) and re-verified. Every file is in [`gke/`](gke/), and the VM deployment at `hermes.saqlainmushtaq.com` is untouched.
 
-> 🧯 Lab sandboxes are deleted after 4 hours (extendable to 8). Everything below rebuilds from scratch with three commands: `gcp/gcp-infra.sh`, an image push, and `gke/deploy.sh`.
+> 🧯 Everything below rebuilds from scratch with three commands: `gcp/gcp-infra.sh`, an image push, and `gke/deploy.sh`.
 
 > 🗂️ VM vs GKE side by side (Docker Compose, OpenShell, Kubernetes): [sandbox/README.md → What runs where](../README.md#️-what-runs-where-docker-compose-vs-openshell-vs-kubernetes).
 
@@ -48,7 +32,7 @@ Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served
 |---|---|
 | **Cloudflare edge** | Proxied DNS `hermes-gke` → the Traefik load balancer; browser-trusted HTTPS; `http` → `https` 301. |
 | **GCP network load balancer** | External passthrough LB created by the Traefik Service (`type: LoadBalancer`, `externalTrafficPolicy: Local`, so Traefik sees Cloudflare's real source IP). |
-| **GKE cluster `hermes-gke`** | Standard, zonal (`us-central1-b`, or `-c` on a stockout; the live build is in `us-central1-c`), GKE 1.36, **2 × `e2-standard-2`** Ubuntu nodes: two steady-state nodes, autoscaling disabled; an upgrade may temporarily add one surge node (3 × `e2-standard-2` = 6 vCPU, still within the lab limits). Dataplane V2, kubelet `podPidsLimit: 2048`. |
+| **GKE cluster `hermes-gke`** | Standard, zonal (`us-central1-b`, or `-c` on a stockout; the live build is in `us-central1-c`), GKE 1.36, **2 × `e2-standard-2`** Ubuntu nodes: two steady-state nodes, autoscaling disabled; an upgrade may temporarily add one surge node (3 × `e2-standard-2` = 6 vCPU, still small). Dataplane V2, kubelet `podPidsLimit: 2048`. |
 | **Dataplane V2 (Cilium)** | Enforces every NetworkPolicy (ingress and egress); OpenShell's workload fence depends on it. |
 | **`traefik` namespace: Traefik v3.7.14** | The only public entry (chart 42.0.0); Cloudflare-only allow-list, security headers, login rate limit, dashboard basic auth, `/v1` and `/v1/*` → API, everything else → dashboard; namespaced RBAC (cannot read Secrets outside its namespaces). |
 | **`cert-manager` namespace: cert-manager v1.21.2** | Issues the origin certificate `hermes-gke-tls` from Let's Encrypt with a Cloudflare DNS-01 challenge. |
@@ -209,7 +193,7 @@ Never combine credentials with curl's `-w '%{redirect_url}'`: it prints the URL 
 | OpenShell sandbox | Cannot start (no Landlock; fails closed) | Runs (all checks on this page) |
 
 - **No switch for it:** Landlock is not compiled into the tested COS kernel, so no GKE flag, kubelet setting, sysctl or node system config can enable it.
-- **Decision:** COS is not supported by OpenShell v0.1.6 (latest release); the lab cluster stays on Ubuntu. Full decision record: [COS-APPARMOR.md](COS-APPARMOR.md).
+- **Decision:** COS is not supported by OpenShell v0.1.6 (latest release); this cluster stays on Ubuntu. Full decision record: [COS-APPARMOR.md](COS-APPARMOR.md).
 
 **Why not AppArmor on COS, and why not gVisor**
 
@@ -257,12 +241,12 @@ kubectl logs "$D"; kubectl delete "$D"
 
 | If you need OpenShell on a cluster whose default pool is COS | Keeps OpenShell's guarantees? |
 |---|---|
-| Add a Landlock-capable node pool (Ubuntu) for the sandboxes only | Yes (same node image as this lab, whose only pool is Ubuntu) |
+| Add a Landlock-capable node pool (Ubuntu) for the sandboxes only | Yes (same node image as this cluster, whose only pool is Ubuntu) |
 | Wait for an OpenShell release with a non-Landlock backend | Yes, if it gives equivalent guarantees |
 | Patch OpenShell to skip the check | No (not recommended) |
 | Run Hermes on COS without OpenShell | No: no per-program or L7 egress rules, no credential injection, no OCSF audit |
 
-The lab copy is zonal with 2 nodes only because the lab sandbox caps compute (8 GB per instance, about 12 vCPU in total); a regional 6-node pool like the real one would break it.
+This copy is zonal with 2 nodes to stay small; a regional 6-node pool like the production one is a sizing choice, not a requirement of OpenShell.
 
 **Official references:** [Linux kernel: Landlock](https://docs.kernel.org/userspace-api/landlock.html) · [NVIDIA OpenShell v0.1.6 support matrix](https://docs.nvidia.com/openshell/v0.1.6/about/support-matrix) · [GKE node images](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/node-images)
 
@@ -276,7 +260,7 @@ The lab copy is zonal with 2 nodes only because the lab sandbox caps compute (8 
 | Workload network | `NetworkMode=none` | Pod has `eth0`; OpenShell's NetworkPolicy allows the workload to reach only its supervisor | **Dataplane V2** enforces it | Test pod with the workload label: internet, Kubernetes API, gateway and DNS all **blocked**; the same pod without the label reaches all four |
 | Workload ↔ supervisor | Unix socket | mTLS over the pod network: the per-pair `os-control-<id>` policy lets the workload reach only its own supervisor (TCP 5500); `openshell-sandbox-workloads` accepts TCP 5500 into any workload from any supervisor pod in `openshell` (one sandbox here) | Inherent to the driver | Both NetworkPolicies present |
 | PID limit | 2048 per sandbox | No per-sandbox limit | kubelet `podPidsLimit: 2048` (every pod) | `configz` → `podPidsLimit = 2048` |
-| CPU / memory | 2 CPU / 4 GiB | **1 CPU / 3 GiB** (lab nodes are 2 vCPU / 8 GB) | Tighter cap, never weaker | Pod `requests = limits = 1 CPU / 3Gi` |
+| CPU / memory | 2 CPU / 4 GiB | **1 CPU / 3 GiB** (nodes are 2 vCPU / 8 GB) | Tighter cap, never weaker | Pod `requests = limits = 1 CPU / 3Gi` |
 | Supervisor resources | n/a | No requests or limits (BestEffort) | LimitRange in `openshell`: 100m/128Mi requests, 1 CPU/512Mi limits | Supervisor pod shows those values |
 | Gateway access | Loopback, no auth | Cluster network | ClusterIP only, **mTLS client certificates**, `allowUnauthenticatedUsers: false` | CLI and tunnel work only with `openshell-client-tls` |
 | Egress policy, key injection | `_provider_nvidia` + `opencode_bridge` | Identical rules (bridge in-cluster) | `server.hostGatewayIP` → bridge Service | Same OCSF lines as the VM (prompts below) |
@@ -287,7 +271,7 @@ The lab copy is zonal with 2 nodes only because the lab sandbox caps compute (8 
 ### ✅ Prerequisites
 
 - Tools: `gcloud` (with `gke-gcloud-auth-plugin`), `kubectl`, `helm` 3, Docker with `buildx`, `jq`, `curl`, `openssl`, `dig`.
-- A GCP project you may use; in the lab: `gcloud auth login`, then `gcloud projects list` and `gcloud config set project <playground-…>` (the pre-set project is often a stale one). Read the [Lab limits](#️-lab-limits-gcp-cloud-lab-sandbox-read-before-creating-anything) first.
+- A GCP project you may use: `gcloud auth login`, then `gcloud projects list` and `gcloud config set project <PROJECT_ID>`. See [Sizing](#-sizing).
 - Read-only checks before creating anything:
   ```bash
   gcloud compute regions describe us-central1 --format='table(quotas.metric,quotas.limit,quotas.usage)'
@@ -325,9 +309,9 @@ gcloud container clusters create hermes-gke --zone=us-central1-b --network=custo
   --image-type=UBUNTU_CONTAINERD --enable-dataplane-v2 --system-config-from-file=../sandbox/k8s/gke/node-system-config.yaml
 ```
 
-Why: **Ubuntu** (Landlock), **Dataplane V2** (NetworkPolicy enforced; creation-time only), **no `--enable-autoscaling`** (two steady-state nodes, autoscaling disabled; an upgrade may temporarily add one surge node: 3 × `e2-standard-2` = 6 vCPU, still within the lab limits), **no GKE Sandbox/gVisor**, zonal (fewer nodes). If a zone reports *"does not have enough resources"*, delete the failed cluster and use the next zone (`-b`, `-c`, `-f`).
+Why: **Ubuntu** (Landlock), **Dataplane V2** (NetworkPolicy enforced; creation-time only), **no `--enable-autoscaling`** (two steady-state nodes, autoscaling disabled; an upgrade may temporarily add one surge node: 3 × `e2-standard-2` = 6 vCPU, still small), **no GKE Sandbox/gVisor**, zonal (fewer nodes). If a zone reports *"does not have enough resources"*, delete the failed cluster and use the next zone (`-b`, `-c`, `-f`).
 
-**2. Images** (Artifact Registry; build locally, the lab throttles Cloud Build):
+**2. Images** (Artifact Registry; built locally):
 
 ```bash
 P=$(gcloud config get-value project); R=us-central1-docker.pkg.dev/$P/hermes
@@ -391,7 +375,7 @@ The application Secrets (charts also create their own: OpenShell `os-sandbox-*`/
 
 ### 🧪 Verify
 
-Results from **2026-11-02** (fresh rebuild in a new lab project).
+Results from **2026-11-02** (fresh rebuild in a new project).
 
 **HTTPS, redirect and auth** (run from a normal internet connection):
 
@@ -433,10 +417,9 @@ and read the audit lines with `sandbox/k8s/gke/openshell-cli.sh logs hermes -n 3
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `Operation denied by org policy: [customConstraints/custom.machineTypeWhitelist]` | Lab machine-type allowlist (`e2-standard-4`/`-8` denied) | Use `e2-standard-2`; read limits from docs, never probe with VMs |
-| Project shut down: *"consumed too much Compute memory"* | An instance above 8 GB (a 32 GiB probe VM) | See [Lab limits](#️-lab-limits-gcp-cloud-lab-sandbox-read-before-creating-anything) |
+| `Operation denied by org policy: [customConstraints/custom.machineTypeWhitelist]` | The project's org policy allows only some machine types | Use an allowed type (`e2-standard-2` here); read the policy with `gcloud resource-manager org-policies describe` |
 | `Google Compute Engine does not have enough resources available … us-central1-a` | Zonal capacity stockout | Delete the ERROR cluster, retry the same plan in `us-central1-b`/`-c`/`-f` |
-| `invalid_grant: Account has been deleted` | Lab session expired | New lab, `gcloud auth login`, re-run (all steps are idempotent) |
+| `invalid_grant: Account has been deleted` | The gcloud account or session expired | `gcloud auth login`, re-run (all steps are idempotent) |
 | `error getting credentials - err: exec: "docker-credential-desktop": executable file not found` on `docker build`/`pull` | `~/.docker/config.json` names a Docker Desktop credential store that this machine doesn't have | Use a separate Docker config for the build: `export DOCKER_CONFIG=$(mktemp -d); echo '{"credHelpers":{"us-central1-docker.pkg.dev":"gcloud"}}' > $DOCKER_CONFIG/config.json; ln -s ~/.docker/cli-plugins $DOCKER_CONFIG/` |
 | Filesystem probes via `kubectl exec` into the workload succeed (e.g. `ls /.openshell`, `/sys/fs/cgroup`) | `kubectl exec` starts a new process from containerd, outside OpenShell's runtime, so Landlock does not apply to it (it needs `pods/exec`, an admin right, not something the agent has) | Test the guardrails the way Hermes runs: `sandbox/k8s/gke/openshell-cli.sh sandbox exec -n hermes -- ls /.openshell` → `Permission denied` |
 | `the --chmod option requires BuildKit`, then *"Install the buildx component"* | Legacy builder | `docker buildx build --load …` |
@@ -454,8 +437,8 @@ and read the audit lines with `sandbox/k8s/gke/openshell-cli.sh logs hermes -n 3
 
 ### 💰 Cost and quota
 
-- In use: 2 × `e2-standard-2` (4 vCPU / 16 GB, 8 GB per node), 2 × 30 GB pd-balanced, PVCs 5 Gi + 1 Gi + 1 Gi, 1 external LB IP + 2 node IPs, ~3 GB in Artifact Registry. Within the lab's 8 vCPU/region, 12 vCPU total, 8 GB per instance.
-- Outside a lab this is roughly one e2-standard-4's worth of compute plus a load balancer and disks; delete it when finished.
+- In use: 2 × `e2-standard-2` (4 vCPU / 16 GB, 8 GB per node), 2 × 30 GB pd-balanced, PVCs 5 Gi + 1 Gi + 1 Gi, 1 external LB IP + 2 node IPs, ~3 GB in Artifact Registry.
+- This is roughly one e2-standard-4's worth of compute plus a load balancer and disks; delete it when finished.
 
 ### 🧹 Teardown
 

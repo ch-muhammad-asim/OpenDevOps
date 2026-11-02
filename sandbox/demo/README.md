@@ -328,7 +328,7 @@ network_policies:
 ## 3. Prerequisites
 
 - **Live deployment** built as described in [`sandbox/README.md`](../README.md) (Steps 1–6). `sandbox/scripts/verify.sh` (run with `HERMES_DASHBOARD_PASSWORD` set) should report all PASS with 1 SKIP (the model check, which runs only with `LLM_CHECKS=1`).
-- **Server access**: SSH to the host (`cloud_user@<server>`), the repo checked out at `~/OpenDevOps`, and `openshell` on the `PATH`:
+- **Server access**: SSH to the host (`<user>@<server>`), the repo checked out at `~/OpenDevOps`, and `openshell` on the `PATH`:
   ```bash
   export PATH="$HOME/.local/bin:$PATH"
   cd ~/OpenDevOps

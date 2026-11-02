@@ -56,7 +56,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::058264369563:role/eksctl-cloudgeeks-eks-dev-addon-iamserviceacc-Role1-8z5zkEXDHGO4
+    eks.amazonaws.com/role-arn: arn:aws:iam::<AWS_ACCOUNT_ID>:role/eksctl-cloudgeeks-eks-dev-addon-iamserviceacc-Role1-8z5zkEXDHGO4
     meta.helm.sh/release-name: vault
     meta.helm.sh/release-namespace: vault
   creationTimestamp: "2024-07-17T05:23:26Z"

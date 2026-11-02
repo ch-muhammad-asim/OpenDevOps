@@ -107,12 +107,12 @@ each module usable across every environment and region.
 
 Point `terragrunt/account.hcl` at your account id, bucket and key alias.
 
-### ⚠️ Account: `637423440646` — IAM permissions
+### ⚠️ Lab sandbox account — IAM permissions
 
 | Service | IAM | SCP | Result |
 |---------|-----|-----|--------|
 | **Bedrock** | ✅ `bedrock:*` (dedicated policy) | — | **Allowed** |
-| **EKS** | ✅ `Allow` (via `NotAction` in `allow_all`) | ❌ **Deny** `eks:CreateCluster` (SCP `p-2nwbuy01`) | **Blocked** |
+| **EKS** | ✅ `Allow` (via `NotAction` in `allow_all`) | ❌ **Deny** `eks:CreateCluster` (org SCP) | **Blocked** |
 | **EC2, S3, IAM, VPC, etc.** | ✅ `Allow` | — | **Allowed** |
 | **Lightsail** | ❌ Explicit deny in IAM | — | Blocked |
 | **SageMaker** | ❌ Explicit deny in IAM | — | Blocked |
@@ -124,11 +124,11 @@ The `allow_all` policy grants all actions except `lightsail:*` and `sagemaker:*`
 ## ⚠️ EKS is blocked in cloud lab sandboxes
 
 `eks:CreateCluster` is denied by an AWS Organizations service control policy
-(`o-yu55c2titn` / `p-2nwbuy01`) in both the regular and the AI Cloud Sandbox:
+in both the regular and the AI-enabled lab sandbox:
 
 ```text
-AccessDeniedException: User: arn:aws:iam::<acct>:user/cloud_user is not authorized
-to perform: eks:CreateCluster on resource: arn:aws:eks:us-east-1:<acct>:cluster/...
+AccessDeniedException: User: arn:aws:iam::<AWS_ACCOUNT_ID>:user/<user> is not authorized
+to perform: eks:CreateCluster on resource: arn:aws:eks:us-east-1:<AWS_ACCOUNT_ID>:cluster/...
 with an explicit deny in a service control policy
 ```
 

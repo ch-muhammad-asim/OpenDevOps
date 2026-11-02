@@ -1,6 +1,6 @@
 # ☁️ GCP Custom VPC + GKE Deployment (gcloud CLI)
 
-Single-subnet custom VPC + a **public, zonal, cost-optimized** GKE cluster sized to fit the GCP cloud lab sandbox quotas (≈8 vCPU per region). Provisioned entirely with the `gcloud` CLI.
+Single-subnet custom VPC + a **public, zonal, cost-optimized** GKE cluster sized to stay small (≈8 vCPU per region). Provisioned entirely with the `gcloud` CLI.
 
 ## 🏗️ Architecture
 
@@ -61,16 +61,16 @@ machine type would exceed the ~8 vCPU sandbox quota.
 > 🔒 The default `--master-networks 0.0.0.0/0` is sandbox convenience. For anything real, pass your own
 > CIDR: `./gcp-infra.sh --project <id> --master-networks "$(curl -s ifconfig.me)/32"`.
 
-### 🛡️ Hermes + NVIDIA OpenShell on GKE (cloud lab sandbox)
+### 🛡️ Hermes + NVIDIA OpenShell on GKE
 
-For the guarded Hermes deployment ([`../sandbox/k8s/README.md` → Part 1](../sandbox/k8s/README.md#️-part-1-hermes-in-nvidia-openshell-on-gke-live-lab-deployment)), the same script takes four extra options, with defaults that keep the cluster above unchanged:
+For the guarded Hermes deployment ([`../sandbox/k8s/README.md` → Part 1](../sandbox/k8s/README.md#️-part-1-hermes-in-nvidia-openshell-on-gke-live-deployment)), the same script takes four extra options, with defaults that keep the cluster above unchanged:
 
 | Option / variable | Purpose |
 |---|---|
 | `--image-type UBUNTU_CONTAINERD` | Ubuntu nodes: OpenShell needs **Landlock**, which the COS kernel does not have (tested on COS 125 / GKE 1.35.8: `landlock_create_ruleset` → `ENOSYS`; see [Landlock and Ubuntu vs COS](../sandbox/k8s/README.md#-landlock-and-why-the-nodes-are-ubuntu-not-cos)) |
 | `--dataplane-v2` | GKE Dataplane V2 (Cilium), so NetworkPolicies are enforced; creation time only |
 | `--system-config-from-file ../sandbox/k8s/gke/node-system-config.yaml` | kubelet `podPidsLimit: 2048` |
-| `--no-ssh-iap` | Skip the SSH-from-IAP firewall rule (cloud lab sandboxes do not support IAP) |
+| `--no-ssh-iap` | Skip the SSH-from-IAP firewall rule (for projects without IAP) |
 | `RELEASE_CHANNEL=stable CLUSTER_VERSION=1.35.8-gke.1796000` | Pin a GKE version (must be valid in that channel; `gcloud container get-server-config --zone <zone>` lists them) |
 | `GCP_APIS="container.googleapis.com artifactregistry.googleapis.com"` | Enable only these APIs (default list also enables compute and iamcredentials) |
 
@@ -82,7 +82,7 @@ GCP_APIS="container.googleapis.com artifactregistry.googleapis.com" \
   --system-config-from-file ../sandbox/k8s/gke/node-system-config.yaml
 ```
 
-> ⚠️ **Lab sandbox limits:** 8 GB memory per instance, about 12 vCPU in total, 10 instances, no Autopilot, and a machine-type allowlist (`e2-standard-4` and larger were denied). A 32 GiB instance got a sandbox shut down for "misuse". Use `e2-standard-2` and read [Lab limits](../sandbox/k8s/README.md#️-lab-limits-gcp-cloud-lab-sandbox-read-before-creating-anything) first. Never create test VMs to find limits.
+> 📏 **Sizing:** 2 × `e2-standard-2` nodes (about 4 vCPU / 16 GB), autoscaling off. Check your project's quotas and org policies before creating resources ([Sizing](../sandbox/k8s/README.md#-sizing)).
 
 The manual steps below are what the script automates — useful for understanding or cherry-picking.
 
@@ -204,7 +204,7 @@ kubectl run test --image=nginx --rm -it -- /bin/bash
 
 ## 🧹 Teardown
 
-No manual cleanup needed — the GCP lab sandbox auto-shuts down and wipes the entire project (~4 h after launch; see the "Auto Shutdown" time in the sandbox UI).
+Delete the resources when you're done (see the teardown steps in [`../sandbox/k8s/README.md`](../sandbox/k8s/README.md#-teardown)).
 
 ## 🔐 Hermes dashboard credentials (GKE)
 

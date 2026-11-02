@@ -18,8 +18,9 @@ out="$(sbx_sh 'cat /etc/shadow >/dev/null')"
 expect_has "/etc/shadow unreadable" "$out" "Permission denied"
 out="$(sbx_sh 'ls /root')"
 expect_has "/root unreadable" "$out" "Permission denied"
-for p in "\$HOME/.ssh" /home/cloud_user/.ssh /var/lib/docker /var/run/docker.sock /run/docker.sock \
-         /home/cloud_user/.config/hermes-sandbox/hermes.env /home/cloud_user/.aws; do
+HOST_HOME="${HOST_HOME:-$HOME}"  # the server user's home on the host (these scripts run on the host)
+for p in "\$HOME/.ssh" "$HOST_HOME/.ssh" /var/lib/docker /var/run/docker.sock /run/docker.sock \
+         "$HOST_HOME/.config/hermes-sandbox/hermes.env" "$HOST_HOME/.aws"; do
   out="$(sbx_sh "ls -d $p")"
   expect_has "$p not present in the sandbox" "$out" "No such file or directory" "Permission denied"
 done

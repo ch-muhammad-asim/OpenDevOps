@@ -1,6 +1,6 @@
 # 🧪 AWS cloud lab sandbox - limits that shape this blueprint
 
-Source: the lab provider's AWS sandbox documentation; the limits are restated below.
+Source: the sandbox account's published limits; the limits are restated below.
 
 The sandbox is a real AWS account with guardrails enforced above your IAM user.
 The user's own policy looks permissive (`allow_all` minus Lightsail and
@@ -23,7 +23,7 @@ them by hitting them. These are the ones that matter for EKS.
 
 ## ⛔ EKS SCP denial
 
-The sandbox's AWS Organizations SCP (`arn:aws:organizations::674998908974:policy/o-yu55c2titn/service_control_policy/p-2nwbuy01`) explicitly denies `eks:CreateCluster`.
+An AWS Organizations Service Control Policy (SCP) on the sandbox explicitly denies `eks:CreateCluster`.
 
 **IAM user has full EKS access** — the `allow_all` policy grants all actions except `lightsail:*` and `sagemaker:*` via `NotAction`. Running `aws iam simulate-principal-policy` confirms `eks:CreateCluster` is **allowed** at the IAM level.
 
@@ -35,7 +35,7 @@ The sandbox's AWS Organizations SCP (`arn:aws:organizations::674998908974:policy
 - Region (`us-east-1`, `us-west-2`)
 - Cluster name
 
-**Resolution:** The lab provider's org admin must modify or remove SCP `p-2nwbuy01` to allow `eks:CreateCluster`. Member accounts cannot read or modify the policy.
+**Resolution:** The organization's admin must change the Service Control Policy that denies `eks:CreateCluster`; member accounts can't read or change it.
 
 **Current workaround:** [`modules/hermes-k3s`](../../modules/hermes-k3s/) provisions a single-node k3s cluster on EC2 (`ec2:RunInstances` at `t3.medium` is permitted). The EKS path in `modules/eks` is fully functional and should be used in any account whose SCP permits it.
 

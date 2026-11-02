@@ -5,7 +5,7 @@ deployment: `kubectl apply -k .` renders and applies the whole stack.
 
 ```text
 Target environment
-  AWS account:  381491923945
+  AWS account:  <AWS_ACCOUNT_ID>
   Region:       us-east-1
   Model:        us.anthropic.claude-sonnet-4-5-20250929-v1:0
   Namespace:    devops-agent
@@ -32,7 +32,7 @@ kubernetes/
 ## ⚠️ Which cluster? EKS vs k3s
 
 The base targets **EKS**. If your account's SCP denies `eks:CreateCluster` — which the
-**AI** cloud lab sandbox does (`p-2nwbuy01`, an AWS Organizations explicit
+AI-enabled lab sandbox does (an AWS Organizations explicit
 deny that a member account cannot override, confirmed unconditional across every
 supported Kubernetes version, both auth modes, tagged requests and EKS Auto Mode) —
 use the k3s path instead:

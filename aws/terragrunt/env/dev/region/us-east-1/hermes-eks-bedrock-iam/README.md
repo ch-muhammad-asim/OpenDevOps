@@ -65,7 +65,7 @@ Note the plan looks clean before that — the `eks` unit still outputs a
 ## 🚫 EKS is blocked in cloud lab sandboxes
 
 Step 2 above cannot succeed there. `eks:CreateCluster` is denied by an AWS
-Organizations SCP (`p-2nwbuy01`) — an org-level explicit deny that a member account
+Organizations SCP — an org-level explicit deny that a member account
 cannot override, and one that is unconditional across every Kubernetes version, both
 auth modes, tagged requests, EKS Auto Mode, and both permitted regions. Use
 [`hermes-k3s`](../hermes-k3s/) instead.

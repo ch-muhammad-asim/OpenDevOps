@@ -1,6 +1,6 @@
 # 🐧 OpenShell on GKE Container-Optimized OS: decision record (2026-11-01)
 
-**Decision: not supported. The GKE lab stays on Ubuntu nodes (see [README.md → Landlock and why the nodes are Ubuntu, not COS](README.md#-landlock-and-why-the-nodes-are-ubuntu-not-cos)).** This record keeps the evidence and the options for clusters whose default node pool is COS. Source paths refer to the OpenShell repository at tag `v0.1.6`.
+**Decision: not supported. The GKE cluster stays on Ubuntu nodes (see [README.md → Landlock and why the nodes are Ubuntu, not COS](README.md#-landlock-and-why-the-nodes-are-ubuntu-not-cos)).** This record keeps the evidence and the options for clusters whose default node pool is COS. Source paths refer to the OpenShell repository at tag `v0.1.6`.
 
 ## Verdict
 Unmodified NVIDIA OpenShell v0.1.6 (latest release, 2026-10-27, commit ac7f615) **cannot run on Container-Optimized OS**, and
@@ -31,7 +31,7 @@ AppArmor cannot replace Landlock through configuration.
 | B. Ask NVIDIA/OpenShell upstream for a non-Landlock (e.g. AppArmor) filesystem backend; adopt when released | Yes, once supported | No date; file an upstream issue with this evidence |
 | C. Patch/fork OpenShell to skip the Landlock probe and rely on AppArmor | No (security redesign of a trust-critical component) | Not recommended |
 | D. Hermes on COS without OpenShell (uid 10000, seccomp, custom AppArmor, no caps, NetworkPolicy, egress proxy) | No: loses per-binary OPA + L7 rules, TLS termination, credential injection (NVIDIA key in the pod), OCSF audit | Different, weaker product |
-| E. Keep the verified Ubuntu `hermes-gke` for the lab; document COS as unsupported for OpenShell | Yes | **Chosen** |
+| E. Keep the verified Ubuntu `hermes-gke`; document COS as unsupported for OpenShell | Yes | **Chosen** |
 
 ## Outcome
 

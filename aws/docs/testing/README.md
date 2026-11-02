@@ -1,6 +1,6 @@
 # 🧪 Validation and test results
 
-Recorded against the AWS cloud lab sandbox, account `898961940126`,
+Recorded against an AWS cloud lab sandbox account in
 `us-east-1`, on 2026-08-27. Every deployment step ran through Terragrunt.
 
 ## 🖥️ Environment
@@ -54,7 +54,7 @@ role/eks-admin-cloudgeeks-eks-dev        AmazonEKSClusterAdminPolicy
 role/eks-developer-cloudgeeks-eks-dev    AmazonEKSViewPolicy
 role/Karpenter-cloudgeeks-eks-dev-...    EC2 node type
 role/system-eks-node-group-...           EC2 node type
-user/cloud_user                          cluster creator
+user/<user>                              cluster creator
 ```
 
 Pod Identity associations:

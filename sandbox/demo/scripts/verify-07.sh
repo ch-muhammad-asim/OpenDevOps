@@ -70,7 +70,8 @@ except Exception as e: print("BLOCKED", e)
 EOF
 )"
 expect_has "OpenShell gateway API (host.openshell.internal:8080) unreachable" "$out" "BLOCKED"
-out="$(sbx_sh 'ls ~/.config/hermes-sandbox/hermes.env /home/cloud_user/.config/hermes-sandbox/hermes.env 2>&1')"
+HOST_HOME="${HOST_HOME:-$HOME}"  # the server user's home on the host
+out="$(sbx_sh "ls ~/.config/hermes-sandbox/hermes.env $HOST_HOME/.config/hermes-sandbox/hermes.env 2>&1")"
 expect_has "host hermes.env not present in the sandbox" "$out" "No such file or directory"
 
 section "3. Prompt path (DEMO-07)"

@@ -3,13 +3,12 @@
 #
 # ⚠️  NOT USABLE IN A CLOUD LAB SANDBOX.
 #
-# Both the regular and the AI Cloud Sandbox deny eks:CreateCluster through an AWS
+# Both the regular and the AI-enabled lab sandbox deny eks:CreateCluster through an AWS
 # Organizations service control policy:
 #
-#   AccessDeniedException: User: arn:aws:iam::<acct>:user/cloud_user is not
+#   AccessDeniedException: User: arn:aws:iam::<AWS_ACCOUNT_ID>:user/<user> is not
 #   authorized to perform: eks:CreateCluster ... with an explicit deny in a
-#   service control policy:
-#   arn:aws:organizations::674998908974:policy/o-yu55c2titn/service_control_policy/p-2nwbuy01
+#   service control policy
 #
 # An SCP deny is evaluated above the account: the IAM user is *allowed* the action
 # by its identity policy (aws iam simulate-principal-policy returns "allowed" -
@@ -19,7 +18,7 @@
 # The deny is unconditional. Verified across Kubernetes 1.30/1.34/1.35/1.36 and the
 # API default, authenticationMode API and CONFIG_MAP, tagged and untagged requests,
 # EKS Auto Mode, us-east-1 and us-west-2, and multiple cluster names - in two
-# separate sandbox accounts (381491923945 and 637423440646).
+# separate sandbox accounts.
 #
 # Use ../hermes-k3s instead, which provisions a conformant single-node Kubernetes
 # cluster on EC2 (RunInstances IS permitted). Everything layered above the cluster
