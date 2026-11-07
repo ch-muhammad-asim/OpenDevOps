@@ -2,6 +2,7 @@
 *.env
 !*.env.example
 # Site settings: only the template is committed; your site.env (server IP) stays local.
+site.env
 
 # Python bytecode
 __pycache__/
