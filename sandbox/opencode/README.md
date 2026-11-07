@@ -6,7 +6,7 @@ In this deployment the bridge is the **optional alternative** provider. The defa
 
 | | |
 |---|---|
-| 📦 Container | `sourcecheck-bridge` (image `mbu7865669/sourcecheck-bridge:1.1.0`, bridge `1.0.0`, OpenCode CLI `v2.1.4`), service `bridge` of the SourceCheck stack in `~/SourceCheck-Ai/docker-compose.yml` on the server. Runs as the non-root user `bridge`. |
+| 📦 Container | `sourcecheck-bridge` (image `sourcecheck-bridge:1.1.0`, full name in [`docker-compose.example.yml`](docker-compose.example.yml); bridge `1.0.0`, OpenCode CLI `v2.1.4`), run from that example or as service `bridge` of your own Compose stack. Runs as the non-root user `bridge`. |
 | ⚙️ Settings | free models only (the bridge's default, `--free-only`; the compose file's `OPENCODE_BRIDGE_FREE_ONLY=1` isn't read by bridge `1.0.0`), `OPENCODE_BRIDGE_MAX_CONCURRENCY=1` (one request at a time; another waits up to 30 s, then gets `429 bridge busy`), `OPENCODE_BRIDGE_TIMEOUT=180` s, default model `opencode/mimo-v2.6-flash-free` |
 | 💾 Volumes | `sourcecheck-ai_bridge-config` → `~/.config/opencode` and `sourcecheck-ai_bridge-state` → `~/.local/share/opencode` (OpenCode's anonymous client identity `service.json` and its session database, kept across restarts; there is no OpenCode login or API key) |
 | 🔌 Published on | **`127.0.0.1:18383` only** (inside its container it listens on `0.0.0.0:18383`). It has **no authentication**, so it must never be published on another address. |
@@ -95,10 +95,12 @@ The bridge is already configured. **Don't change the default model** just to try
 
 - 🖥️ **Dashboard:** in a chat, type `/model` and choose the provider **`opencode-bridge`**, then `opencode/mimo-v2.6-flash-free` (or any model it lists). A **New chat** goes back to the NVIDIA default.
 - ⌨️ **One-shot, from the server** (doesn't touch the saved default):
+
   ```bash
   openshell sandbox exec -n hermes --no-tty -- sh -c 'cd /tmp && HOME=/sandbox/hermes HERMES_HOME=/sandbox/hermes \
     /opt/hermes/bin/hermes chat -Q --provider opencode-bridge -m opencode/mimo-v2.6-flash-free -q "Say hello"'
   ```
+
   It leaves one session in the dashboard's **Sessions** list; delete it there or with `hermes sessions delete`.
 
 > ⚠️ The side panel's **Switch model** saves its pick as the **default**. `start-hermes` restores the NVIDIA default on the next start, but until then every new chat uses the bridge.
@@ -142,9 +144,9 @@ openshell policy get hermes --full | grep -A18 opencode_bridge
 | Symptom | Cause | Fix |
 |---|---|---|
 | Chat replies *"[bridge error: Free usage limit reached … (retry in 16h)]"* | The OpenCode **free quota** is used up. It's **account-wide**, so switching to another free model doesn't help. | Wait for the reset time shown, or switch back to the NVIDIA default (**New chat**). Keep model checks opt-in (`LLM_CHECKS=1`). |
-| Hermes says *"connection error"* on the bridge model | The bridge container is down, or no longer listening on `127.0.0.1:18383` | `docker ps --filter name=sourcecheck-bridge`; `curl http://127.0.0.1:18383/health`; restart it: `cd ~/SourceCheck-Ai && docker compose up -d bridge`. |
+| Hermes says *"connection error"* on the bridge model | The bridge container is down, or no longer listening on `127.0.0.1:18383` | `docker ps --filter name=sourcecheck-bridge`; `curl http://127.0.0.1:18383/health`; restart it from the folder of its Compose file: `docker compose up -d bridge`. |
 | `openshell logs hermes` shows `DENIED … host.openshell.internal:18383` | A program other than Hermes's Python called the bridge, or a route outside the three allowed ones | Expected for `curl` and other routes. If Hermes's own call is denied, check the Python path in `../hermes/policy.yaml` still matches the image (it changes when the Hermes image changes). |
-| `test_bridge.sh` fails *"published on: 0.0.0.0:18383"* | Someone published the bridge on all addresses again. It has **no password**. | In `~/SourceCheck-Ai/docker-compose.yml` set the port to `127.0.0.1:18383:18383`, then `docker compose up -d`. |
+| `test_bridge.sh` fails *"published on: 0.0.0.0:18383"* | Someone published the bridge on all addresses again. It has **no password**. | In the bridge's Compose file (reference: [`docker-compose.example.yml`](docker-compose.example.yml)) set the port to `127.0.0.1:18383:18383`, then `docker compose up -d`. |
 | A bridge chat suddenly answers from `openai/gpt-oss-20b` (log: `Fallback activated`) | The bridge failed, timed out (180 s) or was busy (`429 bridge busy`, one request at a time), so Hermes used its NVIDIA fallback | Wait for the other chat to finish and ask again. `docker logs --tail 20 sourcecheck-bridge` shows `429` or errors. |
 | Model missing from `/model` | The bridge refreshes its model list from OpenCode every hour (`OPENCODE_BRIDGE_MODEL_REFRESH_INTERVAL`, default 3600 s); a model was renamed or retired | `curl -s http://127.0.0.1:18383/v1/models` and pick one it lists. Update `default_model` in `../hermes/config.yaml` if the default is gone. |
 

@@ -7,7 +7,7 @@
 #   sandbox/scripts/update_dns.sh --detect     # on the server: its own public IP
 #   sandbox/scripts/update_dns.sh --dry-run    # show what would change
 #
-# Token: CLOUDFLARE_API_TOKEN_FILE (default ~/Desktop/sandbox/creds/cloudflare/dns/api,
+# Token: CLOUDFLARE_API_TOKEN_FILE (default ~/.config/hermes-sandbox/creds/cloudflare/dns/api,
 # chmod 600; the first "cfat_..." or bare token in the file) or
 # CLOUDFLARE_API_TOKEN. Needs Zone:DNS:Edit and Zone:Zone:Read on the zone. The token is never
 # printed or put on a command line (it goes to curl in a private header file).
@@ -38,7 +38,7 @@ hdr="$(mktemp)"; trap 'rm -f "$hdr"' EXIT
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
   token="$CLOUDFLARE_API_TOKEN"
 else
-  f="${CLOUDFLARE_API_TOKEN_FILE:-$HOME/Desktop/sandbox/creds/cloudflare/dns/api}"
+  f="${CLOUDFLARE_API_TOKEN_FILE:-$HOME/.config/hermes-sandbox/creds/cloudflare/dns/api}"
   mode="$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f" 2>/dev/null || true)"  # GNU || macOS
   if [ -e "$f" ] && [ "$mode" != 600 ] && [ "$mode" != 400 ]; then
     echo "error: $f must be chmod 600 (it is ${mode:-unknown})" >&2; exit 2

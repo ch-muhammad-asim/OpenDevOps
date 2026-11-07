@@ -12,7 +12,7 @@ calling) and latency.
                                                  [--out-dir DIR] [--rpm 30]
 
 Credentials: the file named by CLOUDFLARE_AI_CREDS_FILE (default
-~/Desktop/sandbox/creds/cloudflare/AI/api.txt, chmod 600) with the lines
+~/.config/hermes-sandbox/creds/cloudflare/AI/api.txt, chmod 600) with the lines
 "Account ID: <id>" and "API: <token>", or CLOUDFLARE_ACCOUNT_ID and
 CLOUDFLARE_AI_TOKEN. The token is only sent in the Authorization header; the
 token and the account ID are redacted from all output. Stdlib only.
@@ -39,7 +39,7 @@ import urllib.parse
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4/accounts/{acct}/ai"
-DEFAULT_CREDS = os.path.expanduser("~/Desktop/sandbox/creds/cloudflare/AI/api.txt")
+DEFAULT_CREDS = os.path.expanduser("~/.config/hermes-sandbox/creds/cloudflare/AI/api.txt")
 TIMEOUT = 90.0
 UA = "hermes-cloudflare-ai-bench/1.0"
 

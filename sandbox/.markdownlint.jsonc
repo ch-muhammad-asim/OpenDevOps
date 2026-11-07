@@ -1,0 +1,6 @@
+// markdownlint config for sandbox/ docs. Long lines are kept on purpose:
+// GitHub soft-wraps prose and tables, and one line per paragraph or table
+// row keeps diffs readable. Every other default rule applies.
+{
+  "MD013": false
+}

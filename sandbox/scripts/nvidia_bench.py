@@ -10,7 +10,7 @@ result) and streaming latency (time to first token, total).
                                             [--out-dir DIR] [--rpm 30]
 
 Key: read from the file named by NVIDIA_API_KEY_FILE (default
-~/Desktop/sandbox/creds/nvidia/api, one line "API: nvapi-...") or
+~/.config/hermes-sandbox/creds/nvidia/api, one line "API: nvapi-...") or
 from NVIDIA_API_KEY. It is only ever sent in the Authorization header and is
 redacted (any "nvapi-..." string) from all output. Stdlib only.
 
@@ -43,7 +43,7 @@ import urllib.error
 import urllib.request
 
 BASE = "https://integrate.api.nvidia.com/v1"
-DEFAULT_KEY_FILE = os.path.expanduser("~/Desktop/sandbox/creds/nvidia/api")
+DEFAULT_KEY_FILE = os.path.expanduser("~/.config/hermes-sandbox/creds/nvidia/api")
 CONNECT_TIMEOUT = 30.0  # connect / first byte / per-read
 TOTAL_TIMEOUT = 90.0
 UA = "hermes-nvidia-bench/1.0"

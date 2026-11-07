@@ -52,7 +52,7 @@ For this project, that means:
 | 🤖 NVIDIA API key (`nvapi-…`, OpenShell provider `nvidia`) | Lets someone use our NVIDIA account and its rate limit, and impersonate us to NVIDIA. |
 | 💬 Prompts and chat content sent to the model | They leave the server and are processed by NVIDIA-hosted models. |
 | 🗂️ Hermes data (`hermes-data` volume: memory, sessions, config) | Private conversations and agent memory. |
-| 🌐 The public front door: https://hermes.saqlainmushtaq.com (web UI + `/v1` API) | The way in for people and API clients. |
+| 🌐 The public front door: <https://hermes.saqlainmushtaq.com> (web UI + `/v1` API) | The way in for people and API clients. |
 | 🏅 Origin certificate private key (`~/.config/hermes-sandbox/tls/origin.key`, once installed) | With it, someone could pretend to be our server to Cloudflare. |
 
 ### 🦹 Who or what could attack
@@ -174,12 +174,12 @@ Run these on the server, from the repo root (except `verify_https.sh`, see below
 | 🔎 Scans and SBOM | `sandbox/scripts/scan.sh` | All PASS. Image CVEs are listed as INFO and match the risk register. |
 
 > 🪙 **Model calls are opt-in.** `verify.sh`, `verify_https.sh` and `chat_e2e.py` send no prompt unless `LLM_CHECKS=1`; the demo sends real prompts only with `--with-llm`, capped by `LLM_BUDGET` (default 3 per run). Never loop the real model in automation; for QA use the default, exec-based path.
-
+>
 > 🧹 `security_compare.sh` starts a temporary plain-Docker Hermes container and **always removes it** afterwards. `verify.sh` deletes its own test chat sessions.
 
 Sample `policy_check.sh` output:
 
-```
+```text
 1. The real policy must stay inside the boundary
   PASS  hermes/policy.yaml: within_boundary
 2. Risky edits must be caught (anything but within_boundary)
@@ -199,7 +199,7 @@ Result: 10 passed, 0 failed
 ```
 
 > 📐 The **prover** is a mathematical solver (SMT), not a test that tries a few cases. `within_boundary` means *no possible* request in the modelled parts of the policy goes beyond the boundary.
-
+>
 > ⚠️ **`unsupported` is not a proof.** It means the prover couldn't model the change. Today that's true of **any** filesystem widening, such as making `/etc` writable, and of `audit` mode. Our script and CI **fail closed**: anything other than `within_boundary` counts as caught, as the OpenShell docs require. So for filesystem changes, the safety net is "a human must review this", not a mathematical proof.
 >
 > 🔍 One gap we found: deleting a rule's whole `binaries:` list still gives `within_boundary`. By the schema, an empty list matches **no** program, which means *less* access, so this is correct. Keep it in mind when reviewing, though.
@@ -216,13 +216,17 @@ Example: you want Hermes to read GitHub's API.
 4. 🤖 **CI** re-runs the prover and the scanners on the pull request.
 5. 🚀 **Apply after merge:**
    - Network rules apply **live**, with no restart:
+
      ```bash
      openshell policy set hermes --policy sandbox/hermes/policy.yaml --wait
      ```
+
    - Filesystem and process rules need a re-create:
+
      ```bash
      sandbox/scripts/down.sh && sandbox/scripts/up.sh
      ```
+
 6. ✅ **Re-run** `verify.sh` and `security_compare.sh`.
 
 > 🚫 **Never** use `enforcement: audit`, wildcard binaries (`/**`) or `access: full` to "make it work". The prover flags all three.
@@ -240,6 +244,7 @@ Example: you want Hermes to read GitHub's API.
 | Other LLM or cloud API keys (future) | **OpenShell providers**, the same way | Hermes's environment variables, `config.yaml` |
 
 How secrets reach Hermes:
+
 - The dashboard values are sent with `--env-from`, so they never appear in `ps` output.
 - `verify.sh` sends the test password through stdin, for the same reason.
 
@@ -248,13 +253,16 @@ How secrets reach Hermes:
 1. Generate new values. See README **Step 4**.
 2. Update `~/.config/hermes-sandbox/hermes.env`.
 3. Re-create the sandbox, since environment variables are set at creation:
+
    ```bash
    sandbox/scripts/down.sh && sandbox/scripts/up.sh
    ```
+
    Your data on the `hermes-data` volume is kept.
 4. A new `HERMES_DASHBOARD_BASIC_AUTH_SECRET` logs **everyone** out, which is what you want after a leak.
 
 🤖 **NVIDIA key** (no re-create needed):
+
 1. Create a new key on [build.nvidia.com](https://build.nvidia.com).
 2. On the server: `sandbox/scripts/set_nvidia_key.sh` (hidden prompt, or pipe the key on stdin). It updates the `nvidia` provider, restarts only the Hermes processes and checks the sandbox sees a placeholder.
 3. Revoke the old key on build.nvidia.com. If a key was **exposed**, revoke it first.
@@ -317,14 +325,17 @@ openssl x509 -in ~/.config/hermes-sandbox/tls/origin.pem -noout -enddate
 **Suspect Hermes was tricked or compromised?** Stay calm and follow the steps in order. 🧯
 
 1. **🛑 Contain:** cut Hermes off **without destroying evidence**.
+
    ```bash
    docker compose -f sandbox/traefik/docker-compose.yml stop   # close the public door (Cloudflare shows 521)
    openshell sandbox stop hermes                               # freeze the agent
    ```
+
    🚧 **Want a block page instead of an error?** In Cloudflare → **Security → WAF → Custom rules**, add *Hostname equals `hermes.saqlainmushtaq.com`* → **Block**. It works in seconds and keeps Traefik's logs flowing for the investigation.
 
    🏅 **Origin key may have leaked?** In Cloudflare → **SSL/TLS → Origin Server**, **revoke** the certificate, then install a new one (README Steps 6.2–6.4).
 2. **🧾 Preserve evidence** *before* deleting anything.
+
    ```bash
    mkdir -p ~/incident-$(date +%F) && cd ~/incident-$(date +%F)
    openshell logs hermes -n 2000 > openshell-events.log   # the CLI returns at most ~2000 lines
@@ -332,6 +343,7 @@ openssl x509 -in ~/.config/hermes-sandbox/tls/origin.pem -noout -enddate
    docker logs hermes-tunnel > tunnel.log 2>&1
    docker run --rm -v hermes-data:/d:ro -v "$PWD:/o" alpine tar czf /o/hermes-data.tgz -C /d .
    ```
+
    > 📼 `openshell logs` only keeps the most recent ~2000 events. For real deployments, **record events continuously**, for example `openshell logs hermes --tail >> ~/hermes-events.log` as a service, or the OCSF JSON export, so evidence exists *before* an incident.
 3. **🔍 Investigate:**
    - What was denied: `grep DENIED openshell-events.log`.
@@ -356,9 +368,9 @@ No system is perfectly secure. These are the risks we know about, why they exist
 
 | ID | Risk | Severity | Why it's accepted for now | Next step |
 |---|---|---|---|---|
-| R1 | 🔓 Dashboard on **plain HTTP** port 80 | ✅ Resolved | HTTPS at https://hermes.saqlainmushtaq.com: Cloudflare edge certificate for browsers, HTTP → HTTPS redirect, HSTS, `Secure` login cookie. Nothing publishes plain HTTP to the dashboard any more. The Cloudflare → server hop is tracked as R14. | Keep `verify_https.sh` passing |
+| R1 | 🔓 Dashboard on **plain HTTP** port 80 | ✅ Resolved | HTTPS at <https://hermes.saqlainmushtaq.com>: Cloudflare edge certificate for browsers, HTTP → HTTPS redirect, HSTS, `Secure` login cookie. Nothing publishes plain HTTP to the dashboard any more. The Cloudflare → server hop is tracked as R14. | Keep `verify_https.sh` passing |
 | R2 | 🧱 Docker-published ports **skip UFW** | 🟡 Mitigated (Low) | Only Traefik publishes ports, and only 80/443. Traefik accepts requests **only from Cloudflare's IP ranges** (others get `403`). | Also restrict 80/443 in the AWS security group to Cloudflare's ranges |
-| R3 | 🌉 OpenCode bridge (`sourcecheck-bridge`, **no authentication**) was published on **public `0.0.0.0:18383` and `[::]:18383`** | ✅ Resolved (2026-10-30) | Now published on **`127.0.0.1:18383` only** (`~/SourceCheck-Ai/docker-compose.yml`, container re-created). Hermes still reaches it (verified `200`): OpenShell's supervisor uses host networking and maps `host.openshell.internal` → `127.0.0.1`. Port 18383 is closed from the internet (verified). | `verify.sh` (section 8) and the demo's `reset.sh`/`run-all.sh` health checks fail if it's published anywhere but loopback |
+| R3 | 🌉 OpenCode bridge (`sourcecheck-bridge`, **no authentication**) was published on **public `0.0.0.0:18383` and `[::]:18383`** | ✅ Resolved (2026-10-30) | Now published on **`127.0.0.1:18383` only** (the bridge's Compose file; reference: `opencode/docker-compose.example.yml`). Hermes still reaches it (verified `200`): OpenShell's supervisor uses host networking and maps `host.openshell.internal` → `127.0.0.1`. Port 18383 is closed from the internet (verified). | `verify.sh` (section 8) and the demo's `reset.sh`/`run-all.sh` health checks fail if it's published anywhere but loopback |
 | R4 | 🚪 OpenShell gateway: **no TLS or login**, runs as root with the Docker socket | Medium | Listens on loopback only; it's the trusted control plane | Enable mTLS (OpenShell docs); treat as a host-level component |
 | R5 | 👶 Programs **started by Hermes inherit** its access to the model endpoints. OpenShell authorizes the connecting program **or one of its ancestors**. | Low | Limited to the bridge's 3 and NVIDIA's 2 allowed API routes (method + path enforced) | Keep the rule list minimal. Watch OpenShell for per-leaf binary options. |
 | R6 | 🔑 Dashboard secrets are environment variables inside Hermes | Low | Hermes itself needs them. Two protections: Hermes strips these secrets from the environment of tools it runs, and the sandbox stops other processes reading `/proc/<pid>/environ` (`proc.read_agent_env` is blocked). | Use OpenShell providers for any real API keys (done for the NVIDIA key, R24) |

@@ -89,7 +89,7 @@ Full tables: [screening, 1 round](results/cloudflare-2026-10-31.md) · [confirma
 
 ## ▶️ Run it
 
-Credentials: `~/Desktop/sandbox/creds/cloudflare/AI/api.txt`, folder `700`, file **`600`** (the script refuses anything looser), with the lines:
+Credentials: `~/.config/hermes-sandbox/creds/cloudflare/AI/api.txt` (or the file in `CLOUDFLARE_AI_CREDS_FILE`), folder `700`, file **`600`** (the script refuses anything looser), with the lines:
 
 ```text
 Account ID: <32-hex account id>

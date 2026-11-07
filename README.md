@@ -71,10 +71,11 @@ credentials and the DNS record to set. Prefer to do it by hand? Pick a target be
 | 🐳 | **Docker (Compose)** | Two-service Compose stack — bridge + Hermes, **Opus 5** default with **Fable 5** optional; runs anywhere Docker does | [`docker-bridge/`](./docker-bridge) |
 | 🐳 | **Docker (script)** | Scripted runtime with host-mode proxy and lifecycle subcommands (needs `flock`) | [`docker/`](./docker) |
 | ☸️ | **Kubernetes (GKE)** | Production: Hermes gateway + bridge sidecar, TLS, autoscaling | [`kubernetes/`](./kubernetes) |
+| 🛡️ | **Hermes in NVIDIA OpenShell (VM)** | Hermes Agent v0.23.0 sandboxed by OpenShell 0.1.6 behind Traefik + Cloudflare, NVIDIA models; guardrail demo with automated proofs | [`sandbox/`](./sandbox) |
 | 🧩 | **The bridge itself** | Cross-platform launcher + the Python bridge | [`claude-bridge-with-hermes/`](./claude-bridge-with-hermes) |
 | 🥧 | **pi-agents (macOS)** | The [pi](https://github.com/earendil-works/pi-mono) coding agent as Hermes' executing agent — every tool call through pi with Codex-style approvals (`reply approve`), one guardrail policy for Hermes and the terminal. Backends: OpenCode **free** models, **Claude Code CLI** (opus-5 / fable-5-1 / sonnet-5 on your subscription) | [`pi-agents/`](./pi-agents) |
 
-Every deployment exposes the same endpoint: **`http://<host>:18181/v1`**. Default model is
+Every bridge deployment exposes the same endpoint: **`http://<host>:18181/v1`** ([`sandbox/`](./sandbox) instead serves Hermes's own `/v1` API behind HTTPS). Default model is
 `claude-opus-4-8`, except [`docker-bridge/`](./docker-bridge) which defaults to **`claude-opus-5`** and
 also advertises **`claude-fable-5`** as an optional pick.
 

@@ -2,6 +2,8 @@
 
 Every script for running Hermes in the OpenShell sandbox: bring it up, put it behind HTTPS, manage keys and DNS, keep the disk clean, and prove it all works.
 
+> **Status (2026-11-07):** all scripts below run against Hermes Agent **v0.23.0** / OpenShell **v0.1.6**; latest results in [`../README.md` → Latest test results](../README.md#-latest-test-results). Every shell script passes `bash -n` and shellcheck in CI (`scan.sh`).
+>
 > 📘 Step-by-step setup: [`../README.md`](../README.md) · every variable and credential: [`../ENVIRONMENT.md`](../ENVIRONMENT.md) (§8 scripts, §9 tests, §10 benchmarks)
 
 ---
@@ -18,7 +20,8 @@ Every script for running Hermes in the OpenShell sandbox: bring it up, put it be
 | [`down.sh`](down.sh) | 🖥️ | Deletes the sandbox (the `hermes-data` volume is kept) and stops the host forwards; Traefik and the tunnel keep running. `--purge` also stops Traefik, the tunnel and the gateway and removes `hermes-data` (`/var/lib/openshell` stays; remove it with sudo). | – | ✅ |
 | [`https_up.sh`](https_up.sh) | 🖥️ | Starts `hermes-tunnel` and Traefik on 80/443; enables the origin certificate if present. Idempotent. | optional origin key (`600`) | ✅ |
 | [`set_nvidia_key.sh`](set_nvidia_key.sh) | 🖥️ | Stores or rotates the NVIDIA key in OpenShell (provider `nvidia`), attaches it, restarts the Hermes processes and the tunnel (`--no-restart` skips). Key from a hidden prompt or stdin. | 🔑 NVIDIA key | ✅ (open chats reload) |
-| [`update_dns.sh`](update_dns.sh) | 💻 | Points the Cloudflare `A` record at the IP in [`../site.env`](../site.env) (`--detect` on the server, `--dry-run` to preview). | 🔑 Cloudflare DNS token | ✅ DNS |
+| [`update_dns.sh`](update_dns.sh) | 💻 | Points the Cloudflare `A` record at the IP in your local `../site.env` (template: [`../site.env.example`](../site.env.example)) (`--detect` on the server, `--dry-run` to preview). | 🔑 Cloudflare DNS token | ✅ DNS |
+| [`forwards.sh`](forwards.sh) | 🖥️ | Starts the host-loopback forwards (`127.0.0.1:9119` dashboard, `127.0.0.1:8642` API) when their port does not answer, after the sandbox is `Ready`, retrying until both answer. Idempotent. Run at boot by the [`hermes-forwards`](../systemd/README.md) user unit (reboot-tested). | – | ✅ (only missing forwards) |
 | [`housekeeping.sh`](housekeeping.sh) | 🖥️ | Frees disk: build cache, dangling images, old demo logs. `--install-cron` runs it daily. | – | ✅ (only recreatable things) |
 
 ### 🧪 Tests
@@ -57,8 +60,11 @@ sandbox/scripts/up.sh && sandbox/scripts/https_up.sh
 read -rs HERMES_DASHBOARD_PASSWORD; export HERMES_DASHBOARD_PASSWORD
 sandbox/scripts/verify.sh                          # 👉 all PASS
 
+# server, after a reboot (idempotent; the hermes-forwards unit does this at boot)
+sandbox/scripts/forwards.sh                        # 👉 "answers HTTP" for 9119 and 8642
+
 # laptop, after a server restart that changed the IP
-$EDITOR sandbox/site.env                           # HERMES_ORIGIN_IP=<new ip>
+$EDITOR sandbox/site.env                           # HERMES_ORIGIN_IP=<new ip> (git-ignored; from site.env.example)
 sandbox/scripts/update_dns.sh
 sandbox/scripts/verify_https.sh                    # 👉 all PASS (2 WARN without an origin certificate)
 ```

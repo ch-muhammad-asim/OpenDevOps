@@ -3,7 +3,7 @@
 This is the reference for **every environment variable, `.env` file and credential** in the Hermes OpenShell sandbox (`sandbox/`): what each one does, its default, who reads it, and where an **API key or secret is required**. Each Docker Compose stack has a ready-to-copy `.env.example` file.
 
 - 📘 Setup guide: [README.md](README.md) · 🛡️ Security: [SECURITY.md](SECURITY.md) · ☸️ Kubernetes: [KUBERNETES.md](KUBERNETES.md)
-- ✅ Verified on 2026-10-31 against the live server (`docker compose config` for every stack, the scripts' own defaults and the running containers).
+- ✅ Verified on 2026-11-07 against the live server (Hermes Agent v0.23.0, OpenShell 0.1.6): `docker compose config` for every stack, the scripts' own defaults and the running containers.
 
 ## 📑 Contents
 
@@ -20,6 +20,7 @@ This is the reference for **every environment variable, `.env` file and credenti
 11. [Kubernetes](#️-11-kubernetes)
 12. [Rotating a credential](#-12-rotating-a-credential)
 13. [Troubleshooting](#-13-troubleshooting)
+14. [Pinned versions](#-14-pinned-versions)
 
 ---
 
@@ -29,9 +30,9 @@ This is the reference for **every environment variable, `.env` file and credenti
 |---|---|---|---|---|---|
 | 1 | 🔐 **Hermes dashboard login** | Logging in at `https://hermes…/` (web chat) | `HERMES_DASHBOARD_BASIC_AUTH_USERNAME`, `…_PASSWORD_HASH`, `…_SECRET` | `~/.config/hermes-sandbox/hermes.env` on the server (`600`), passed into the sandbox | [`hermes/hermes.env.example`](hermes/hermes.env.example) |
 | 2 | 🗝️ **Hermes API key** | The OpenAI-compatible API (`/v1/…`, `Authorization: Bearer`) | `API_SERVER_KEY` (Hermes) · `HERMES_API_KEY` (tests) | Same `hermes.env` | [`hermes/hermes.env.example`](hermes/hermes.env.example) |
-| 3 | 🤖 **NVIDIA API key** (`nvapi-…`) | Hermes's default models (NVIDIA API Catalog) | `NVIDIA_API_KEY` (placeholder in the sandbox; typed into `set_nvidia_key.sh`) | **OpenShell's credential store** (provider `nvidia`); operator copy on your laptop `~/Desktop/sandbox/creds/nvidia/api` (`600`, used by `nvidia_bench.py`) | [`providers/hermes-nvidia.yaml`](providers/hermes-nvidia.yaml), [`k8s/secret.example.yaml`](k8s/secret.example.yaml) |
-| 4 | 🌍 **Cloudflare DNS API token** | Pointing the `A` record at a new server IP (`update_dns.sh`) | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_API_TOKEN_FILE` | `~/Desktop/sandbox/creds/cloudflare/dns/api` (`600`) on your laptop | [`operator.env.example`](operator.env.example) |
-| 5 | ☁️ **Cloudflare Workers AI token + account ID** | Testing Cloudflare's free models (`cf_ai_bench.py`) | `CLOUDFLARE_AI_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_AI_CREDS_FILE` | `~/Desktop/sandbox/creds/cloudflare/AI/api.txt` (`600`) | [`cloudflare-ai/cloudflare-ai.env.example`](cloudflare-ai/cloudflare-ai.env.example) |
+| 3 | 🤖 **NVIDIA API key** (`nvapi-…`) | Hermes's default models (NVIDIA API Catalog) | `NVIDIA_API_KEY` (placeholder in the sandbox; typed into `set_nvidia_key.sh`) | **OpenShell's credential store** (provider `nvidia`); operator copy on your laptop `~/.config/hermes-sandbox/creds/nvidia/api` (`600`, used by `nvidia_bench.py`) | [`providers/hermes-nvidia.yaml`](providers/hermes-nvidia.yaml), [`k8s/secret.example.yaml`](k8s/secret.example.yaml) |
+| 4 | 🌍 **Cloudflare DNS API token** | Pointing the `A` record at a new server IP (`update_dns.sh`) | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_API_TOKEN_FILE` | `~/.config/hermes-sandbox/creds/cloudflare/dns/api` (`600`) on your laptop | [`operator.env.example`](operator.env.example) |
+| 5 | ☁️ **Cloudflare Workers AI token + account ID** | Testing Cloudflare's free models (`cf_ai_bench.py`) | `CLOUDFLARE_AI_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_AI_CREDS_FILE` | `~/.config/hermes-sandbox/creds/cloudflare/AI/api.txt` (`600`) | [`cloudflare-ai/cloudflare-ai.env.example`](cloudflare-ai/cloudflare-ai.env.example) |
 | 6 | 🏅 **Cloudflare Origin Certificate** *(optional)* | SSL mode *Full (strict)* between Cloudflare and Traefik | `TRAEFIK_TLS_DIR` (folder) | `~/.config/hermes-sandbox/tls/origin.pem` + `origin.key` (`600`) | [`traefik/.env.example`](traefik/.env.example) |
 | 7 | 🪪 **OIDC client secret** *(Kubernetes only)* | The provider-bootstrap Job logging in to the gateway | `OIDC_CLIENT_SECRET_FILE` | A Kubernetes Secret mounted as a file | [`k8s/provider-bootstrap-job.yaml`](k8s/provider-bootstrap-job.yaml) |
 
@@ -78,13 +79,29 @@ flowchart LR
   CF --> TR -->|"via hermes-tunnel, gateway, supervisor"| H
 ```
 
-The point of this layout: **Hermes never holds the NVIDIA key**. It only sees a placeholder, and the OpenShell supervisor swaps in the real key only on requests to `integrate.api.nvidia.com`. The secrets Hermes does hold (its own login and API key) are scrubbed from the commands its tools run, and nothing in the sandbox can send them anywhere except the approved model routes (see [README §6](README.md) and [SECURITY.md](SECURITY.md)).
+| Node | One line |
+|---|---|
+| Cloudflare DNS token file | Read by `update_dns.sh` to update the `A hermes` record (path in §8.2) |
+| Workers AI token file | Account ID and token read by `cloudflare-ai/cf_ai_bench.py` |
+| NVIDIA key file (operator copy) | Read by `scripts/nvidia_bench.py` for benchmarks |
+| Dashboard password | Typed with `read -rs` for `verify.sh`, `verify_https.sh` and `browser_check.sh`; never stored in clear |
+| Cloudflare DNS API, Workers AI, NVIDIA API | External APIs those scripts call |
+| Cloudflare edge | Public HTTPS front door in front of Traefik |
+| `hermes.env` | Dashboard login hash, session secret and API key, passed by `up.sh --env-from` |
+| NVIDIA key | Typed or piped into `set_nvidia_key.sh`; stored only in OpenShell |
+| `tls/origin.key` | Optional Cloudflare Origin Certificate key, read by Traefik |
+| OpenShell credential store | Gateway database holding the `nvidia` provider |
+| Hermes | Sees only the placeholder, never the key |
+| Supervisor | Swaps the placeholder for the real key on `integrate.api.nvidia.com` only |
+| Traefik | Origin proxy; reaches Hermes through `hermes-tunnel` |
+
+The point of this layout: **Hermes never holds the NVIDIA key**. It only sees a placeholder, and the OpenShell supervisor swaps in the real key only on requests to `integrate.api.nvidia.com`. The secrets Hermes does hold (its own login and API key) are scrubbed from the commands its tools run, and nothing in the sandbox can send them anywhere except the approved model routes (see [demo → Known limits](demo/README.md#known-limits-residual-risks) and [SECURITY.md](SECURITY.md)).
 
 ---
 
 ## 🛡️ 3. Rules for secrets
 
-1. 🙈 **Never in git.** `.gitignore` blocks `*.env`, `.env`, `.env.*`, `*.key` and `*.pem`; only `*.env.example`, `.env.example` and `site.env` are committed. Example files hold **placeholders only** (`REPLACE`). `scripts/scan.sh` (gitleaks) fails CI on a leaked secret.
+1. 🙈 **Never in git.** `.gitignore` blocks `*.env`, `.env`, `.env.*`, `*.key` and `*.pem`; only `*.env.example`, `.env.example` and `site.env.example` are committed; your `site.env` (with the server IP) stays local. Example files hold **placeholders only** (`REPLACE`). `scripts/scan.sh` (gitleaks) fails CI on a leaked secret.
 2. 🔒 **`chmod 600` files, `700` folders.** Create them with `install -m 600 …` or under `umask 077`. `update_dns.sh`, `cf_ai_bench.py` and `https_up.sh` (for `origin.key`) **refuse** a credential file that's readable by others.
 3. ⌨️ **Never on a command line.** Values on a command line show up in `ps` and shell history. Type them with `read -rs VAR; export VAR`, or let the script read the file. The scripts pass secrets on **stdin** or in private temp files (curl `-H @file`, `--env-from`).
 4. 🧾 **Never printed.** No script prints a secret, its length or a prefix. Reports from `cf_ai_bench.py` and `nvidia_bench.py` are redacted, and `cf_ai_bench.py` deletes a report that would contain one.
@@ -103,8 +120,8 @@ The point of this layout: **Hermes never holds the NVIDIA key**. It only sees a 
 | [`traefik/.env.example`](traefik/.env.example) | `sandbox/traefik/.env` | `docker compose` for Traefik (`https_up.sh` sets these for you) | no (points at the origin key's folder) |
 | [`opencode/bridge.env.example`](opencode/bridge.env.example) | `sandbox/opencode/bridge.env` | [`opencode/docker-compose.example.yml`](opencode/docker-compose.example.yml) (`env_file`) | no |
 | [`operator.env.example`](operator.env.example) | `~/.config/hermes-sandbox/operator.env` (`600`) | You, before running scripts (`set -a; . file; set +a`) | no (paths only) |
-| [`cloudflare-ai/cloudflare-ai.env.example`](cloudflare-ai/cloudflare-ai.env.example) | `~/Desktop/sandbox/creds/cloudflare/AI/api.txt` (`600`) | `cloudflare-ai/cf_ai_bench.py` | ✅ yes |
-| [`site.env`](site.env) | (committed as is) | `update_dns.sh`, `verify_https.sh`, `browser_check.sh` (the other scripts carry the same hostname as a built-in default) | no: hostname, server IP, SSH user |
+| [`cloudflare-ai/cloudflare-ai.env.example`](cloudflare-ai/cloudflare-ai.env.example) | `~/.config/hermes-sandbox/creds/cloudflare/AI/api.txt` (`600`) | `cloudflare-ai/cf_ai_bench.py` | ✅ yes |
+| [`site.env.example`](site.env.example) | `sandbox/site.env` (git-ignored, next to the example) | `update_dns.sh`, `verify_https.sh`, `browser_check.sh` (the other scripts carry the same hostname as a built-in default) | no: hostname and the server's public IP (no secrets) |
 | [`k8s/secret.example.yaml`](k8s/secret.example.yaml) | Created with `kubectl create secret … --from-file=/dev/stdin` | Kubernetes provider-bootstrap Job | ✅ yes (placeholder only) |
 
 Every `.env` for Compose is **optional**: each variable has a default in the compose file, so the stack runs without one.
@@ -237,7 +254,7 @@ File [`traefik/docker-compose.yml`](traefik/docker-compose.yml), example [`traef
 
 ### 7.4 OpenCode bridge
 
-Reference file [`opencode/docker-compose.example.yml`](opencode/docker-compose.example.yml), env file [`opencode/bridge.env.example`](opencode/bridge.env.example). On the server the bridge runs as service `bridge` of the SourceCheck stack (`~/SourceCheck-Ai/docker-compose.yml`); the example matches it. Details: [`opencode/README.md`](opencode/README.md).
+Reference file [`opencode/docker-compose.example.yml`](opencode/docker-compose.example.yml), env file [`opencode/bridge.env.example`](opencode/bridge.env.example). On a server the bridge can run from this example or as service `bridge` of your own Compose stack, published on `127.0.0.1:18383` only. Details: [`opencode/README.md`](opencode/README.md).
 
 | Variable | Value on the server | Meaning |
 |---|---|---|
@@ -247,7 +264,7 @@ Reference file [`opencode/docker-compose.example.yml`](opencode/docker-compose.e
 | `OPENCODE_BRIDGE_MAX_CONCURRENCY` | `1` | Requests at a time |
 | `OPENCODE_BRIDGE_QUEUE_WAIT` | `30` *(bridge default)* | Seconds a request waits for a slot before `429 bridge busy` |
 | `OPENCODE_BRIDGE_TIMEOUT` | `180` | Seconds per request |
-| `OPENCODE_BRIDGE_FREE_ONLY` | `1` | Not read by bridge `1.0.0`; free-only is its built-in default |
+| `OPENCODE_BRIDGE_FREE_ONLY` | `1` | Not read by bridge `1.0.0` (image `sourcecheck-bridge:1.1.0`); free-only is its built-in default |
 | `OPENCODE_BRIDGE_API_KEY` | *(unset)* | Optional client key (`Authorization: Bearer`). If you set it, Hermes must send the same value: `up.sh` hard-codes `--env OPENCODE_BRIDGE_API_KEY=not-needed`, so change that line (or delete it and put the key in `hermes.env`, never both) and re-create the sandbox. |
 
 Other variables bridge `1.0.0` reads, all left at their defaults here: `OPENCODE_BRIDGE_MODELS`, `OPENCODE_BRIDGE_MODEL_PROVIDERS`, `OPENCODE_BRIDGE_MODEL_REFRESH_INTERVAL` (3600 s), `OPENCODE_BRIDGE_MODEL_CACHE`, `OPENCODE_BRIDGE_AGENT`, `OPENCODE_BRIDGE_VARIANT`, `OPENCODE_BRIDGE_SHOW_REASONING`, `OPENCODE_BRIDGE_SHOW_TOOLS`, `OPENCODE_BRIDGE_MAX_IMAGES`, `OPENCODE_BRIDGE_MAX_IMAGE_BYTES`, `OPENCODE_BRIDGE_MAX_PROMPT_CHARS`, `OPENCODE_BRIDGE_CWD` (image: `/work`), `OPENCODE_BIN` (image: `/home/bridge/.opencode/bin/opencode`) and `BRIDGE_SELFCHECK`. Their meaning is in the bridge's source, [`../opencode/hermes-desktop/opencode_bridge.py`](../opencode/hermes-desktop/opencode_bridge.py) (`--help`).
@@ -265,12 +282,12 @@ Run on the server unless noted. Put your settings in a copy of [`operator.env.ex
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
 | `HERMES_HOST` | `hermes.saqlainmushtaq.com` (from `site.env` in `update_dns.sh`, `verify_https.sh`, `browser_check.sh`; built-in default elsewhere) | `https_up.sh`, `update_dns.sh`, `verify.sh`, `verify_https.sh`, `browser_check.sh` | Public hostname |
-| `HERMES_ORIGIN_IP` | from `site.env` | `update_dns.sh`, `verify_https.sh` | Server's public IP. **Changes on every restart.** |
+| `HERMES_ORIGIN_IP` | from your local `site.env` (never committed) | `update_dns.sh`, `verify_https.sh` | Server's public IP. **Changes on every restart.** |
 | `OPENSHELL` | `openshell` | almost all | CLI binary (`~/.local/bin/openshell`) |
 | `SANDBOX_NAME` | `hermes` | almost all | Sandbox name |
 | `HERMES_ENV_FILE` | `~/.config/hermes-sandbox/hermes.env` | `up.sh`, `verify.sh`, `verify_https.sh`, demo | Hermes secrets (section 6.1) |
 | `HERMES_IMAGE` | `nousresearch/hermes-agent:v0.23.0` | `up.sh`, `scan.sh`, tests | Upstream Hermes image |
-| `DASHBOARD_PORT` / `API_PORT` | `9119` / `8642` | `up.sh`, `down.sh`, tests | Hermes ports |
+| `DASHBOARD_PORT` / `API_PORT` | `9119` / `8642` | `up.sh`, `down.sh`, `forwards.sh`, tests | Hermes ports |
 | `HERMES_ADDR` | `172.31.250.10` | `verify.sh`, `set_nvidia_key.sh`, demo | Reach Hermes through `hermes-tunnel` (use `127.0.0.1` for `up.sh`'s host forwards) |
 
 ### 8.2 Per script
@@ -283,11 +300,13 @@ Run on the server unless noted. Put your settings in a copy of [`operator.env.ex
 | | `TMP_SIZE_BYTES` | `536870912` | Size of the sandbox's `/tmp` (512 MiB) |
 | | `HERMES_PROVIDERS` | `nvidia` if it exists | OpenShell providers to attach |
 | `down.sh` | `DATA_VOLUME` | `hermes-data` | Deleted only with `--purge` |
+| `forwards.sh` | `WAIT_SECONDS` | `300` | How long to wait for the gateway and the sandbox to be `Ready` |
+| | `GATEWAY_NAME` | `hermes-gw` | Gateway to select before checking |
 | `https_up.sh` | `NETWORK` | `openshell_default` | Gateway's Docker network |
 | | `TRAEFIK_UID` / `TRAEFIK_GID` / `TRAEFIK_TLS_DIR` | your uid/gid, `~/.config/hermes-sandbox/tls` | Passed to Traefik's compose (7.3) |
 | `set_nvidia_key.sh` | 🔑 *(no variable)* | hidden prompt, or **stdin** | The NVIDIA key is read from a hidden prompt or piped in (`< key-file`, a raw `nvapi-…` or an `API: nvapi-…` line); it is never taken from the environment or a command line. Option `--no-restart`: don't restart the Hermes processes and the tunnel. |
 | | `PROVIDER` | `nvidia` | OpenShell provider to create or update |
-| `update_dns.sh` *(laptop)* | 🔑 `CLOUDFLARE_API_TOKEN_FILE` | `~/Desktop/sandbox/creds/cloudflare/dns/api` | File with the token (`600`, the first `cfat_…` or bare token in it). Needs **Zone → DNS → Edit** and **Zone → Zone → Read** on this zone. |
+| `update_dns.sh` *(laptop)* | 🔑 `CLOUDFLARE_API_TOKEN_FILE` | `~/.config/hermes-sandbox/creds/cloudflare/dns/api` | File with the token (`600`, the first `cfat_…` or bare token in it). Needs **Zone → DNS → Edit** and **Zone → Zone → Read** on this zone. |
 | | 🔑 `CLOUDFLARE_API_TOKEN` | *(unset)* | The token itself, instead of a file |
 | | `CLOUDFLARE_ZONE` | the domain part of `HERMES_HOST` | Zone name |
 | `housekeeping.sh` | `HOUSEKEEPING_LOG` | `~/.local/state/hermes-housekeeping.log` | Log file |
@@ -362,9 +381,9 @@ Run from your laptop. Each needs its own API key; the reports are redacted.
 
 | Script | Variable | Default | Meaning |
 |---|---|---|---|
-| `scripts/nvidia_bench.py` | 🔑 `NVIDIA_API_KEY_FILE` | `~/Desktop/sandbox/creds/nvidia/api` | File with one line `API: nvapi-…` (or the bare key) |
+| `scripts/nvidia_bench.py` | 🔑 `NVIDIA_API_KEY_FILE` | `~/.config/hermes-sandbox/creds/nvidia/api` | File with one line `API: nvapi-…` (or the bare key) |
 | | 🔑 `NVIDIA_API_KEY` | *(unset)* | The key itself, instead of a file |
-| `cloudflare-ai/cf_ai_bench.py` | 🔑 `CLOUDFLARE_AI_CREDS_FILE` | `~/Desktop/sandbox/creds/cloudflare/AI/api.txt` | `600` file with `Account ID: …` and `API: …` lines. Token from Cloudflare's **Workers AI** template. |
+| `cloudflare-ai/cf_ai_bench.py` | 🔑 `CLOUDFLARE_AI_CREDS_FILE` | `~/.config/hermes-sandbox/creds/cloudflare/AI/api.txt` | `600` file with `Account ID: …` and `API: …` lines. Token from Cloudflare's **Workers AI** template. |
 | | 🔑 `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_AI_TOKEN` | *(unset)* | Both values instead of the file (both must be set) |
 
 Neither key is used by Hermes. Hermes's NVIDIA key is the one in OpenShell (6.3), and Hermes isn't connected to Cloudflare Workers AI.
@@ -429,4 +448,16 @@ After any rotation, run `verify.sh` on the server and `verify_https.sh` from you
 | Hermes: *"connection error"* on NVIDIA models | Provider missing or not attached | `sandbox/scripts/set_nvidia_key.sh` |
 | A `.env` change has no effect | It's in the wrong folder (Compose reads it from the compose file's folder), or a shell variable with the same name wins | `docker compose -f <file> config` shows the values in effect; `unset VAR` |
 | `git status` shows an env file | Outside `sandbox/`, only `.env` and `.env.*` are ignored, not `name.env`; inside `sandbox/`, a name that doesn't end in `.env` | Rename it, or keep it in `~/.config/hermes-sandbox/` |
-| `HERMES_ADDR=127.0.0.1` tests fail, `openshell forward list` shows the 127.0.0.1 forwards as **dead** | `up.sh`'s host forwards don't survive a server or gateway restart (the tunnel's do) | Use the default `HERMES_ADDR=172.31.250.10`, or `sandbox/scripts/down.sh && sandbox/scripts/up.sh` to restore them |
+| `HERMES_ADDR=127.0.0.1` tests fail, `openshell forward list` shows the 127.0.0.1 forwards as **dead** or missing | The host forwards don't survive a server or gateway restart (the tunnel's do) | Use the default `HERMES_ADDR=172.31.250.10`, or restore them with `sandbox/scripts/forwards.sh` (the [`hermes-forwards`](systemd/README.md) user unit does this at boot) |
+
+---
+
+## 📌 14. Pinned versions
+
+| Component | Version | Pinned in |
+|---|---|---|
+| NVIDIA OpenShell (gateway, supervisor, CLI, prover) | `0.1.6` | `openshell/docker-compose.yml`, `tunnel/Dockerfile`, `scripts/policy_check.sh` |
+| Hermes Agent | `nousresearch/hermes-agent:v0.23.0` → `hermes-openshell:v0.23.0` | `hermes/Dockerfile`, `scripts/up.sh`, `scripts/scan.sh` |
+| Traefik | `traefik:v3.7.15` | `traefik/docker-compose.yml` |
+| hermes-tunnel | `hermes-tunnel:0.1.6` (`alpine:3.24.2`) | `tunnel/docker-compose.yml`, `tunnel/Dockerfile` |
+| OpenCode bridge | app `1.0.0` in image `sourcecheck-bridge:1.1.0` (full name in the compose file) | `opencode/docker-compose.example.yml` |

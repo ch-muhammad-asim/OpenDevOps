@@ -1,8 +1,7 @@
 # Real secrets live in ~/.config/hermes-sandbox/, never in the repo.
 *.env
 !*.env.example
-# Non-secret site settings (hostname, server IP) are meant to be committed.
-!site.env
+# Site settings: only the template is committed; your site.env (server IP) stays local.
 
 # Python bytecode
 __pycache__/

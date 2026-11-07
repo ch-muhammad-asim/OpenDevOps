@@ -1,7 +1,6 @@
-# Reference compose file for the OpenCode bridge, matching the live
-# `sourcecheck-bridge` service (service `bridge` in
-# ~/SourceCheck-Ai/docker-compose.yml on the server). Use it to run the bridge
-# on its own, e.g. on a new server:
+# Reference compose file for the OpenCode bridge (container
+# `sourcecheck-bridge`, service `bridge`), matching the deployed service.
+# Use it to run the bridge on its own, e.g. on a new server:
 #
 #   cp sandbox/opencode/bridge.env.example sandbox/opencode/bridge.env
 #   docker compose -f sandbox/opencode/docker-compose.example.yml up -d

@@ -31,7 +31,7 @@ Each round: a random `a + b` (exact answer), a `list_dir` tool call with valid J
 
 ## ▶️ Re-run
 
-Run from your laptop (key in `~/Desktop/sandbox/creds/nvidia/api`, `600`); re-run before changing models and whenever NVIDIA retires one:
+Run from your laptop (key in `~/.config/hermes-sandbox/creds/nvidia/api` or the file in `NVIDIA_API_KEY_FILE`, `600`); re-run before changing models and whenever NVIDIA retires one:
 
 ```bash
 python3 sandbox/scripts/nvidia_bench.py                              # screening: every chat model, 1 round
