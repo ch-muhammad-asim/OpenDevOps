@@ -1,0 +1,26 @@
+# Non-root sshd in hermes-herdr-work. The only thing a login can do is run herdr-broker, which reads a herdr argv
+# on stdin, checks it against a fixed allowlist and runs the real herdr. No shell, no PTY, no forwarding.
+Port 2222
+ListenAddress 0.0.0.0
+HostKey /data/hostkey/ssh_host_ed25519_key
+PidFile /tmp/sshd.pid
+AuthorizedKeysFile /ctlkeys/authorized_keys
+AllowUsers herdr
+ForceCommand /usr/local/libexec/herdr-broker
+PermitTTY no
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+X11Forwarding no
+PermitTunnel no
+PermitUserEnvironment no
+PermitUserRC no
+StrictModes yes
+ClientAliveInterval 30
+LogLevel VERBOSE

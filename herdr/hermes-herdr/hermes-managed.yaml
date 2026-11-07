@@ -1,0 +1,101 @@
+# Hermes Agent v0.22.5 managed ("administrator") config for the herdr-hermes POC.
+# Installed root-owned and read-only at /etc/hermes/config.yaml: Hermes applies it over the user config and
+# refuses to change these keys at runtime ("managed by your administrator"), so the agent cannot relax its
+# own guardrails. Option names checked against the code in nousresearch/hermes-agent:v0.22.5 and
+# https://hermes-agent.nousresearch.com/docs/user-guide/security.
+
+approvals:
+  mode: "manual"                  # manual|smart|off. manual = a human approves every flagged command (default smart lets a model approve)
+  timeout: 120                    # seconds; no answer = denied
+  cron_mode: "deny"               # scheduled runs never auto-approve
+  single_query_mode: "deny"       # `hermes -q` never auto-approves
+  unattended_mode: "deny"         # API/webhook runs never auto-approve
+  denial_breaker_threshold: 3     # after 3 denials in a row the agent must stop and ask
+  deny:                           # case-insensitive globs over the whole command; blocked even under --yolo
+    - "*rm -rf /*"
+    - "*sudo *"
+    - "sudo"
+    - "su"
+    - "su *"
+    - "*/su *"
+    - "* su *"
+    - "doas"
+    - "*doas *"
+    - "pkexec"
+    - "*pkexec *"   # bare sudo and other privilege tools (none exist in the workbench; defence in depth)
+    - "*curl *|*sh*"
+    - "*wget *|*sh*"
+    - "*git push*"
+    - "*docker *"
+    # herdr (herdr-operator skill): defence in depth on top of the workbench isolation (terminal.backend below)
+    - "*herdr server stop*"
+    - "*herdr * close*"
+    - "*herdr --machine*"
+    - "*herdr --remote*"
+    - "*herdr --session*"
+    - "*herdr update*"
+    - "*herdr integration*"
+    - "*herdr config*"
+    - "*herdr agent send-keys*"
+    - "*herdr agent prompt*"
+    - "*herdr agent start*"
+    - "*herdr machine*"
+command_allowlist: []             # "always allow" answers would be stored here; kept empty
+
+# Every terminal and file tool call runs in the hermes-workbench container over SSH, never in this container:
+# nothing Hermes executes can reach this container's herdr socket (Hermes's own pane and approval prompt), the
+# NVIDIA key, or this config. Pinned here so the agent cannot switch back to the local backend.
+terminal:
+  backend: "ssh"
+  ssh_host: "172.31.252.20"
+  ssh_user: "worker"
+  ssh_port: 2222
+  ssh_key: "/data/hermes/ssh/id_ed25519"
+  ssh_persistent: true
+  cwd: "/work/workspace"
+  timeout: 180
+  env_passthrough: []             # nothing from this container's environment is forwarded
+  client_env_passthrough: []
+
+security:
+  redact_secrets: true            # masks secrets in tool output, logs and approval prompts
+  allow_private_urls: false       # SSRF guard for URL fetches
+  allow_lazy_installs: false      # no automatic package installs
+  protected_instruction_files: true  # edits to AGENTS.md / SOUL.md / Hermes config always need a human
+  approval:
+    transport: "builtin"
+    transport_fallback: "deny"
+
+platform_toolsets:
+  cli: [terminal, file, todo, clarify]   # least privilege: shell (with approvals), file tools, todo list, questions
+
+agent:
+  max_turns: 30                   # stop runaway tool loops
+  budget_warning_ratio: 0.8
+  run_budget_seconds: 1800        # wall-clock limit per run
+  disabled_toolsets: [web, search, browser, code_execution, delegation, cronjob, memory, session_search,
+                      connections, skills, computer_use, vision, image_gen, tts, kanban, x_search, video,
+                      video_gen, stt]
+
+tools:
+  connectors: {enabled: false}    # no remote connectors
+mcp_servers: {}                   # no MCP servers
+
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+  nudge_interval: 0
+  write_approval: true
+skills:
+  external_dirs: ["/opt/hermes-herdr/skills"]   # root-owned, read-only image path with the one skill (herdr-operator)
+  creation_nudge_interval: 0
+  write_approval: true            # skill changes are staged for a human
+  guard_agent_created: true
+  inline_shell: false
+  project_discovery: false
+curator: {enabled: false}
+auxiliary:
+  background_review: {enabled: false}   # no post-turn "save memory / patch skill" runs
+delegation:
+  subagent_auto_approve: false
+  max_spawn_depth: 1

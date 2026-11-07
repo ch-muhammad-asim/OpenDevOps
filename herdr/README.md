@@ -8,8 +8,11 @@ This folder covers how to **install Herdr** and how to get the **Herdr Mobile** 
 
 ```text
 herdr/
-└── README.md                       # 👈 You are here
+├── README.md                       # 👈 You are here
+└── hermes-herdr/                   # 🤖 POC: herdr driving Hermes Agent in hardened containers
 ```
+
+🤖 **herdr + Hermes Agent POC:** [hermes-herdr/README.md](hermes-herdr/README.md) shows herdr running Hermes Agent as a recognised agent (`hermes`) in hardened containers, with Hermes's own guardrails locked, an OS-enforced herdr allowlist for its one skill, and end-to-end tests.
 
 ## 🧩 Supported Platforms
 

@@ -1,0 +1,2 @@
+# work/ here is source (the hermes-herdr-work container), not the runtime state the root .gitignore excludes.
+!work/

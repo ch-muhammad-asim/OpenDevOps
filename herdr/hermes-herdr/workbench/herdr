@@ -1,0 +1,8 @@
+#!/bin/sh
+# `herdr` in the workbench is only a client: it sends its arguments, NUL-separated, to herdr-broker in
+# hermes-herdr-work, which checks them against a fixed allowlist and runs the real herdr there (no shell).
+# The real herdr binary does not exist in this container.
+printf '%s\0' "$@" | exec ssh -T -q -i /var/lib/workbench/ctl_ed25519 \
+  -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile=/panekeys/broker_known_hosts \
+  -p 2222 herdr@172.31.252.21

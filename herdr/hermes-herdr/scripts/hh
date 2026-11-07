@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# hh: run herdr commands against the containerized herdr + Hermes, from the server or from your PC.
+#   On the server:        scripts/hh agent list
+#   From your PC (SSH):   HERMES_HERDR_SSH=user@server scripts/hh agent prompt hermes "..." --wait --timeout 300000
+# It only wraps `docker exec herdr-hermes herdr ...` (over SSH when HERMES_HERDR_SSH is set): no port, no herdr
+# socket leaves the container.
+set -euo pipefail
+CONTAINER="${HERMES_HERDR_CONTAINER:-herdr-hermes}"
+if [[ -n "${HERMES_HERDR_SSH:-}" ]]; then
+  # printf %q keeps every argument (prompts with spaces/quotes) intact through the remote shell.
+  exec ssh -o BatchMode=yes "${HERMES_HERDR_SSH}" "docker exec -i ${CONTAINER} herdr $(printf '%q ' "$@")"
+fi
+exec docker exec -i "${CONTAINER}" herdr "$@"

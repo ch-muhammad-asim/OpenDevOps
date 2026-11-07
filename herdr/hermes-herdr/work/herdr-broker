@@ -1,0 +1,106 @@
+#!/usr/bin/python3 -I
+"""herdr-broker: the only way into the work herdr server (sshd ForceCommand for user `herdr`).
+
+The workbench's `herdr` command is a client that sends its argv NUL-separated on stdin. This broker parses that
+argv exactly (no shell, no string matching), allows only the pane operations the herdr-operator skill needs, and
+execs the real herdr binary with the validated argv. Anything else is refused with exit code 126.
+The command line sent by the ssh client (SSH_ORIGINAL_COMMAND) is ignored.
+"""
+import os
+import re
+import sys
+
+REAL = "/usr/local/bin/herdr"
+MAX_REQUEST = 64 * 1024
+PANE = re.compile(r"^w[0-9]{1,4}:p[0-9]{1,4}$")
+WORKSPACE = re.compile(r"^w[0-9]{1,4}$")
+LABEL = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+SOURCES = {"visible", "recent", "recent-unwrapped"}
+
+
+def deny(reason: str) -> None:
+    sys.stderr.write(f"herdr-broker: denied: {reason}\n")
+    sys.exit(126)
+
+
+def number(lo: int, hi: int):
+    return lambda v: v.isdigit() and lo <= int(v) <= hi
+
+
+def ratio(v: str) -> bool:
+    try:
+        return 0.1 <= float(v) <= 0.9
+    except ValueError:
+        return False
+
+
+def text(limit: int):
+    return lambda v: 0 < len(v) <= limit and "\n" not in v
+
+
+# subcommand -> allowed options (validator per value), allowed flags, number of pane-id positionals (min, max)
+SPEC = {
+    "list": ({"--workspace": WORKSPACE.match}, set(), (0, 0)),
+    "get": ({}, set(), (1, 1)),
+    "layout": ({"--pane": PANE.match}, set(), (0, 0)),
+    "read": ({"--source": SOURCES.__contains__, "--lines": number(1, 1000), "--format": "text".__eq__},
+             {"--raw"}, (1, 1)),
+    "wait-output": ({"--match": text(500), "--regex": text(500), "--source": SOURCES.__contains__,
+                     "--lines": number(1, 1000), "--timeout": number(1, 900000)}, {"--raw"}, (1, 1)),
+    "split": ({"--pane": PANE.match, "--direction": {"right", "down"}.__contains__, "--ratio": ratio,
+               "--cwd": "/work/workspace".__eq__}, {"--no-focus", "--focus"}, (0, 1)),
+    "rename": ({}, {"--clear"}, (1, 1)),
+}
+
+
+def parse(argv: list[str]) -> None:
+    if len(argv) < 2 or argv[0] != "pane":
+        deny("only `herdr pane <list|get|layout|read|wait-output|split|run|rename>` is allowed")
+    sub, rest = argv[1], argv[2:]
+    if sub == "run":  # herdr pane run <PANE_ID> <COMMAND>: one command string, typed into a workbench shell
+        if len(rest) != 2 or not PANE.match(rest[0]) or not rest[1] or rest[1].startswith("-") or len(rest[1]) > 8192:
+            deny("usage: herdr pane run <PANE_ID> '<command>'")
+        return
+    if sub not in SPEC:
+        deny(f"pane {sub!r} is not allowed")
+    opts, flags, (lo, hi) = SPEC[sub]
+    positional, seen, i = [], set(), 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok in flags:
+            seen.add(tok)
+        elif tok in opts:
+            if i + 1 >= len(rest) or not opts[tok](rest[i + 1]):
+                deny(f"bad value for {tok}")
+            seen.add(tok)
+            i += 1
+        elif tok.startswith("-"):
+            deny(f"option {tok!r} is not allowed for pane {sub}")
+        else:
+            positional.append(tok)
+        i += 1
+    if sub == "rename":  # pane id, then one label word (or --clear)
+        if not positional or not PANE.match(positional[0]) or len(positional) > 2 \
+                or (len(positional) == 2 and not LABEL.match(positional[1])):
+            deny("usage: herdr pane rename <PANE_ID> <label>")
+        return
+    if not lo <= len(positional) <= hi or not all(PANE.match(p) for p in positional):
+        deny(f"pane {sub} takes {lo}-{hi} pane id(s) like w1:p2")
+    if sub == "wait-output" and ("--timeout" not in seen or not seen & {"--match", "--regex"}):
+        deny("wait-output needs --timeout and --match or --regex")
+
+
+def main() -> None:
+    data = sys.stdin.buffer.read(MAX_REQUEST + 1)
+    if len(data) > MAX_REQUEST or not data.endswith(b"\0"):
+        deny("malformed request")
+    try:
+        argv = [a.decode("utf-8") for a in data[:-1].split(b"\0")]
+    except UnicodeDecodeError:
+        deny("request is not UTF-8")
+    parse(argv)
+    os.execv(REAL, [REAL, *argv])
+
+
+if __name__ == "__main__":
+    main()

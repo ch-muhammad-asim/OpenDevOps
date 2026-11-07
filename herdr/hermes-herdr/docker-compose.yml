@@ -1,0 +1,138 @@
+# herdr + Hermes Agent POC: four hardened containers on an internal-only network.
+#   herdr-hermes         herdr server + Hermes Agent TUI pane (holds the NVIDIA key)
+#   hermes-workbench     where Hermes's terminal/file tools run over SSH (no secrets, no internet, no real herdr)
+#   hermes-herdr-work    work herdr server for the herdr-operator skill, reachable only via herdr-broker
+#   hermes-herdr-egress  allowlist proxy: HTTPS to the NVIDIA model API only
+# No ports are published and no Docker socket is mounted. The NVIDIA key comes from an env file outside the repo
+# (mode 600), never from the image. HERMES_VERSION picks the Hermes Agent base image and the image tag.
+#
+#   docker compose -f herdr/hermes-herdr/docker-compose.yml up -d --build
+#   docker exec herdr-hermes herdr agent list
+name: hermes-herdr
+
+services:
+  herdr-hermes:
+    build:
+      context: .
+      args:
+        HERMES_IMAGE: nousresearch/hermes-agent:${HERMES_VERSION:-v0.22.5}
+    image: herdr-hermes:herdr0.9.5-hermes${HERMES_VERSION:-v0.22.5}
+    container_name: herdr-hermes
+    init: true                      # reaps the pane processes herdr starts
+    restart: unless-stopped
+    user: "10000:10000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777,nosuid,nodev
+      - /opt/data:size=16m,mode=0700,uid=10000,gid=10000,nosuid,nodev   # base image VOLUME; made explicit, not kept
+    volumes:
+      - hermes-herdr-data:/data     # herdr socket/state (HOME) + Hermes config/sessions (HERMES_HOME) + ssh key
+      - hermes-workbench-keys:/keys # Hermes's public key for the workbench (only file written here)
+      - hermes-ctl-keys:/workbench-pub:ro   # the workbench's published host key (pinned in known_hosts)
+    env_file:
+      - ${HERMES_HERDR_ENV_FILE:-${HOME}/.config/hermes-herdr/hermes-herdr.env}
+    environment:
+      HTTPS_PROXY: http://172.31.252.2:8888
+      HTTP_PROXY: http://172.31.252.2:8888
+      NO_PROXY: localhost,127.0.0.1
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true      # Docker's default seccomp profile stays on (not overridden)
+    mem_limit: 2g
+    cpus: 1.0
+    pids_limit: 512
+    networks:
+      internal:
+        ipv4_address: 172.31.252.10
+    depends_on:
+      - egress
+      - workbench
+      - work
+
+  # Where Hermes's terminal and file tools run (ssh backend) and where work pane shells land; no internet
+  # (internal network only, and the proxy refuses it), no secrets, no real herdr, no access to herdr-hermes.
+  workbench:
+    build: ./workbench
+    image: hermes-workbench:alpine3.24.2
+    container_name: hermes-workbench
+    init: true
+    restart: unless-stopped
+    user: "10000:10000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777,nosuid,nodev
+    volumes:                                       # /work itself is on the read-only rootfs
+      - hermes-workbench-workspace:/work/workspace # the only writable work dir
+      - hermes-workbench-state:/var/lib/workbench  # sshd host key, key for herdr-broker
+      - hermes-workbench-keys:/keys:ro             # authorized_keys from herdr-hermes (Hermes's terminal backend)
+      - hermes-pane-keys:/panekeys:ro              # authorized_keys from hermes-herdr-work (work pane shells)
+      - hermes-ctl-keys:/ctlkeys                   # publishes this container's broker key and sshd host key
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    networks:
+      internal:
+        ipv4_address: 172.31.252.20
+
+  # Work herdr server for the herdr-operator skill. The real herdr binary exists only here; the workbench reaches it
+  # through herdr-broker (sshd ForceCommand, exact-argv allowlist). Work panes are SSH shells into the workbench.
+  work:
+    build: ./work
+    image: hermes-herdr-work:herdr0.9.5-alpine3.24.2
+    container_name: hermes-herdr-work
+    init: true
+    restart: unless-stopped
+    user: "10000:10000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,nosuid,nodev
+    volumes:
+      - hermes-herdr-work-data:/data               # herdr state + socket, pane key, sshd host key
+      - hermes-pane-keys:/panekeys                 # publishes the pane key and the broker host key
+      - hermes-ctl-keys:/ctlkeys:ro                # the workbench's key for herdr-broker
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 256
+    networks:
+      internal:
+        ipv4_address: 172.31.252.21
+
+  egress:
+    build: ./egress
+    image: hermes-herdr-egress:alpine3.24.2
+    container_name: hermes-herdr-egress
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 64
+    networks:
+      internal:
+        ipv4_address: 172.31.252.2
+      egress: {}
+
+networks:
+  internal:                         # no route to anywhere except the proxy
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.252.0/24
+  egress: {}                        # the proxy's outbound side
+
+volumes:
+  hermes-herdr-data:
+  hermes-workbench-workspace:
+  hermes-workbench-state:
+  hermes-workbench-keys:
+  hermes-herdr-work-data:
+  hermes-pane-keys:
+  hermes-ctl-keys:

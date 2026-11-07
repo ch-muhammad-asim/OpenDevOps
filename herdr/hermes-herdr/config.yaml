@@ -1,0 +1,126 @@
+# Hermes Agent v0.22.5 profile config for the herdr-hermes POC, copied to $HERMES_HOME/config.yaml on every start.
+# Safety keys live in the managed config (/etc/hermes/config.yaml, from hermes-managed.yaml) and win over
+# this file. The NVIDIA key is never written here: Hermes reads NVIDIA_API_KEY from the environment.
+_config_version: 51
+
+model:
+  provider: "nvidia"
+  default: "nvidia/nemotron-3.5-super-vl-120b-a12b"
+  base_url: "https://integrate.api.nvidia.com/v1"
+  key_env: "NVIDIA_API_KEY"
+
+
+
+code_execution: {mode: "strict"}
+cron: {allow_agent_scheduling: false}
+hooks_auto_accept: false
+plugins: {auto_apply: false}
+logging: {level: "INFO", max_size_mb: 5, backup_count: 3}   # $HERMES_HOME/logs/agent.log + errors.log
+
+telemetry:
+  shared_metrics: {enabled: false, send: false, offer_version: 2}   # answers "Help improve Hermes?" with No
+onboarding: {profile_build: "off"}
+updates: {check: false}
+auth: {adopt_external_logins: false}
+
+# ---------------------------------------------------------------------------------------------------------------
+# Safety settings, mirrored from hermes-managed.yaml (/etc/hermes/config.yaml). Hermes's TUI session builds its
+# terminal scope and skill directories from THIS profile file (gateway/session_policy.py, agent/skill_utils.py),
+# so the guardrails must be here too; the managed copy stays as the runtime lock ("managed by your administrator").
+# Keep both files in sync.
+# ---------------------------------------------------------------------------------------------------------------
+approvals:
+  mode: "manual"                  # manual|smart|off. manual = a human approves every flagged command (default smart lets a model approve)
+  timeout: 120                    # seconds; no answer = denied
+  cron_mode: "deny"               # scheduled runs never auto-approve
+  single_query_mode: "deny"       # `hermes -q` never auto-approves
+  unattended_mode: "deny"         # API/webhook runs never auto-approve
+  denial_breaker_threshold: 3     # after 3 denials in a row the agent must stop and ask
+  deny:                           # case-insensitive globs over the whole command; blocked even under --yolo
+    - "*rm -rf /*"
+    - "*sudo *"
+    - "sudo"
+    - "su"
+    - "su *"
+    - "*/su *"
+    - "* su *"
+    - "doas"
+    - "*doas *"
+    - "pkexec"
+    - "*pkexec *"   # bare sudo and other privilege tools (none exist in the workbench; defence in depth)
+    - "*curl *|*sh*"
+    - "*wget *|*sh*"
+    - "*git push*"
+    - "*docker *"
+    # herdr (herdr-operator skill): defence in depth on top of the workbench isolation (terminal.backend below)
+    - "*herdr server stop*"
+    - "*herdr * close*"
+    - "*herdr --machine*"
+    - "*herdr --remote*"
+    - "*herdr --session*"
+    - "*herdr update*"
+    - "*herdr integration*"
+    - "*herdr config*"
+    - "*herdr agent send-keys*"
+    - "*herdr agent prompt*"
+    - "*herdr agent start*"
+    - "*herdr machine*"
+command_allowlist: []             # "always allow" answers would be stored here; kept empty
+
+# Every terminal and file tool call runs in the hermes-workbench container over SSH, never in this container:
+# nothing Hermes executes can reach this container's herdr socket (Hermes's own pane and approval prompt), the
+# NVIDIA key, or this config. Pinned here so the agent cannot switch back to the local backend.
+terminal:
+  backend: "ssh"
+  ssh_host: "172.31.252.20"
+  ssh_user: "worker"
+  ssh_port: 2222
+  ssh_key: "/data/hermes/ssh/id_ed25519"
+  ssh_persistent: true
+  cwd: "/work/workspace"
+  timeout: 180
+  env_passthrough: []             # nothing from this container's environment is forwarded
+  client_env_passthrough: []
+
+security:
+  redact_secrets: true            # masks secrets in tool output, logs and approval prompts
+  allow_private_urls: false       # SSRF guard for URL fetches
+  allow_lazy_installs: false      # no automatic package installs
+  protected_instruction_files: true  # edits to AGENTS.md / SOUL.md / Hermes config always need a human
+  approval:
+    transport: "builtin"
+    transport_fallback: "deny"
+
+platform_toolsets:
+  cli: [terminal, file, todo, clarify]   # least privilege: shell (with approvals), file tools, todo list, questions
+
+agent:
+  max_turns: 30                   # stop runaway tool loops
+  budget_warning_ratio: 0.8
+  run_budget_seconds: 1800        # wall-clock limit per run
+  disabled_toolsets: [web, search, browser, code_execution, delegation, cronjob, memory, session_search,
+                      connections, skills, computer_use, vision, image_gen, tts, kanban, x_search, video,
+                      video_gen, stt]
+
+tools:
+  connectors: {enabled: false}    # no remote connectors
+mcp_servers: {}                   # no MCP servers
+
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+  nudge_interval: 0
+  write_approval: true
+skills:
+  external_dirs: ["/opt/hermes-herdr/skills"]   # root-owned, read-only image path with the one skill (herdr-operator)
+  creation_nudge_interval: 0
+  write_approval: true            # skill changes are staged for a human
+  guard_agent_created: true
+  inline_shell: false
+  project_discovery: false
+curator: {enabled: false}
+auxiliary:
+  background_review: {enabled: false}   # no post-turn "save memory / patch skill" runs
+delegation:
+  subagent_auto_approve: false
+  max_spawn_depth: 1

@@ -1,0 +1,24 @@
+# Non-root sshd: Hermes's ssh terminal backend and the work panes' shells. Key-only, one user, no forwarding.
+Port 2222
+ListenAddress 0.0.0.0
+HostKey /var/lib/workbench/ssh_host_ed25519_key
+PidFile /tmp/sshd.pid
+AuthorizedKeysFile /keys/authorized_keys /panekeys/authorized_keys
+AllowUsers worker
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+X11Forwarding no
+PermitTunnel no
+PermitUserEnvironment no
+PermitUserRC no
+StrictModes yes
+ClientAliveInterval 30
+LogLevel VERBOSE
+Subsystem sftp internal-sftp

@@ -1,0 +1,118 @@
+# herdr agent-detection override for Hermes Agent, pinned in the herdr-hermes image.
+# Same rules as herdr's bundled hermes manifest 2026.07.24.1, plus `tui_turn_working`: Hermes v0.22.5+'s default
+# TUI shows "type to redirect this turn" and a spinner line while a turn runs, which the bundled rules do not
+# match, so herdr stayed `idle` and `agent prompt --wait` stalled. Blocked rules keep a higher priority, so an
+# approval prompt is still reported as `blocked` during a turn.
+id = "hermes"
+version = "2026.11.07.1"
+min_engine_version = 2
+updated_at = "2026-11-07T00:00:00Z"
+aliases = ["hermes-agent"]
+
+[[rules]]
+id = "osc_title_blocked"
+state = "blocked"
+priority = 1100
+region = "osc_title"
+visible_blocker = true
+regex = ['^⚠[\u{fe0e}\u{fe0f}]?(?:\s|$)']
+
+[[rules]]
+id = "osc_title_working"
+state = "working"
+priority = 1050
+region = "osc_title"
+visible_working = true
+regex = ['^⏳[\u{fe0e}\u{fe0f}]?(?:\s|$)']
+
+[[rules]]
+id = "dangerous_command_approval"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(14)"
+visible_blocker = true
+any = [
+  { contains = ["dangerous"] },
+  { contains = ["approval"] },
+  { contains = ["allow once", "deny"] },
+  { line_regex = ['(?i)^\s*[▸>]?\s*1\.\s*allow'] },
+]
+all = [
+  { any = [{ contains = ["enter confirm"] }, { contains = ["enter to confirm"] }, { contains = ["↑/↓ to select"] }, { contains = ["show full command"] }] },
+]
+
+[[rules]]
+id = "clarification_prompt"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(14)"
+visible_blocker = true
+any = [
+  { contains = ["hermes needs your"] },
+  { line_regex = ['^\s*ask\s+\S'] },
+  { contains = ["type your answer"] },
+]
+all = [
+  { any = [{ contains = ["enter confirm"] }, { contains = ["enter to confirm"] }, { contains = ["enter send"] }, { contains = ["press enter"] }, { contains = ["↑/↓ select"] }, { contains = ["↑/↓ to select"] }, { contains = ["other (type"] }] },
+]
+
+[[rules]]
+id = "credential_prompt"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(14)"
+visible_blocker = true
+any = [
+  { contains = ["sudo password"] },
+  { contains = ["skill setup"] },
+  { contains = ["🔑", "for "] },
+]
+
+[[rules]]
+id = "confirmation_prompt"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(14)"
+visible_blocker = true
+all = [
+  { any = [{ contains = ["approve once", "cancel"] }, { contains = ["start a new session", "keep going"] }] },
+  { any = [{ contains = ["enter to confirm"] }, { contains = ["enter confirm"] }, { contains = ["type 1/2/3"] }, { contains = ["y/n quick"] }] },
+]
+
+[[rules]]
+id = "interrupt_status_working"
+state = "working"
+priority = 950
+region = "bottom_non_empty_lines(5)"
+visible_working = true
+any = [
+  { contains = ["msg=interrupt"] },
+  { contains = ["ctrl+c to interrupt"] },
+]
+
+[[rules]]
+id = "tui_turn_working"
+state = "working"
+priority = 850
+region = "bottom_non_empty_lines(6)"
+visible_working = true
+any = [
+  { contains = ["type to redirect this turn"] },
+  { line_regex = ['^──\s*[⠀-⣿]\s'] },
+]
+
+[[rules]]
+id = "classic_cancel_working"
+state = "working"
+priority = 500
+region = "bottom_non_empty_lines(5)"
+visible_working = true
+contains = ["ctrl+c cancel"]
+
+[[rules]]
+id = "osc_title_idle"
+state = "idle"
+priority = 100
+region = "osc_title"
+visible_idle = true
+regex = ['^✓[\u{fe0e}\u{fe0f}]?(?:\s|$)']
