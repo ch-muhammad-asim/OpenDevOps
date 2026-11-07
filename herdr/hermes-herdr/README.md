@@ -16,22 +16,68 @@ benchmark are in progress.
 ## 🏗️ Architecture
 
 ```mermaid
-flowchart LR
-  PC["Your PC<br/>scripts/hh, e2e-test.sh, bench.sh"] -- "ssh + docker exec<br/>(no port)" --> A
-  subgraph server["Server (Docker)"]
-    subgraph internal["network 'internal' 172.31.252.0/24 (internal: true, no route out)"]
-      A["herdr-hermes .10<br/>herdr server + Hermes TUI pane<br/>model key, managed config"]
-      B["hermes-workbench .20<br/>sshd :2222 (key only)<br/>/work read-only, herdr = client only"]
-      W["hermes-herdr-work .21<br/>work herdr server (real binary)<br/>herdr-broker (sshd :2222 ForceCommand)"]
-      E["hermes-herdr-egress .2<br/>tinyproxy :8888 allowlist"]
+flowchart TB
+  PC["1 · Operator PC"]
+  subgraph HOST["2 · Server / Docker — no published container ports"]
+    subgraph NET["3 · Internal network — no direct route out"]
+      subgraph AGENT["4 · herdr-hermes"]
+        H["Hermes TUI<br/>herdr pane foreground"]
+        S["5 · herdr-operator<br/>Read-only skill"]
+        C["6 · Managed config<br/>Read-only"]
+        K["7 · Model key<br/>Hermes environment"]
+        S -->|guides| H
+        C -->|enforces| H
+        K -->|key_env| H
+      end
+      B["8 · hermes-workbench<br/>SSH tools / herdr client"]
+      subgraph WORK["9 · hermes-herdr-work"]
+        R["10 · herdr-broker<br/>Exact argv allowlist"]
+        W["Work herdr server<br/>SSH-backed panes"]
+        R -->|execv only| W
+      end
+      E["11 · hermes-herdr-egress<br/>Allowlist proxy"]
+      H -->|SSH tools| B
+      B -->|SSH argv| R
+      W -->|SSH shells| B
+      H -->|HTTPS CONNECT| E
+      B -. blocked .-> E
     end
   end
-  A -- "terminal + file tools<br/>(Hermes ssh backend)" --> B
-  B -- "herdr argv → broker<br/>(exact allowlist, no shell)" --> W
-  W -- "work pane shells<br/>(ssh as worker)" --> B
-  A -- "HTTPS CONNECT" --> E
-  E -- "only integrate.api.nvidia.com:443" --> NV["NVIDIA model API"]
+  PC -->|SSH docker-exec| H
+  E -->|egress network| API["12 · NVIDIA API<br/>integrate.api.nvidia.com:443"]
+  B -. blocked .-> API
+
+  classDef operator fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e,stroke-width:2px;
+  classDef agent fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef enforcement fill:#fef3c7,stroke:#b45309,color:#78350f,stroke-width:2px;
+  classDef isolated fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px;
+  classDef external fill:#fce7f3,stroke:#be185d,color:#831843,stroke-width:2px;
+  class PC operator;
+  class H,S,K agent;
+  class C,R,E enforcement;
+  class B,W isolated;
+  class API external;
+  style HOST fill:#f8fafc,stroke:#64748b,color:#0f172a
+  style NET fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-dasharray:5 5
+  style AGENT fill:#faf5ff,stroke:#a78bfa,color:#4c1d95
+  style WORK fill:#f0fdf4,stroke:#86efac,color:#14532d
 ```
+
+| # | Component / boundary | Details and source |
+|---|---|---|
+| 1 | Operator PC | `scripts/hh` uses host SSH followed by `docker exec herdr-hermes herdr …` to prompt, read, attach and answer approvals. Host SSH remains available; no container port is published. Source: `README.md`. |
+| 2 | Server / Docker | Four Compose containers; no Docker socket mount or published ports. Read-only root filesystems, dropped capabilities and `no-new-privileges`; agent, work and workbench run as UID 10000, proxy as `nobody`. Source: `docker-compose.yml`, Dockerfiles. |
+| 3 | Internal network | Compose `internal`, `172.31.252.0/24`, `internal: true`; agent `.10`, workbench `.20`, work `.21`, proxy `.2`. Only the proxy also joins Compose `egress`; the API arrow crosses that second network. Internal networking does not isolate these containers from each other; SSH authentication and proxy ACLs enforce the permitted services. Source: `docker-compose.yml`. |
+| 4 | herdr-hermes / Hermes TUI | Hosts the control herdr server and Hermes as a pane's foreground process, launched with `--skills herdr-operator`, without `--yolo`. Its local herdr socket is separate from the work server's socket. Terminal and file tools use SSH to `worker@172.31.252.20:2222` with a pinned host key; both environment passthrough lists are empty. Source: `Dockerfile`, `entrypoint.sh`, `hermes-herdr-up.sh`, `config.yaml`. |
+| 5 | herdr-operator skill | Root-owned, read-only `/opt/hermes-herdr/skills/herdr-operator/SKILL.md`; guides list → split/reuse → run → wait-output → read → summary. Skill text is instruction, not the broker enforcement boundary. Only operate on the skill's work panes; never answer approvals. Source: skill, `Dockerfile`, `entrypoint.sh`. |
+| 6 | Managed config | Root-owned `/etc/hermes/config.yaml` on the read-only image locks manual approvals, deny rules and SSH backend; startup checks fail closed. Flagged commands require a human, timeout is 120 seconds, deny rules reject outright. Safety settings are also mirrored in the profile copied at startup because TUI backend/skill selection uses that profile. Source: `hermes-managed.yaml`, `config.yaml`, `entrypoint.sh`. |
+| 7 | Model API key | Supplied through Compose `env_file` only to `herdr-hermes`, consumed via `model.key_env: NVIDIA_API_KEY`; never supplied to workbench or work. Precisely: entrypoint stages it in mode-0600 `/tmp/.hermes-herdr/model.key` on tmpfs, unsets it before starting herdr, and `hermes-shim` restores it to the Hermes process environment. Thus “env only” describes injection/model configuration, not exclusive storage: the tmpfs copy and Docker container metadata remain. No key is baked into the image or written to YAML. Source: Compose, entrypoint, shim, README caveats. |
+| 8 | hermes-workbench | Key-only sshd on `:2222`; executes terminal/file tools and work-pane shell commands. `/work` is read-only except the `/work/workspace` volume; `/var/lib/workbench` and `/tmp` are also writable for state/runtime needs. No model key or real herdr binary; `/usr/local/bin/herdr` serializes argv with NUL separators over SSH to the broker. Direct internet has no route; proxy rejects this source IP. Source: `workbench/`, Compose, proxy config. |
+| 9 | hermes-herdr-work / work herdr | Separate, supervised herdr server with state/socket in `/data/home`. Each pane runs `workbench-shell`, which SSHes back to `worker@172.31.252.20:2222` with a PTY and starts Bash in `/work/workspace`. The actual job executes in the workbench, not in this container. Source: `work/entrypoint.sh`, `work/workbench-shell`. |
+| 10 | herdr-broker | Work sshd `:2222` forces this command: no login shell, PTY or forwarding. Parses NUL-delimited UTF-8 argv (64 KiB limit), ignores `SSH_ORIGINAL_COMMAND`, validates then `os.execv`s real herdr; rejection exits 126. Exact operation allowlist: `pane list`, `get`, `layout`, `read`, `wait-output`, `split`, `run`, `rename`; options/values are checked, split cwd can only be `/work/workspace`, wait requires a timeout (1–900000 ms) and match/regex. `run` accepts a pane ID and one nonempty command string up to 8192 characters, not starting with `-`. “No shell” applies to broker dispatch; that command string intentionally runs in the workbench pane's shell. Source: `work/herdr-broker`, `work/sshd_config`. |
+| 11 | hermes-herdr-egress | Tinyproxy `:8888`, dual-homed on `internal` and `egress`. Accepts only `.10/32`; default-deny host filter `^integrate\.api\.nvidia\.com$` and CONNECT port 443. Workbench and work are refused. This is host/CONNECT-port filtering, not TLS inspection or API path/method filtering. Source: Compose, `egress/allowlist`, `egress/tinyproxy.conf`. |
+| 12 | NVIDIA model API | Configured base URL `https://integrate.api.nvidia.com/v1`, model `nvidia/nemotron-3.5-super-vl-120b-a12b`; the sole configured external model destination allowed through the proxy. The dotted workbench → API edge denotes blocked direct internet access; it is not an extra network service. Source: `config.yaml`, egress config. |
+
 
 ## 🧩 Components
 
@@ -151,6 +197,51 @@ commands run next to Hermes's other commands. Hermes can't see or control the he
 | Work herdr stays up | supervised restart loop in `hermes-herdr-work`; the broker never allows `server stop` | test 10 |
 | Everything else still asks | non-herdr dangerous commands still go to the manual approval prompt | test 3 |
 | Skill text | never bypass approvals or use `--yolo`, never touch secrets, only allowed herdr commands, stop after 2 failures | `SKILL.md` |
+
+### 🔁 How Hermes runs a command through herdr
+
+```mermaid
+sequenceDiagram
+  title Hermes uses herdr-operator to run a command
+  actor U as Operator
+  participant H as Hermes TUI
+  participant C as Workbench client
+  participant B as Broker
+  participant W as Work herdr
+  participant P as Workbench shell
+
+  U->>H: User prompt via SSH + docker exec
+  Note over H: herdr-operator guides pane workflow
+  Note over H: Deny rules reject, approval applies when flagged
+  opt Command flagged for approval
+    H-->>U: Approval prompt (agent blocked)
+    U->>H: Human decision
+    break Denied or timed out
+      H-->>U: Not executed
+    end
+  end
+  Note over H,W: List panes first, split if needed (same broker path)
+  H->>C: SSH terminal: herdr pane run ID command
+  C->>B: SSH: NUL-separated herdr argv
+  B->>B: Validate exact argv, reject invalid requests
+  B->>W: execv herdr pane run
+  W->>P: Type command + Enter over pane SSH
+  P-->>W: Output + computed exit marker
+  W-->>B: Run acknowledgement
+  B-->>C: Return result
+  C-->>H: Tool result
+  loop wait-output, then read
+    H->>C: herdr pane wait-output / read
+    C->>B: SSH argv
+    B->>W: Validate and execv
+    W-->>B: Marker matched / captured output
+    B-->>C: Return result
+    C-->>H: Tool result
+  end
+  H-->>U: Exit code + concise summary
+  Note over H,P: wait-output uses timeout + computed marker, read defaults to 40 lines in skill
+```
+
 
 ## 🚫 No OpenShell: what's lost
 
