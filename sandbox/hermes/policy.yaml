@@ -1,4 +1,4 @@
-# OpenShell sandbox policy for Hermes Agent v0.22.5.
+# OpenShell sandbox policy for Hermes Agent v0.23.0.
 #
 # Filesystem, landlock and process take effect at sandbox creation.
 # network_policies is live: change it with `openshell policy set`.

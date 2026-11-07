@@ -12,7 +12,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORTS="${REPORTS:-$HOME/hermes-security-reports}"
-HERMES_IMAGE="${HERMES_IMAGE:-nousresearch/hermes-agent:v0.22.5}"
+HERMES_IMAGE="${HERMES_IMAGE:-nousresearch/hermes-agent:v0.23.0}"
 TUNNEL_IMAGE="${TUNNEL_IMAGE:-hermes-tunnel:0.1.6}"
 TRAEFIK_IMAGE="${TRAEFIK_IMAGE:-traefik:v3.7.15}"
 GITLEAKS=zricethezav/gitleaks:v8.21.2

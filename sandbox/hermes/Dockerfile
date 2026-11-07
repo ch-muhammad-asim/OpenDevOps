@@ -6,7 +6,7 @@
 #   - moves HERMES_HOME into the /sandbox workspace,
 #   - ships start-hermes, which runs the dashboard + gateway that s6 would
 #     normally supervise. Pass it after `--` in `openshell sandbox create`.
-ARG HERMES_IMAGE=nousresearch/hermes-agent:v0.22.5
+ARG HERMES_IMAGE=nousresearch/hermes-agent:v0.23.0
 # The tag is pinned through the ARG above, which hadolint can't see.
 # hadolint ignore=DL3006
 FROM ${HERMES_IMAGE}

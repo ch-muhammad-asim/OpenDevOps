@@ -95,7 +95,7 @@ watch -n 1 "docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsag
 
 - A `trap` in `verify-08.sh` deletes `hermes-abuse` on exit, error or interrupt. If the script was killed with SIGKILL, `reset.sh` (or `openshell sandbox delete hermes-abuse`) removes it.
 - Every test is wrapped in `timeout`, so nothing outlives the run.
-- The throwaway sandbox uses the same image (`hermes-openshell:v0.22.5`), the same `sandbox/hermes/policy.yaml` and the same limits as `hermes`, so the result transfers to the live sandbox without ever loading it.
+- The throwaway sandbox uses the same image (`hermes-openshell:v0.23.0`), the same `sandbox/hermes/policy.yaml` and the same limits as `hermes`, so the result transfers to the live sandbox without ever loading it.
 
 ### Residual risk: host disk under `/sandbox`
 

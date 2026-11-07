@@ -35,7 +35,7 @@ echo "1. OpenShell"
 "$OPENSHELL" sandbox list 2>&1 | grep -E "^$SANDBOX_NAME\b" | grep -q Ready && ok "sandbox Ready" || bad "sandbox Ready"
 
 echo "2. Hermes inside the sandbox"
-case "$(sbx /opt/hermes/bin/hermes --version)" in *v0.22.5*) ok "Hermes Agent v0.22.5" ;; *) bad "Hermes Agent v0.22.5" ;; esac
+case "$(sbx /opt/hermes/bin/hermes --version)" in *v0.23.0*) ok "Hermes Agent v0.23.0" ;; *) bad "Hermes Agent v0.23.0" ;; esac
 check "runs as uid 10000 (not root)" "$(sbx id -u | tr -d '\r')" "10000"
 
 # Capture output first: the probed commands are expected to fail, and with
@@ -81,7 +81,7 @@ if [ -n "${HERMES_DASHBOARD_PASSWORD:-}" ]; then
   chat_out="$(printf '%s' "$HERMES_DASHBOARD_PASSWORD" | timeout 300 docker run --rm -i --network host \
     -e HERMES_DASHBOARD_USERNAME="$USERNAME" -e LLM_CHECKS="${LLM_CHECKS:-0}" \
     -v "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/chat_e2e.py:/t/chat_e2e.py:ro" \
-    --entrypoint sh "${HERMES_IMAGE:-nousresearch/hermes-agent:v0.22.5}" -c \
+    --entrypoint sh "${HERMES_IMAGE:-nousresearch/hermes-agent:v0.23.0}" -c \
     'read -r HERMES_DASHBOARD_PASSWORD; export HERMES_DASHBOARD_PASSWORD; /opt/hermes/.venv/bin/python -I /t/chat_e2e.py "$0"' "$DASH" 2>&1)"
   case "$chat_out" in
     *"answer received"*) ok "web Chat page: new session gets a PTY and answers" ;;

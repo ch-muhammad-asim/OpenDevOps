@@ -31,7 +31,7 @@ flowchart TB
   P -->|"Unix socket channel to the runtime<br/>loopback :9119 / :8642"| H
 
   subgraph SBX["🛡️ Hermes workload container · network=none"]
-    H["🤖 Hermes v0.22.5<br/>dashboard :9119 · API :8642<br/>provider opencode-bridge<br/>no network interface"]
+    H["🤖 Hermes v0.23.0<br/>dashboard :9119 · API :8642<br/>provider opencode-bridge<br/>no network interface"]
   end
 
   subgraph SUPV["👮 OpenShell supervisor"]

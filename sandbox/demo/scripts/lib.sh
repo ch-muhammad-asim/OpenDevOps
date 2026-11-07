@@ -21,7 +21,7 @@ HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.config/hermes-sandbox/hermes.env}"
 HERMES_ADDR="${HERMES_ADDR:-172.31.250.10}"
 API="http://${HERMES_ADDR}:${API_PORT:-8642}"
 DASH="http://${HERMES_ADDR}:${DASHBOARD_PORT:-9119}"
-SANDBOX_IMAGE="${SANDBOX_IMAGE:-hermes-openshell:v0.22.5}"
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-hermes-openshell:v0.23.0}"
 # Hermes's bundled Python: the only program the policy lets reach the bridge.
 PY=/opt/hermes/tools/python-3.14.9+20261021-linux-x64/bin/python3.14
 BRIDGE=http://host.openshell.internal:18383

@@ -14,7 +14,7 @@ Every script for running Hermes in the OpenShell sandbox: bring it up, put it be
 
 | Script | Where | What it does | Credential | Changes things? |
 |---|---|---|---|---|
-| [`up.sh`](up.sh) | 🖥️ | Starts the OpenShell gateway, builds `hermes-openshell:v0.22.5`, creates the `hermes-data` volume and the sandbox (policy, secrets via `--env-from`, CPU/memory limits), opens host forwards. Idempotent. | `~/.config/hermes-sandbox/hermes.env` | ✅ |
+| [`up.sh`](up.sh) | 🖥️ | Starts the OpenShell gateway, builds `hermes-openshell:v0.23.0`, creates the `hermes-data` volume and the sandbox (policy, secrets via `--env-from`, CPU/memory limits), opens host forwards. Idempotent. | `~/.config/hermes-sandbox/hermes.env` | ✅ |
 | [`down.sh`](down.sh) | 🖥️ | Deletes the sandbox (the `hermes-data` volume is kept) and stops the host forwards; Traefik and the tunnel keep running. `--purge` also stops Traefik, the tunnel and the gateway and removes `hermes-data` (`/var/lib/openshell` stays; remove it with sudo). | – | ✅ |
 | [`https_up.sh`](https_up.sh) | 🖥️ | Starts `hermes-tunnel` and Traefik on 80/443; enables the origin certificate if present. Idempotent. | optional origin key (`600`) | ✅ |
 | [`set_nvidia_key.sh`](set_nvidia_key.sh) | 🖥️ | Stores or rotates the NVIDIA key in OpenShell (provider `nvidia`), attaches it, restarts the Hermes processes and the tunnel (`--no-restart` skips). Key from a hidden prompt or stdin. | 🔑 NVIDIA key | ✅ (open chats reload) |

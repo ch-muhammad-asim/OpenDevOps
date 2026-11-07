@@ -13,7 +13,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OPENSHELL="${OPENSHELL:-openshell}"
 SANDBOX_NAME="${SANDBOX_NAME:-hermes}"
-HERMES_IMAGE="${HERMES_IMAGE:-nousresearch/hermes-agent:v0.22.5}"
+HERMES_IMAGE="${HERMES_IMAGE:-nousresearch/hermes-agent:v0.23.0}"
 BRIDGE_CONTAINER="${BRIDGE_CONTAINER:-sourcecheck-bridge}"
 REPORT="${1:-$HERE/security/COMPARISON.md}"
 BASELINE=hermes-baseline-$$

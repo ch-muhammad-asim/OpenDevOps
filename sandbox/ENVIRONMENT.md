@@ -183,7 +183,7 @@ install -m 600 sandbox/hermes/hermes.env.example ~/.config/hermes-sandbox/hermes
 | `HERMES_HOME`, `HERMES_WRITE_SAFE_ROOT`, `HOME` | `/sandbox/hermes` (the `hermes-data` volume) | [`hermes/Dockerfile`](hermes/Dockerfile) |
 | `PATH` | Hermes's bundled Python and tools first | [`hermes/Dockerfile`](hermes/Dockerfile) |
 | `HERMES_PYTHON`, `HERMES_RUNTIME_DIR`, `HERMES_TUI_DIR`, `HERMES_WEB_DIST`, `PLAYWRIGHT_BROWSERS_PATH`, `XDG_RUNTIME_DIR`, `PYTHON*` | upstream values | The upstream `nousresearch/hermes-agent` image's own `ENV` (not changed here) |
-| `HERMES_IMAGE` *(build arg)* | `nousresearch/hermes-agent:v0.22.5` | `up.sh` → `docker build --build-arg` |
+| `HERMES_IMAGE` *(build arg)* | `nousresearch/hermes-agent:v0.23.0` | `up.sh` → `docker build --build-arg` |
 | `TERM` | `xterm-256color` (replaces OpenShell's `dumb`) | [`hermes/start-hermes.sh`](hermes/start-hermes.sh) |
 | `COLORTERM` | `truecolor` | `start-hermes.sh` |
 | `LANG` | `C.UTF-8` | `start-hermes.sh` |
@@ -269,7 +269,7 @@ Run on the server unless noted. Put your settings in a copy of [`operator.env.ex
 | `OPENSHELL` | `openshell` | almost all | CLI binary (`~/.local/bin/openshell`) |
 | `SANDBOX_NAME` | `hermes` | almost all | Sandbox name |
 | `HERMES_ENV_FILE` | `~/.config/hermes-sandbox/hermes.env` | `up.sh`, `verify.sh`, `verify_https.sh`, demo | Hermes secrets (section 6.1) |
-| `HERMES_IMAGE` | `nousresearch/hermes-agent:v0.22.5` | `up.sh`, `scan.sh`, tests | Upstream Hermes image |
+| `HERMES_IMAGE` | `nousresearch/hermes-agent:v0.23.0` | `up.sh`, `scan.sh`, tests | Upstream Hermes image |
 | `DASHBOARD_PORT` / `API_PORT` | `9119` / `8642` | `up.sh`, `down.sh`, tests | Hermes ports |
 | `HERMES_ADDR` | `172.31.250.10` | `verify.sh`, `set_nvidia_key.sh`, demo | Reach Hermes through `hermes-tunnel` (use `127.0.0.1` for `up.sh`'s host forwards) |
 
@@ -278,7 +278,7 @@ Run on the server unless noted. Put your settings in a copy of [`operator.env.ex
 | Script | Variable | Default | Meaning |
 |---|---|---|---|
 | `up.sh` | `GATEWAY_NAME` | `hermes-gw` | CLI name for the local gateway |
-| | `SANDBOX_IMAGE` | `hermes-openshell:v0.22.5` | Image built from `hermes/` |
+| | `SANDBOX_IMAGE` | `hermes-openshell:v0.23.0` | Image built from `hermes/` |
 | | `DATA_VOLUME` | `hermes-data` | Volume holding `HERMES_HOME` |
 | | `TMP_SIZE_BYTES` | `536870912` | Size of the sandbox's `/tmp` (512 MiB) |
 | | `HERMES_PROVIDERS` | `nvidia` if it exists | OpenShell providers to attach |
@@ -349,7 +349,7 @@ read -rs HERMES_API_KEY; export HERMES_API_KEY      # verify_https.sh API tests 
 | `demo/scripts/*.sh` | `LLM_BUDGET` | `3` | Max model prompts per run (`--with-llm`) |
 | | `LLM_TIMEOUT` / `SBX_TIMEOUT` | `600` / `90` | Seconds per model call / per sandbox command |
 | | `ABUSE_SANDBOX` | `hermes-abuse` | Throwaway sandbox for UC 08 |
-| | `SANDBOX_IMAGE` | `hermes-openshell:v0.22.5` | Image for the throwaway sandbox (UC 08) |
+| | `SANDBOX_IMAGE` | `hermes-openshell:v0.23.0` | Image for the throwaway sandbox (UC 08) |
 | | `LLM_BUDGET_FILE` | *(set by `run-all.sh`)* | Shares the prompt counter across all steps of one run |
 | | `POLICY_FILE` | `sandbox/hermes/policy.yaml` | Policy the reset compares against |
 | | `RESET_NO_REAPPLY` | `0` | `1` = report policy drift, don't fix it |
