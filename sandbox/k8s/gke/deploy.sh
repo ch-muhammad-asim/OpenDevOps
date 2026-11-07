@@ -187,12 +187,16 @@ if want sandbox; then
       "${env_from[@]}" --no-credential-warnings \
       --provider nvidia --no-auto-providers \
       --cpu "$HERMES_CPU" --memory "$HERMES_MEMORY" \
-      --detach --restart-policy on-failure -- "$HERMES_CMD"
+      --detach --restart-policy on-failure -- "$HERMES_CMD" \
+      || { os -- sandbox get hermes >/dev/null 2>&1 || exit 1   # the create call's stream can drop after the
+           echo "sandbox create: stream closed early, but sandbox hermes exists; waiting for Ready"; }   # sandbox exists
   fi
+  ready=0
   for _ in $(seq 1 60); do  # capture first: grep -q under pipefail would break the pipe
-    out="$(os -- sandbox get hermes 2>/dev/null || true)"; case "$out" in *"Phase: Ready"*) break ;; esac; sleep 10
+    out="$(os -- sandbox get hermes 2>/dev/null || true)"; case "$out" in *"Phase: Ready"*) ready=1; break ;; esac; sleep 10
   done
   printf '%s\n' "$out" | sed -n 1,20p
+  [ "$ready" = 1 ] || { echo "sandbox hermes not Ready after 10 min" >&2; exit 1; }
 fi
 
 if want restore-data; then   # not in the default STEPS: see recreate-sandbox

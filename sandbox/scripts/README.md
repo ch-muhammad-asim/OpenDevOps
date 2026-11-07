@@ -21,7 +21,7 @@ Every script for running Hermes in the OpenShell sandbox: bring it up, put it be
 | [`https_up.sh`](https_up.sh) | 🖥️ | Starts `hermes-tunnel` and Traefik on 80/443; enables the origin certificate if present. Idempotent. | optional origin key (`600`) | ✅ |
 | [`set_nvidia_key.sh`](set_nvidia_key.sh) | 🖥️ | Stores or rotates the NVIDIA key in OpenShell (provider `nvidia`), attaches it, restarts the Hermes processes and the tunnel (`--no-restart` skips). Key from a hidden prompt or stdin. | 🔑 NVIDIA key | ✅ (open chats reload) |
 | [`update_dns.sh`](update_dns.sh) | 💻 | Points the Cloudflare `A` record at the IP in your local `../site.env` (template: [`../site.env.example`](../site.env.example)) (`--detect` on the server, `--dry-run` to preview). | 🔑 Cloudflare DNS token | ✅ DNS |
-| [`forwards.sh`](forwards.sh) | 🖥️ | Starts the host-loopback forwards (`127.0.0.1:9119` dashboard, `127.0.0.1:8642` API) when their port does not answer, after the sandbox is `Ready`, retrying until both answer. Idempotent. Run at boot by the [`hermes-forwards`](../systemd/README.md) user unit (reboot-tested). | – | ✅ (only missing forwards) |
+| [`forwards.sh`](forwards.sh) | 🖥️ | Starts the host-loopback forwards (`127.0.0.1:9119` dashboard, `127.0.0.1:8642` API) when their port does not answer, after the sandbox is `Ready`, retrying until both answer. Idempotent. Run at boot and every minute by the [`hermes-forwards`](../systemd/README.md) timer, so forwards dropped by a sandbox restart come back too. | – | ✅ (only missing forwards) |
 | [`housekeeping.sh`](housekeeping.sh) | 🖥️ | Frees disk: build cache, dangling images, old demo logs. `--install-cron` runs it daily. | – | ✅ (only recreatable things) |
 
 ### 🧪 Tests
@@ -60,7 +60,7 @@ sandbox/scripts/up.sh && sandbox/scripts/https_up.sh
 read -rs HERMES_DASHBOARD_PASSWORD; export HERMES_DASHBOARD_PASSWORD
 sandbox/scripts/verify.sh                          # 👉 all PASS
 
-# server, after a reboot (idempotent; the hermes-forwards unit does this at boot)
+# server, after a reboot or sandbox restart (idempotent; the hermes-forwards timer does this every minute)
 sandbox/scripts/forwards.sh                        # 👉 "answers HTTP" for 9119 and 8642
 
 # laptop, after a server restart that changed the IP

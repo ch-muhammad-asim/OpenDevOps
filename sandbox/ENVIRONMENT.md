@@ -302,6 +302,8 @@ Run on the server unless noted. Put your settings in a copy of [`operator.env.ex
 | `down.sh` | `DATA_VOLUME` | `hermes-data` | Deleted only with `--purge` |
 | `forwards.sh` | `WAIT_SECONDS` | `300` | How long to wait for the gateway and the sandbox to be `Ready` |
 | | `GATEWAY_NAME` | `hermes-gw` | Gateway to select before checking |
+| | `FORWARDS_QUIET` | `0` (`1` in the unit) | `1`: log only restarts and failures |
+| | `FORWARDS_SCOPE` | `0` (`1` in the unit) | `1`: start each forward in its own systemd scope, so it outlives the unit's run |
 | `https_up.sh` | `NETWORK` | `openshell_default` | Gateway's Docker network |
 | | `TRAEFIK_UID` / `TRAEFIK_GID` / `TRAEFIK_TLS_DIR` | your uid/gid, `~/.config/hermes-sandbox/tls` | Passed to Traefik's compose (7.3) |
 | `set_nvidia_key.sh` | 🔑 *(no variable)* | hidden prompt, or **stdin** | The NVIDIA key is read from a hidden prompt or piped in (`< key-file`, a raw `nvapi-…` or an `API: nvapi-…` line); it is never taken from the environment or a command line. Option `--no-restart`: don't restart the Hermes processes and the tunnel. |
@@ -448,7 +450,7 @@ After any rotation, run `verify.sh` on the server and `verify_https.sh` from you
 | Hermes: *"connection error"* on NVIDIA models | Provider missing or not attached | `sandbox/scripts/set_nvidia_key.sh` |
 | A `.env` change has no effect | It's in the wrong folder (Compose reads it from the compose file's folder), or a shell variable with the same name wins | `docker compose -f <file> config` shows the values in effect; `unset VAR` |
 | `git status` shows an env file | Outside `sandbox/`, only `.env` and `.env.*` are ignored, not `name.env`; inside `sandbox/`, a name that doesn't end in `.env` | Rename it, or keep it in `~/.config/hermes-sandbox/` |
-| `HERMES_ADDR=127.0.0.1` tests fail, `openshell forward list` shows the 127.0.0.1 forwards as **dead** or missing | The host forwards don't survive a server or gateway restart (the tunnel's do) | Use the default `HERMES_ADDR=172.31.250.10`, or restore them with `sandbox/scripts/forwards.sh` (the [`hermes-forwards`](systemd/README.md) user unit does this at boot) |
+| `HERMES_ADDR=127.0.0.1` tests fail, `openshell forward list` shows the 127.0.0.1 forwards as **dead** or missing | The host forwards don't survive a server or gateway restart (the tunnel's do) | Use the default `HERMES_ADDR=172.31.250.10`, or restore them with `sandbox/scripts/forwards.sh` (the [`hermes-forwards`](systemd/README.md) timer does this every minute) |
 
 ---
 

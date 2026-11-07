@@ -1,20 +1,14 @@
-# systemd user unit: restore the host-loopback forwards to the Hermes sandbox
-# after a reboot (sandbox/scripts/forwards.sh). Install: see README.md in this folder.
+# Runs sandbox/scripts/forwards.sh once; hermes-forwards.timer starts it at boot
+# and every minute after. Install and test: sandbox/systemd/README.md.
 [Unit]
 Description=Hermes sandbox host-loopback forwards (dashboard 127.0.0.1:9119, API 127.0.0.1:8642)
-# No After=default.target: WantedBy=default.target already orders default.target
-# after this unit, so After= would create an ordering cycle. forwards.sh waits
-# for the gateway and the sandbox itself.
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=FORWARDS_QUIET=1
+Environment=FORWARDS_SCOPE=1
 ExecStart=%h/OpenDevOps/sandbox/scripts/forwards.sh
 TimeoutStartSec=600
-# The forwards outlive this oneshot run: stopping or restarting the unit must
-# not kill them (stop them with `openshell forward stop`).
+# The forwards run in their own scopes (FORWARDS_SCOPE=1); never kill anything but the script.
 KillMode=process
-
-[Install]
-WantedBy=default.target

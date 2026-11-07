@@ -12,7 +12,7 @@ umask 022
 printf 'restrict,pty %s\n' "$(cat /data/ssh/pane_ed25519.pub)" >/panekeys/authorized_keys.tmp
 mv /panekeys/authorized_keys.tmp /panekeys/authorized_keys
 # Publish the broker's host key so the workbench client pins it.
-printf '[172.31.252.21]:2222 %s\n' "$(cut -d' ' -f1,2 /data/hostkey/ssh_host_ed25519_key.pub)" >/panekeys/broker_known_hosts.tmp
+printf '[hermes-herdr-work]:2222 %s\n' "$(cut -d' ' -f1,2 /data/hostkey/ssh_host_ed25519_key.pub)" >/panekeys/broker_known_hosts.tmp
 mv /panekeys/broker_known_hosts.tmp /panekeys/broker_known_hosts
 
 # Supervised: if the herdr server ever exits, it is started again (state is restored from /data/home).

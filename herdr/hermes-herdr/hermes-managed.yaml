@@ -1,7 +1,9 @@
-# Hermes Agent v0.22.5 managed ("administrator") config for the herdr-hermes POC.
-# Installed root-owned and read-only at /etc/hermes/config.yaml: Hermes applies it over the user config and
-# refuses to change these keys at runtime ("managed by your administrator"), so the agent cannot relax its
-# own guardrails. Option names checked against the code in nousresearch/hermes-agent:v0.22.5 and
+# Hermes Agent v0.23.0 managed ("administrator") config for the herdr-hermes POC.
+# Installed root-owned and read-only at /etc/hermes/config.yaml (HERMES_MANAGED_DIR=/etc/hermes): Hermes applies it
+# over the user config and refuses to change these keys at runtime ("managed by your administrator"), so the agent
+# cannot relax its own guardrails. Hermes ignores this file if it can't parse it, so entrypoint.sh checks the
+# loaded values and refuses to start otherwise. Option names checked against the code in
+# nousresearch/hermes-agent:v0.23.0 (same keys and defaults as v0.22.5) and
 # https://hermes-agent.nousresearch.com/docs/user-guide/security.
 
 approvals:
@@ -47,7 +49,7 @@ command_allowlist: []             # "always allow" answers would be stored here;
 # NVIDIA key, or this config. Pinned here so the agent cannot switch back to the local backend.
 terminal:
   backend: "ssh"
-  ssh_host: "172.31.252.20"
+  ssh_host: "hermes-workbench"
   ssh_user: "worker"
   ssh_port: 2222
   ssh_key: "/data/hermes/ssh/id_ed25519"
@@ -65,6 +67,10 @@ security:
   approval:
     transport: "builtin"
     transport_fallback: "deny"
+
+display:
+  show_reasoning: false           # the model's reasoning is not redacted (Hermes masks tool output, logs and answers,
+                                  # not reasoning), so don't stream it into the pane; it is still stored in state.db
 
 platform_toolsets:
   cli: [terminal, file, todo, clarify]   # least privilege: shell (with approvals), file tools, todo list, questions

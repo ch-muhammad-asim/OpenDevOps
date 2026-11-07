@@ -5,4 +5,4 @@
 exec ssh -tt -q -i /data/ssh/pane_ed25519 \
   -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
   -o UserKnownHostsFile=/ctlkeys/workbench_known_hosts -o ServerAliveInterval=30 \
-  -p 2222 worker@172.31.252.20 'cd /work/workspace && exec bash -l'
+  -p 2222 worker@hermes-workbench 'cd /work/workspace && exec bash -l'

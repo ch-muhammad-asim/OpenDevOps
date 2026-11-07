@@ -1,7 +1,7 @@
-# Hermes Agent v0.22.5 profile config for the herdr-hermes POC, copied to $HERMES_HOME/config.yaml on every start.
+# Hermes Agent profile config for the herdr-hermes POC, copied to $HERMES_HOME/config.yaml on every start.
 # Safety keys live in the managed config (/etc/hermes/config.yaml, from hermes-managed.yaml) and win over
 # this file. The NVIDIA key is never written here: Hermes reads NVIDIA_API_KEY from the environment.
-_config_version: 51
+_config_version: 52   # set at build time from the base image (Dockerfile)
 
 model:
   provider: "nvidia"
@@ -72,7 +72,7 @@ command_allowlist: []             # "always allow" answers would be stored here;
 # NVIDIA key, or this config. Pinned here so the agent cannot switch back to the local backend.
 terminal:
   backend: "ssh"
-  ssh_host: "172.31.252.20"
+  ssh_host: "hermes-workbench"
   ssh_user: "worker"
   ssh_port: 2222
   ssh_key: "/data/hermes/ssh/id_ed25519"
@@ -90,6 +90,10 @@ security:
   approval:
     transport: "builtin"
     transport_fallback: "deny"
+
+display:
+  show_reasoning: false           # the model's reasoning is not redacted (Hermes masks tool output, logs and answers,
+                                  # not reasoning), so don't stream it into the pane; it is still stored in state.db
 
 platform_toolsets:
   cli: [terminal, file, todo, clarify]   # least privilege: shell (with approvals), file tools, todo list, questions

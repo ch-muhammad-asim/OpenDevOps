@@ -1,0 +1,13 @@
+# Starts hermes-forwards.service 30 s after boot (or after enabling), then 60 s
+# after each run finishes. A run that is still going (waiting for the sandbox)
+# is never started twice.
+[Unit]
+Description=Check the Hermes sandbox host-loopback forwards every minute
+
+[Timer]
+OnActiveSec=30s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

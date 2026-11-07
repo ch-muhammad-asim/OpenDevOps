@@ -31,7 +31,7 @@ flowchart LR
 
 | Property | Default | Hermes profile | Why |
 |---|---|---|---|
-| Location | zonal `us-central1-a` | zonal `us-central1-b` (`-c` on a stockout) | A regional cluster puts the node count in every zone (3×) |
+| Location | zonal `us-central1-a` | zonal `us-central1-b` (the next zone after a stockout or `INTERNAL` failure) | A regional cluster puts the node count in every zone (3×) |
 | Machine type × nodes | `e2-medium` × 3 (6 vCPU) | `e2-standard-2` × 2 (4 vCPU / 16 GB) | Small and predictable |
 | Node image | GKE default (COS) | `UBUNTU_CONTAINERD` | OpenShell needs Landlock, which COS lacks |
 | Network policy | none | Dataplane V2 (creation time only) | NetworkPolicies enforced |
@@ -72,7 +72,7 @@ It enables the APIs, creates the VPC, subnet, firewall rules and cluster, runs `
 
 ### 🛡️ Hermes + NVIDIA OpenShell profile
 
-For the guarded Hermes deployment ([`../sandbox/k8s/README.md` → Part 1](../sandbox/k8s/README.md#️-part-1-hermes-in-nvidia-openshell-on-gke-live-deployment)):
+For the guarded Hermes deployment ([`../sandbox/k8s/README.md` → Part 1](../sandbox/k8s/README.md#️-part-1-hermes-in-nvidia-openshell-on-gke-verified-2026-11-07)):
 
 | Option / variable | Why |
 |---|---|
@@ -152,6 +152,7 @@ GKE creates the firewall rules for LoadBalancer Services and health checks itsel
 | Symptom | Cause | Fix |
 |---|---|---|
 | `does not have enough resources` on create | Zone stockout | Delete the failed cluster, use the next zone |
+| Create ends in `ERROR`: `INTERNAL` / `Failed to create cluster` (code 13) | Transient or zonal GKE failure, no cause given | Delete the `ERROR` cluster (`gcloud container clusters delete <cluster> --zone <zone> --quiet`), re-run in the next zone (`ZONE=us-central1-c`) |
 | `No project` | No project set | `gcloud config set project <PROJECT_ID>` |
 | `kubectl` cannot reach the cluster | Your IP is not in the authorized networks | `gcloud container clusters update <cluster> --zone <zone> --enable-master-authorized-networks --master-authorized-networks <IP>/32` |
 | `docker push` to Artifact Registry fails with a credential helper error | Docker config names a helper this machine lacks | Use a separate `DOCKER_CONFIG` with `{"credHelpers":{"us-central1-docker.pkg.dev":"gcloud"}}` |
@@ -162,6 +163,7 @@ GKE creates the firewall rules for LoadBalancer Services and health checks itsel
 |---|---|---|
 | 2026-11-07 | `./gcp-infra.sh --dry-run --project example-project` | 7 `gcloud` commands printed (APIs, VPC, subnet, 2 firewall rules, cluster, credentials), nothing created |
 | 2026-11-07 | Hermes profile in a fresh project | Cluster `hermes-gke` created in `us-central1-b`, GKE 1.36.4-gke.2046003, 2 nodes `Ready`, Ubuntu 24.04.5, Dataplane V2 (`ADVANCED_DATAPATH`), Workload Identity pool set, autoscaling off |
+| 2026-11-07 | Hermes profile in a third fresh project | `us-central1-b` → `INTERNAL: Failed to create cluster`; deleted, re-run with `ZONE=us-central1-c`: created, GKE 1.36.4-gke.2377000, 2 nodes `Ready` (Ubuntu), later resized to 3 for the POC |
 
 ## 🧹 Teardown
 

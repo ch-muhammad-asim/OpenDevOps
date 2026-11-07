@@ -1,0 +1,3 @@
+# Keep documentation out of the herdr-hermes image: Hermes would load a README.md under skills/ as skill content,
+# and e2e test 12 hashes every file in the installed skill tree.
+**/README.md

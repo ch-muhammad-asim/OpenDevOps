@@ -15,8 +15,8 @@ t 'herdr pane close w1:p1' herdr pane close w1:p1
 t 'herdr --machine x pane list' herdr --machine x pane list
 t 'herdr pane split --env A=B' herdr pane split --env A=B
 t 'herdr pane send-keys w1:p1 enter' herdr pane send-keys w1:p1 enter
-t 'direct ssh, argv server stop' sh -c 'printf "server\0stop\0" | ssh "$@" herdr@172.31.252.21' _ "${KEY[@]}"
-t 'direct ssh, command line' ssh "${KEY[@]}" herdr@172.31.252.21 herdr server stop </dev/null
+t 'direct ssh, argv server stop' sh -c 'printf "server\0stop\0" | ssh "$@" herdr@hermes-herdr-work' _ "${KEY[@]}"
+t 'direct ssh, command line' ssh "${KEY[@]}" herdr@hermes-herdr-work herdr server stop </dev/null
 herdr pane list >/dev/null 2>&1; echo "allowed herdr pane list => rc=$?"
 n=0
 while IFS= read -r f; do [[ "$(head -c 2 "$f")" == '#!' ]] || n=$((n + 1)); done < <(find / -xdev -name herdr -type f 2>/dev/null)

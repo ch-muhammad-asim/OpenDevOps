@@ -27,8 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq && rm -rf /v
 # Managed ("administrator") config: root-owned, Hermes refuses to change these keys at runtime.
 COPY sandbox/k8s/gke/herdr/hermes-managed.yaml /etc/hermes/config.yaml
 # The one herdr skill: the herdr-hermes POC skill with the same rules, worded for the sandbox (no workbench);
-# root-owned and read-only.
-COPY sandbox/k8s/gke/herdr/skills/herdr-operator /opt/hermes-sandbox/skills/herdr-operator
+# root-owned and read-only. Only SKILL.md is copied: Hermes can read any other file in a skill dir as skill content,
+# so the folder's README.md stays out of the image.
+COPY sandbox/k8s/gke/herdr/skills/herdr-operator/SKILL.md /opt/hermes-sandbox/skills/herdr-operator/SKILL.md
 COPY --chmod=0755 sandbox/k8s/gke/herdr/start-hermes-herdr.sh /usr/local/bin/start-hermes-herdr
 # `herdr` on PATH is an exact-argv allowlist (pane operations only) in front of the real binary in libexec. The
 # allowlist is the herdr-hermes POC's herdr-broker, unchanged (one script for both). Defence in depth: the herdr

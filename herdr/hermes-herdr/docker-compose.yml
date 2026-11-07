@@ -3,8 +3,8 @@
 #   hermes-workbench     where Hermes's terminal/file tools run over SSH (no secrets, no internet, no real herdr)
 #   hermes-herdr-work    work herdr server for the herdr-operator skill, reachable only via herdr-broker
 #   hermes-herdr-egress  allowlist proxy: HTTPS to the NVIDIA model API only
-# No ports are published and no Docker socket is mounted. The NVIDIA key comes from an env file outside the repo
-# (mode 600), never from the image. HERMES_VERSION picks the Hermes Agent base image and the image tag.
+# No ports are published and no Docker socket is mounted. The NVIDIA key is a read-only file mount from outside the
+# repo (mode 0440), never in the image or the environment. HERMES_VERSION picks the Hermes Agent base image and the image tag.
 #
 #   docker compose -f herdr/hermes-herdr/docker-compose.yml up -d --build
 #   docker exec herdr-hermes herdr agent list
@@ -15,12 +15,14 @@ services:
     build:
       context: .
       args:
-        HERMES_IMAGE: nousresearch/hermes-agent:${HERMES_VERSION:-v0.22.5}
-    image: herdr-hermes:herdr0.9.5-hermes${HERMES_VERSION:-v0.22.5}
+        HERMES_IMAGE: nousresearch/hermes-agent:${HERMES_VERSION:-v0.23.0}
+    image: herdr-hermes:herdr0.9.5-hermes${HERMES_VERSION:-v0.23.0}
     container_name: herdr-hermes
     init: true                      # reaps the pane processes herdr starts
     restart: unless-stopped
     user: "10000:10000"
+    group_add:
+      - "${HERMES_HERDR_KEY_GID:?set HERMES_HERDR_KEY_GID to the group id that owns the key file (id -g)}"
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777,nosuid,nodev
@@ -29,11 +31,12 @@ services:
       - hermes-herdr-data:/data     # herdr socket/state (HOME) + Hermes config/sessions (HERMES_HOME) + ssh key
       - hermes-workbench-keys:/keys # Hermes's public key for the workbench (only file written here)
       - hermes-ctl-keys:/workbench-pub:ro   # the workbench's published host key (pinned in known_hosts)
-    env_file:
-      - ${HERMES_HERDR_ENV_FILE:-${HOME}/.config/hermes-herdr/hermes-herdr.env}
+      # Model API key: a read-only file (mode 0440 on the host, group = HERMES_HERDR_KEY_GID), read only by hermes-shim.
+      # Not in the environment, so neither PID 1 nor `docker inspect` holds it.
+      - ${HERMES_HERDR_KEY_FILE:-${HOME}/.config/hermes-herdr/nvidia_api_key}:/run/secrets/nvidia_api_key:ro
     environment:
-      HTTPS_PROXY: http://172.31.252.2:8888
-      HTTP_PROXY: http://172.31.252.2:8888
+      HTTPS_PROXY: http://hermes-herdr-egress:8888
+      HTTP_PROXY: http://hermes-herdr-egress:8888
       NO_PROXY: localhost,127.0.0.1
     cap_drop: [ALL]
     security_opt:

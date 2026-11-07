@@ -1,6 +1,7 @@
 # hermes-herdr-egress: tinyproxy allowlist proxy (HTTPS CONNECT to the NVIDIA model API only). The image is the
-# compose image; only tinyproxy.conf differs: on Kubernetes pod addresses are not fixed, so `Allow` names the pod
-# range and the NetworkPolicy admits only herdr-hermes on :8888 (the workbench never reaches the proxy).
+# compose image; only tinyproxy.conf differs: on Kubernetes pod addresses are not fixed, so `Allow` names the
+# cluster's pod range (rendered by k8s/deploy.sh from the cluster, or POD_CIDR) and the NetworkPolicy admits only
+# herdr-hermes on :8888 (the workbench never reaches the proxy). Apply through deploy.sh, not `kubectl apply -k`.
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: hermes-herdr-egress-conf, namespace: hermes-herdr}
@@ -10,8 +11,8 @@ data:
     Listen 0.0.0.0
     Timeout 600
     MaxClients 20
-    # Pod range; callers are limited to herdr-hermes by the NetworkPolicy hermes-herdr-egress.
-    Allow 10.196.0.0/14
+    # Pod range (rendered by deploy.sh); callers are limited to herdr-hermes by the NetworkPolicy hermes-herdr-egress.
+    Allow @POD_CIDR@
     DisableViaHeader Yes
     ConnectPort 443
     FilterDefaultDeny Yes

@@ -16,6 +16,9 @@ GATEWAY_NAME="${GATEWAY_NAME:-hermes-gw}"
 SANDBOX_NAME="${SANDBOX_NAME:-hermes}"
 HERMES_IMAGE="${HERMES_IMAGE:-nousresearch/hermes-agent:v0.23.0}"
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-hermes-openshell:v0.23.0}"
+# HERDR=1: add the herdr layer (sandbox/k8s/gke/herdr/, same as GKE) on top and start the sandbox with start-hermes-herdr.
+HERDR="${HERDR:-0}"
+HERDR_IMAGE="${HERDR_IMAGE:-${SANDBOX_IMAGE}-herdr0.9.5}"
 DATA_VOLUME="${DATA_VOLUME:-hermes-data}"
 HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.config/hermes-sandbox/hermes.env}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-9119}"
@@ -46,6 +49,13 @@ docker build -q --build-arg "HERMES_IMAGE=$HERMES_IMAGE" -t "$SANDBOX_IMAGE" "$H
 # Each build of the 4 GB Hermes image leaves ~4.5 GB of build cache behind;
 # drop it right away so re-runs never fill the disk.
 docker builder prune -af >/dev/null 2>&1 || true
+RUN_IMAGE="$SANDBOX_IMAGE"; RUN_CMD=start-hermes
+if [ "$HERDR" = 1 ]; then
+  log "Building $HERDR_IMAGE (herdr layer) from $SANDBOX_IMAGE"
+  docker build -q -f "$HERE/k8s/gke/herdr/Dockerfile" --build-arg "BASE_IMAGE=$SANDBOX_IMAGE" -t "$HERDR_IMAGE" "$HERE/.."
+  docker builder prune -af >/dev/null 2>&1 || true
+  RUN_IMAGE="$HERDR_IMAGE"; RUN_CMD=start-hermes-herdr
+fi
 
 log "Ensuring persistent volume $DATA_VOLUME"
 docker volume inspect "$DATA_VOLUME" >/dev/null 2>&1 || docker volume create \
@@ -73,7 +83,7 @@ else
 
   "$OPENSHELL" sandbox create \
     --name "$SANDBOX_NAME" \
-    --from "$SANDBOX_IMAGE" \
+    --from "$RUN_IMAGE" \
     --policy "$HERE/hermes/policy.yaml" \
     --driver-config-json "{\"docker\":{\"mounts\":[{\"type\":\"volume\",\"source\":\"$DATA_VOLUME\",\"target\":\"/sandbox/hermes\",\"read_only\":false},{\"type\":\"tmpfs\",\"target\":\"/tmp\",\"size_bytes\":$TMP_SIZE_BYTES}]}}" \
     --env HERMES_DASHBOARD_PORT="$DASHBOARD_PORT" \
@@ -88,7 +98,7 @@ else
     --no-auto-providers \
     --cpu 2 --memory 4Gi \
     --detach --restart-policy on-failure \
-    -- start-hermes
+    -- "$RUN_CMD"
 fi
 
 log "Forwarding dashboard and API to host loopback"

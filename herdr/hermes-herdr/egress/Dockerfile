@@ -11,4 +11,6 @@ COPY allowlist /etc/tinyproxy/allowlist
 RUN chmod 0644 /etc/tinyproxy/tinyproxy.conf /etc/tinyproxy/allowlist
 
 USER nobody
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD nc -z 127.0.0.1 8888 || exit 1
 ENTRYPOINT ["tinyproxy", "-d", "-c", "/etc/tinyproxy/tinyproxy.conf"]

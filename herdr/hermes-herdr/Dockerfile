@@ -3,7 +3,7 @@
 # recognises it as agent kind `hermes` and can prompt it, read it and see when it is blocked on an approval.
 # No OpenShell here: protection comes from Hermes's own guardrails (config.yaml) and the container settings
 # in docker-compose.yml. Same image is meant for Kubernetes later (README "Run on GKE later").
-ARG HERMES_IMAGE=nousresearch/hermes-agent:v0.22.5
+ARG HERMES_IMAGE=nousresearch/hermes-agent:v0.23.0
 # The tag is pinned through the ARG above, which hadolint can't see.
 # hadolint ignore=DL3006
 FROM ${HERMES_IMAGE}
@@ -46,6 +46,11 @@ RUN mkdir -p /opt/hermes-herdr/no-bundled-skills && \
     chown -R root:root /etc/hermes /opt/hermes-herdr && \
     find /opt/hermes-herdr/skills /opt/hermes-herdr/herdr-agent-detection -type d -exec chmod 0755 {} + && \
     find /opt/hermes-herdr/skills /opt/hermes-herdr/herdr-agent-detection -type f -exec chmod 0644 {} +
+# The profile config's _config_version must match this Hermes release (no migration prompt at start): take it from
+# the base image's own defaults, so one config.yaml serves every pinned Hermes version.
+RUN v="$(/opt/hermes/.venv/bin/python -c 'from hermes_cli.config_defaults import DEFAULT_CONFIG as d; print(d["_config_version"])')" && \
+    sed -i "s/^_config_version: .*/_config_version: ${v}/" /opt/hermes-herdr/config.yaml && \
+    grep -q "^_config_version: ${v}$" /opt/hermes-herdr/config.yaml
 
 # HOME (herdr socket + state) and HERMES_HOME (Hermes config, sessions, memory) live on the /data volume;
 # the root filesystem is mounted read-only by docker-compose.yml. HERMES_BUNDLED_SKILLS points at an empty dir so
@@ -54,6 +59,7 @@ ENV HOME=/data/home \
     HERMES_HOME=/data/hermes \
     HERMES_WRITE_SAFE_ROOT=/work/workspace \
     HERMES_BUNDLED_SKILLS=/opt/hermes-herdr/no-bundled-skills \
+    HERMES_MANAGED_DIR=/etc/hermes \
     SHELL=/bin/sh \
     TERM=xterm-256color \
     COLORTERM=truecolor \

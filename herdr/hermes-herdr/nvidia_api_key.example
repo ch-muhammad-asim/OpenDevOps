@@ -1,0 +1,4 @@
+# Put ONLY the key (no NAME=, no comments) in ~/.config/hermes-herdr/nvidia_api_key on the server:
+#   install -m 0600 /dev/null ~/.config/hermes-herdr/nvidia_api_key   # write the key into it, then chmod 0440
+#   export HERMES_HERDR_KEY_GID=$(id -g)                             # compose gives herdr-hermes this group
+# The real file is never committed. Remove these comment lines in the real file.

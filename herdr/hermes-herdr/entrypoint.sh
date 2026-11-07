@@ -1,18 +1,15 @@
 #!/bin/sh
-# herdr-hermes entrypoint: move the model key out of the environment, install Hermes's profile config, refuse to start
+# herdr-hermes entrypoint: check the model key file, install Hermes's profile config, refuse to start
 # unless the managed guardrails are in force (fail closed), pin herdr's detection rules, create the ssh key for the
 # workbench, open the Hermes pane in the background, then run the herdr server as the main process (its sockets
 # stay inside this container, mode 600).
 set -eu
 die() { echo "[herdr-hermes] FATAL: $*" >&2; exit 1; }
 
-# Model key: from the env file into a 0600 file on the tmpfs; the herdr server, the up-script and the pane shells
-# start without it. Only the Hermes process tree loads it (/opt/hermes-herdr/bin/hermes).
-umask 077
-mkdir -p /tmp/.hermes-herdr
-[ -n "${NVIDIA_API_KEY:-}" ] && printf '%s' "$NVIDIA_API_KEY" >/tmp/.hermes-herdr/model.key
-unset NVIDIA_API_KEY
-umask 022
+# Model key: a read-only file mount, loaded only by the Hermes process tree (/opt/hermes-herdr/bin/hermes). Refuse to
+# start without it rather than run a Hermes that can't reach its model; it must never come in through the environment.
+[ -r /run/secrets/nvidia_api_key ] && [ -s /run/secrets/nvidia_api_key ] || die "model key file /run/secrets/nvidia_api_key missing or unreadable"
+[ -z "${NVIDIA_API_KEY:-}" ] || die "NVIDIA_API_KEY must not be set in the container environment (use the key file mount)"
 
 mkdir -p "$HOME/.config/herdr/agent-detection" "$HOME/.ssh" "$HERMES_HOME/ssh" "$HERMES_HOME/skills"
 chmod 0700 "$HOME" "$HERMES_HOME" "$HOME/.ssh" "$HERMES_HOME/ssh"
@@ -32,11 +29,18 @@ from hermes_cli.managed_scope import load_managed_config
 c = load_managed_config()
 a, t = c.get("approvals", {}), c.get("terminal", {})
 ok = (a.get("mode") == "manual" and "*sudo *" in (a.get("deny") or []) and "*herdr server stop*" in (a.get("deny") or [])
-      and t.get("backend") == "ssh" and t.get("ssh_host") == "172.31.252.20" and t.get("env_passthrough") == [])
+      and t.get("backend") == "ssh" and t.get("ssh_host") == "hermes-workbench" and t.get("env_passthrough") == []
+      and c.get("display", {}).get("show_reasoning") is False)
 sys.exit(0 if ok else 1)
 EOF
 set +e; hermes approvals test --env-type ssh -- sudo ls >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" = 3 ] || die "approvals.deny is not enforced (hermes approvals test -- sudo ls exited $rc, expected 3)"
+
+# Lock the one skill (Hermes v0.23.0+ `hermes curator lock`): skill_manage, write_file, patch and terminal refuse to
+# change it, even under --yolo. Its files are also root-owned on the read-only rootfs. Re-applied on every start
+# because the skills dir (which holds the lock record) is cleaned above. Fail closed: no lock, no start.
+hermes curator lock --help >/dev/null 2>&1 || die "hermes curator lock unsupported (needs Hermes v0.23.0+); refusing to start"
+hermes curator lock herdr-operator >/dev/null 2>&1 || die "could not lock skill herdr-operator; refusing to start"
 
 # Always re-pin the detection override from the image.
 cp /opt/hermes-herdr/herdr-agent-detection/hermes.toml "$HOME/.config/herdr/agent-detection/hermes.toml"

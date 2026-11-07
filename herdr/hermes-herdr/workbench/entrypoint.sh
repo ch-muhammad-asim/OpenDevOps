@@ -7,7 +7,7 @@ umask 077
 [ -f /var/lib/workbench/ctl_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -C hermes-workbench-ctl -f /var/lib/workbench/ctl_ed25519
 
 # Publish this sshd's host key so its clients pin it (StrictHostKeyChecking, no trust-on-first-use).
-printf '[172.31.252.20]:2222 %s\n' "$(cut -d' ' -f1,2 /var/lib/workbench/ssh_host_ed25519_key.pub)" >/ctlkeys/workbench_known_hosts.tmp
+printf '[hermes-workbench]:2222 %s\n' "$(cut -d' ' -f1,2 /var/lib/workbench/ssh_host_ed25519_key.pub)" >/ctlkeys/workbench_known_hosts.tmp
 mv /ctlkeys/workbench_known_hosts.tmp /ctlkeys/workbench_known_hosts
 
 # hermes-herdr-work accepts this key only for herdr-broker (ForceCommand there); `restrict` turns off the rest.

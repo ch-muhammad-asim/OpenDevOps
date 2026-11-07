@@ -241,7 +241,7 @@ spec:
     # EndpointSlices, Secrets). Dataplane V2 matches the real control-plane
     # endpoint, not the kubernetes Service ClusterIP.
     # TODO(apply): narrow to the control-plane IP:
-    #   gcloud container clusters describe hermes-gke --zone us-central1-b \
+    #   gcloud container clusters describe hermes-gke --zone "$(gcloud container clusters list --filter=name=hermes-gke --format='value(location)')" \
     #     --format='value(endpoint)'      -> replace 0.0.0.0/0 with <IP>/32
     - to:
         - ipBlock:

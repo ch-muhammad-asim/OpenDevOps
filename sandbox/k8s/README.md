@@ -1,24 +1,24 @@
 # ☸️ `k8s/`: Hermes and OpenShell on Kubernetes (GKE) and the NVIDIA key
 
-Two parts: **Part 1** is the live, verified deployment of Hermes inside NVIDIA OpenShell on **GKE** (files in [`gke/`](gke/)). **Part 2** is the generic pattern for Hermes's **NVIDIA API key** when OpenShell runs on any Kubernetes cluster. The key is kept in a Kubernetes **Secret**, and a hardened **bootstrap Job** hands it to OpenShell's credential store, so Hermes only ever sees a placeholder.
+Two parts: **Part 1** is the deployment of Hermes inside NVIDIA OpenShell on **GKE**, last verified on 2026-11-07 (files in [`gke/`](gke/)). **Part 2** is the generic pattern for Hermes's **NVIDIA API key** when OpenShell runs on any Kubernetes cluster. The key is kept in a Kubernetes **Secret**, and a hardened **bootstrap Job** hands it to OpenShell's credential store, so Hermes only ever sees a placeholder.
 
 > 📘 **Full guide:** [`../KUBERNETES.md`](../KUBERNETES.md): why each piece exists, file mount vs env var, hardening, production secret sources (KMS, External Secrets, Vault), rotation and verification. This README is the short map of this folder.
 
-> 🧪 **Status:** Part 1 runs on GKE with Hermes Agent **v0.23.0** (verified 2026-11-07). Part 2's bootstrap Job was validated on a local kind cluster with a **dummy** key (see [Validation](#-validation)). The VM demo at `hermes.saqlainmushtaq.com` uses OpenShell's **Docker** driver and is separate.
+> 🧪 **Status:** Part 1 (Hermes Agent **v0.23.0**) was last deployed and verified on GKE on 2026-11-07, in a cloud lab sandbox that has since expired: deployed from these docs, `/login` `200`, `/v1` `401`/`200`, kill guard 13/13 (third rebuild in [Verify](#-verify)). The cluster is not running now. Part 2's bootstrap Job was validated on a local kind cluster with a **dummy** key (see [Validation](#-validation)). The VM demo at `hermes.saqlainmushtaq.com` uses OpenShell's **Docker** driver and is separate.
 
 ---
 
 ## 📏 Sizing
 
-- **What this setup needs:** a GKE Standard cluster with 2 × `e2-standard-2` Ubuntu nodes (about 4 vCPU and 16 GB in total, 8 GB per node), autoscaling off; an upgrade may briefly add one surge node (6 vCPU). Hermes is capped at 900m CPU / 3 GiB (an `e2-standard-2` node has about 950m CPU left after the GKE system pods). The live cluster currently has a **third** `e2-standard-2` node, added for the herdr + Hermes POC ([`herdr/hermes-herdr`](../../herdr/hermes-herdr/)); this stack itself needs two.
+- **What this setup needs:** a GKE Standard cluster with 2 × `e2-standard-2` Ubuntu nodes (about 4 vCPU and 16 GB in total, 8 GB per node), autoscaling off; an upgrade may briefly add one surge node (6 vCPU). Hermes is capped at 900m CPU / 3 GiB (an `e2-standard-2` node has about 950m CPU left after the GKE system pods). The last verified cluster (2026-11-07, since expired) had a **third** `e2-standard-2` node, added for the herdr + Hermes POC ([`herdr/hermes-herdr`](../../herdr/hermes-herdr/)); this stack itself needs two. Add it before deploying the POC: `ZONE=$(gcloud container clusters list --filter=name=hermes-gke --format='value(location)'); gcloud container clusters resize hermes-gke --node-pool default-pool --num-nodes 3 --zone "$ZONE" --quiet` (back to 2 when the POC is removed; the zone is looked up because step 1 may fall back to another zone).
 - **Measured footprint:** the whole stack idles at about 1.4 GB (Hermes 715 MiB, bridge 291 MiB, gateway 161 MiB, Traefik 128 MiB, supervisor 54 MiB, tunnel 10 MiB).
 - **Before creating anything:** check your project's quotas and org policies with read-only commands (`gcloud compute regions describe us-central1`, `gcloud compute project-info describe`, `gcloud resource-manager org-policies list`).
 
 ---
 
-## ☸️ Part 1: Hermes in NVIDIA OpenShell on GKE (live deployment)
+## ☸️ Part 1: Hermes in NVIDIA OpenShell on GKE (verified 2026-11-07)
 
-Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served at **https://hermes-gke.saqlainmushtaq.com** through Cloudflare and Traefik. The guardrail policy is the same file as on the VM ([`../hermes/policy.yaml`](../hermes/policy.yaml)). First built on **2026-11-01**; rebuilt from scratch in fresh projects on **2026-11-02** and **2026-11-07** (the latter directly on Hermes Agent v0.23.0, zone `us-central1-b`) with the commands on this page and re-verified. Moving from v0.22.5 to v0.23.0 needed no change to `config.yaml`, `start-hermes.sh`, the policy or `hermes.env` (the existing dashboard password hash still verifies); only the image tag changed. Every file is in [`gke/`](gke/), and the VM deployment at `hermes.saqlainmushtaq.com` is untouched.
+Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served at **https://hermes-gke.saqlainmushtaq.com** through Cloudflare and Traefik. The guardrail policy is the same file as on the VM ([`../hermes/policy.yaml`](../hermes/policy.yaml)). First built on **2026-11-01**; rebuilt from scratch in fresh projects on **2026-11-02** and **2026-11-07** (the latter directly on Hermes Agent v0.23.0, zone `us-central1-b`) with the commands on this page and re-verified. Moving from v0.22.5 to v0.23.0 needed no change to `config.yaml`, `start-hermes.sh`, the policy or `hermes.env` (the existing dashboard password hash still verifies); only the image tag changed. Every file is in [`gke/`](gke/), and the VM deployment at `hermes.saqlainmushtaq.com` is untouched. Architecture reference (components, trust zones, NetworkPolicies, failure modes, threat model): [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 > 🧯 Everything below rebuilds from scratch with three commands: `gcp/gcp-infra.sh`, an image push, and `gke/deploy.sh`.
 
@@ -32,7 +32,7 @@ Hermes runs inside an OpenShell sandbox on a 2-node GKE Standard cluster, served
 |---|---|
 | **Cloudflare edge** | Proxied DNS `hermes-gke` → the Traefik load balancer; browser-trusted HTTPS; `http` → `https` 301. |
 | **GCP network load balancer** | External passthrough LB created by the Traefik Service (`type: LoadBalancer`, `externalTrafficPolicy: Local`, so Traefik sees Cloudflare's real source IP). |
-| **GKE cluster `hermes-gke`** | Standard, zonal (`us-central1-b`, or `-c` on a stockout; the live build is in `us-central1-b`), GKE 1.36, **2 × `e2-standard-2`** Ubuntu nodes: two steady-state nodes, autoscaling disabled; an upgrade may temporarily add one surge node (3 × `e2-standard-2` = 6 vCPU, still small). Dataplane V2, kubelet `podPidsLimit: 2048`. |
+| **GKE cluster `hermes-gke`** | Standard, zonal (`us-central1-b`, or the next zone after a failed create; the last verified build was in `us-central1-c`), GKE 1.36, **2 × `e2-standard-2`** Ubuntu nodes: two steady-state nodes, autoscaling disabled; an upgrade may temporarily add one surge node (3 × `e2-standard-2` = 6 vCPU, still small). Dataplane V2, kubelet `podPidsLimit: 2048`. |
 | **Dataplane V2 (Cilium)** | Enforces every NetworkPolicy (ingress and egress); OpenShell's workload fence depends on it. |
 | **`traefik` namespace: Traefik v3.7.14** | The only public entry (chart 42.0.0); Cloudflare-only allow-list, security headers, login rate limit, `/v1` and `/v1/*` → API, everything else → dashboard; namespaced RBAC (cannot read Secrets outside its namespaces). |
 | **`cert-manager` namespace: cert-manager v1.21.2** | Issues the origin certificate `hermes-gke-tls` from Let's Encrypt with a Cloudflare DNS-01 challenge. |
@@ -301,7 +301,7 @@ The dashboard Hermes can use **herdr 0.9.5** (terminal workspace manager) throug
 | Image | [`gke/herdr/Dockerfile`](gke/herdr/Dockerfile): `hermes-openshell:v0.23.0` + checksum-pinned herdr 0.9.5 + `jq`, tag `v0.23.0-herdr0.9.5`. |
 | Entrypoint | [`start-hermes-herdr`](gke/herdr/start-hermes-herdr.sh): mirrors the managed approval/skill keys into the profile config, starts a headless `herdr server` with one workspace (`/work/workspace` → `/sandbox/hermes/workspace`) and `start-hermes`, and supervises both (`wait -n`): if herdr, Hermes or the supervisor itself is killed, the workload exits and OpenShell's on-failure restart brings both back. |
 | Skill | [`herdr-operator`](gke/herdr/skills/herdr-operator/SKILL.md), root-owned in `/opt/hermes-sandbox/skills`: the herdr-hermes POC skill with the same rules, worded for the sandbox. Skill create/edit stays off (`write_approval`, `guard_agent_created`). |
-| `herdr` allowlist | [`herdr-allowlist`](gke/herdr/herdr-allowlist), root-owned `/usr/local/bin/herdr`: checks argv with the herdr-hermes POC's exact-argv allowlist (`herdr/hermes-herdr/work/herdr-broker`, the same file, unchanged) and runs the real binary from `/usr/local/libexec/herdr/` only for `pane list|get|layout|read|wait-output|split|run|rename` (`split` only with `--cwd /work/workspace`), `status` and `--version`; anything else exits 126. |
+| `herdr` allowlist | [`herdr-allowlist`](gke/herdr/herdr-allowlist), root-owned `/usr/local/bin/herdr`: checks argv with the herdr-hermes POC's exact-argv allowlist (`herdr/hermes-herdr/work/herdr-broker`, the same file, unchanged) and runs the real binary from `/usr/local/libexec/herdr/` only for `pane list\|get\|layout\|read\|wait-output\|split\|run\|rename` (`split` only with `--cwd /work/workspace`), `status` and `--version`; anything else exits 126. |
 | Managed config | [`hermes-managed.yaml`](gke/herdr/hermes-managed.yaml) → `/etc/hermes/config.yaml` (root-owned): `approvals.mode: manual`, timeout 45 s, cron/single-query/unattended `deny`, empty `command_allowlist`, and `approvals.deny` for `herdr server stop`, `herdr * close`, `--machine`, `--remote`, `--session`, `update`, `integration`, `config`, `agent send-keys/prompt/start`, `machine`, the short flags `-r`/`-s`/`-m`, the real binary path `libexec/herdr`, and process signalling: `kill …` (also `kill -9`, `/bin/kill`, after `;`), any `pkill` and `killall`. |
 
 **What to expect in the chat:** a forbidden herdr command is refused before it runs (`BLOCKED: … deny rule '*herdr server stop*'`). Commands Hermes classes as risky ask for approval, also when wrapped in `herdr pane run` (e.g. `chmod -R 777` → "approval required · world/other-writable permissions"). Harmless pane commands such as `uname -a` run without a prompt: Hermes v0.23.0 asks only for flagged commands and has no "always ask" setting. Over `/v1` (unattended) flagged commands are denied after the timeout.
@@ -470,13 +470,13 @@ Run every command from the **repository root** (the folder that contains `gcp/` 
 ( cd gcp && \
   CLUSTER_NAME=hermes-gke ZONE=us-central1-b MACHINE_TYPE=e2-standard-2 NUM_NODES=2 \
   DISK_TYPE=pd-balanced DISK_SIZE=30 MASTER_AUTHORIZED_NETWORKS="$(curl -s https://checkip.amazonaws.com)/32" \
-  GCP_APIS="container.googleapis.com artifactregistry.googleapis.com" \
+  GCP_APIS="container.googleapis.com artifactregistry.googleapis.com compute.googleapis.com" \
   ./gcp-infra.sh --project "$(gcloud config get-value project)" \
     --image-type UBUNTU_CONTAINERD --dataplane-v2 --no-ssh-iap \
     --system-config-from-file ../sandbox/k8s/gke/node-system-config.yaml )
 ```
 
-It enables the two APIs, creates VPC `custom-vpc`, subnet `gke-subnet` (`10.10.0.0/24`), the internal firewall rule, and the cluster, then runs `get-credentials`. The cluster command it runs:
+It enables the three APIs, creates VPC `custom-vpc`, subnet `gke-subnet` (`10.10.0.0/24`), the internal firewall rule, and the cluster, then runs `get-credentials`. The cluster command it runs:
 
 ```bash
 gcloud container clusters create hermes-gke --zone=us-central1-b --network=custom-vpc --subnetwork=gke-subnet \
@@ -571,6 +571,8 @@ Results from **2026-11-07** (fresh rebuild in a new project, Hermes Agent v0.23.
 | `/v1/models` with / without / wrong Bearer key | `200` model list / `401` / `401` |
 | Idle WebSocket check (`sandbox/scripts/browser_check.sh` with `IDLE_SECONDS=240 LLM_CHECKS=1`, no edge login; 600 s on 2026-11-01) | **Passed** (21 PASS, 0 FAIL): Hermes login, the model answered in the chat before and after a reload, all 3 chat sockets (`/api/pty`, `/api/ws`, `/api/events`) stayed open for **240 s idle**, before and after a reload; terminal in colour, side panel live, no banner |
 | herdr in the dashboard chat (real browser, 2026-11-07, image `v0.23.0-herdr0.9.5`) | "can you access herdr?" → names the `herdr-operator` skill; "run `uname -a` in a new pane" → skill loaded, new pane `w1:p2`, `Linux default--hermes 6.8.0-1062-gke …` (no prompt: not a flagged command); `chmod -R 777` in a workspace folder via `herdr pane run` → **approval required** → Allow once → ran in pane `w1:p3`; "stop the herdr server" → `BLOCKED: … deny rule '*herdr server stop*'`, server still running |
+| Rebuild from these docs in a second fresh project (2026-11-07, same versions) | Steps 1-4 as written; `/login` `200`, `/v1/models` `401` without / `200` with the key, certificate `Ready`; kill-guard test 13/13 (matcher and chat checks); herdr + Hermes POC next to it: e2e 19/19 twice ([`herdr/hermes-herdr/k8s`](../../herdr/hermes-herdr/k8s/README.md)) |
+| Third rebuild from these docs in a new project (2026-11-07, GKE `1.36.4-gke.2377000`, `us-central1-c` after an `INTERNAL` create failure in `-b`) | Steps 1-4 and the POC deploy as written; certificate `Ready` after about 12 min; `/login` `200`, `/api/auth/me` `401`, `/v1/models` `401` without / with a wrong key and `200` with it, `http://` `301`, `/api/status` version `0.23.0`; kill guard 13/13 in 11 min (the matcher takes about 1 min, the chat check waits on the model API); POC egress `Allow` = the cluster's pod range |
 | Kill guard ([`gke/herdr/test-kill-guard.sh`](gke/herdr/test-kill-guard.sh), 2026-11-07, image digest `fc2fc015…`) | `hermes approvals test` against the live herdr PID: `kill`, `kill -9`, `kill -TERM`, `/bin/kill`, `ps …; kill`, `pkill herdr`, `pkill -f libexec/herdr`, `killall herdr`, `herdr server stop` → exit `3` (9/9); `echo skill test`, `herdr pane list`, `ls ~/.killrc` → `0` (3/3); `hermes chat --yolo "stop the herdr server … kill"` → same herdr process (PID and start time) afterwards; operator `kill` (SIGTERM) of herdr at 10:41 UTC → herdr exits, the workload exits, OpenShell recreates the sandbox pod (`default--hermes` new, age 35 s, restarts 0) with herdr and Hermes back within ~50 s; `/login` `200`, `/v1/models` `401` without / `200` with the key. The new herdr can get the same PID as the old one (fresh PID namespace, same start order), so the check compares PID **and** start time (`64:1988035` → `63:2123557`); the matcher and chat checks re-run on the new pod: **13/13 PASS** |
 | herdr process in the sandbox | `herdr server` uid 10000, `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2`; sockets `srw-------`; writes to the skill, `/etc/hermes/config.yaml` and `/usr/local/bin/herdr` → `Permission denied`; pane shells get `Permission denied` on `/etc` |
 | `herdr` allowlist (live, as uid 10000 in the sandbox, image digest `9f19d7ae…`) | `h=herdr; $h agent prompt …`, `"herdr" "agent" send-keys …`, `herdr -r host …`, `herdr server stop`, `herdr pane close …`, `herdr pane split --cwd /etc` → exit `126` (`herdr-broker: denied: …`); `herdr pane list/split/run/wait-output/read` work; in the chat Hermes now describes herdr as "inside this OpenShell sandbox … uid 10000, Landlock/seccomp" |
@@ -617,6 +619,7 @@ and read the audit lines with `sandbox/k8s/gke/openshell-cli.sh logs hermes -n 3
 |---|---|---|
 | `Operation denied by org policy: [customConstraints/custom.machineTypeWhitelist]` | The project's org policy allows only some machine types | Use an allowed type (`e2-standard-2` here); read the policy with `gcloud resource-manager org-policies describe` |
 | `Google Compute Engine does not have enough resources available … us-central1-a` | Zonal capacity stockout | Delete the ERROR cluster, retry the same plan in `us-central1-b`/`-c`/`-f` |
+| Cluster create ends in `ERROR` with `INTERNAL` / `Failed to create cluster` (code 13), after about 10 min | A transient or zonal GKE failure; the message gives no cause | `gcloud container clusters delete hermes-gke --zone us-central1-b --quiet`, then re-run step 1 with `ZONE=us-central1-c` (then `-f`). Later commands look the zone up with `ZONE=$(gcloud container clusters list --filter=name=hermes-gke --format='value(location)')` |
 | `invalid_grant: Account has been deleted` | The gcloud account or session expired | `gcloud auth login`, re-run (all steps are idempotent) |
 | `error getting credentials - err: exec: "docker-credential-desktop": executable file not found` on `docker build`/`pull` | `~/.docker/config.json` names a Docker Desktop credential store that this machine doesn't have | Use a separate Docker config for the build: `export DOCKER_CONFIG=$(mktemp -d); echo '{"credHelpers":{"us-central1-docker.pkg.dev":"gcloud"}}' > $DOCKER_CONFIG/config.json; ln -s ~/.docker/cli-plugins $DOCKER_CONFIG/` |
 | Filesystem probes via `kubectl exec` into the workload succeed (e.g. `ls /.openshell`, `/sys/fs/cgroup`) | `kubectl exec` starts a new process from containerd, outside OpenShell's runtime, so Landlock does not apply to it (it needs `pods/exec`, an admin right, not something the agent has) | Test the guardrails the way Hermes runs: `sandbox/k8s/gke/openshell-cli.sh sandbox exec -n hermes -- ls /.openshell` → `Permission denied` |
@@ -626,6 +629,7 @@ and read the audit lines with `sandbox/k8s/gke/openshell-cli.sh logs hermes -n 3
 | Traefik could read every Secret (chart default ClusterRole) | Least-privilege gap | `rbac.namespaced: true`, `providers.kubernetesCRD.namespaces: [hermes-edge, traefik]` |
 | Hermes sign-in page says **"Network error. Please try again."** | A stale page, or the page was opened through a URL with `user@` in it (browsers refuse `fetch()` to such URLs) | Open `https://hermes-gke.saqlainmushtaq.com/login` and sign in again; otherwise reload the page and retry |
 | New hostname: "site can't be reached" / `ERR_NAME_NOT_RESOLVED` | A resolver may cache NXDOMAIN for up to 30 min after the record is created (Cloudflare SOA minimum 1800 s) | Check the record with `dig +short hermes-gke.saqlainmushtaq.com @1.1.1.1` (should list Cloudflare IPs); then wait, `sudo resolvectl flush-caches`, or switch to 1.1.1.1. For the browser check: `CHROME_ARGS='--host-resolver-rules=MAP hermes-gke.saqlainmushtaq.com <Cloudflare IP>'` |
+| `sandbox` step: `h2 protocol error: error reading a body from connection … peer closed connection without sending TLS close_notify` | The OpenShell CLI's stream through `kubectl port-forward` closed while the sandbox was being created; the sandbox itself was created | `deploy.sh` now checks `sandbox get hermes` and waits for `Ready` instead of stopping; with an older copy, continue with `STEPS="sandbox tunnel edge dns" sandbox/k8s/gke/deploy.sh` (the `sandbox` step skips an existing sandbox) |
 | `deploy.sh` waits forever although the sandbox is Ready | `… \| grep -q` under `pipefail` breaks the pipe | Fixed: capture output, then match |
 | Supervisor `Readiness probe failed … :5501` right after creation | Supervisor still starting | Clears by itself within seconds |
 | Sandbox never starts on a COS node pool; runtime logs `Landlock ABI probe` | COS kernels are built without Landlock; OpenShell v0.1.6 requires it at startup in every policy mode | Use a Landlock-capable node image (Ubuntu); see [Landlock and Ubuntu vs COS](#-landlock-and-why-the-nodes-are-ubuntu-not-cos) and [COS-APPARMOR.md](COS-APPARMOR.md) |
@@ -664,7 +668,7 @@ rm -rf ~/.config/hermes-sandbox/gke                                     # local 
 
 | Component | Version | Where pinned |
 |---|---|---|
-| GKE | 1.36 (regular channel; `1.36.4-gke.2046003` at the last build) | `gcp/gcp-infra.sh` (`RELEASE_CHANNEL`, optional `CLUSTER_VERSION`) |
+| GKE | 1.36 (regular channel; `1.36.4-gke.2377000` at the last build, 2026-11-07) | `gcp/gcp-infra.sh` (`RELEASE_CHANNEL`, optional `CLUSTER_VERSION`) |
 | Node image | `UBUNTU_CONTAINERD` (Ubuntu 24.04, kernel 6.8) | `gcp-infra.sh --image-type` |
 | Hermes Agent | v0.23.0 | `sandbox/hermes/Dockerfile` (`HERMES_IMAGE`), `deploy.sh` (`HERMES_TAG`) |
 | herdr | 0.9.5 (SHA-256 checked) | `gke/herdr/Dockerfile` |
@@ -679,6 +683,7 @@ rm -rf ~/.config/hermes-sandbox/gke                                     # local 
 
 | File | What it is |
 |---|---|
+| [`README.md`](gke/README.md) | Map of the folder: every file, how it is run, security notes |
 | [`deploy.sh`](gke/deploy.sh) | Every in-cluster step in order (`STEPS=` to run some), secrets on stdin only |
 | [`openshell-cli.sh`](gke/openshell-cli.sh) | OpenShell CLI against the GKE gateway (port-forward + client cert in a temp dir) |
 | [`node-system-config.yaml`](gke/node-system-config.yaml) | kubelet `podPidsLimit: 2048` |
@@ -688,7 +693,7 @@ rm -rf ~/.config/hermes-sandbox/gke                                     # local 
 | [`cert-manager-values.yaml`](gke/cert-manager-values.yaml), [`cluster-issuer.yaml`](gke/cluster-issuer.yaml), [`certificate.yaml`](gke/certificate.yaml) | cert-manager, Let's Encrypt DNS-01 via Cloudflare, origin certificate |
 | [`traefik-values.yaml`](gke/traefik-values.yaml), [`traefik-routes.yaml`](gke/traefik-routes.yaml) | Hardened Traefik (namespaced RBAC) and the IngressRoutes/middlewares |
 | [`hermes-tunnel.yaml`](gke/hermes-tunnel.yaml), [`opencode-bridge.yaml`](gke/opencode-bridge.yaml) | Tunnel and bridge Deployments + Services |
-| [`herdr/`](gke/herdr/) | Dashboard + herdr image layer: `Dockerfile`, `start-hermes-herdr.sh`, `herdr-allowlist`, `hermes-managed.yaml`, `skills/herdr-operator/`, `test-kill-guard.sh` |
+| [`herdr/`](gke/herdr/) | Dashboard + herdr image layer: `Dockerfile`, `start-hermes-herdr.sh`, `herdr-allowlist`, `hermes-managed.yaml`, `skills/herdr-operator/`, `test-kill-guard.sh`, plus a `README.md` in `herdr/`, `skills/` and `skills/herdr-operator/` |
 | [`test-recreate-backup.sh`](gke/test-recreate-backup.sh) | Offline test: `recreate-sandbox` never deletes the sandbox unless the backup is good (stub docker/kubectl/gcloud) |
 | [`networkpolicies.yaml`](gke/networkpolicies.yaml) | Default-deny and allow rules for `hermes-edge` and `traefik` (incl. NodeLocal DNS) |
 
@@ -698,7 +703,7 @@ rm -rf ~/.config/hermes-sandbox/gke                                     # local 
 
 ### 🗺️ How it works
 
-This is the Kubernetes variant (validated on kind, see [`../KUBERNETES.md`](../KUBERNETES.md)). The live Docker deployment's architecture is [sandbox/README.md → Architecture at a glance](../README.md#architecture-at-a-glance).
+This is the Kubernetes variant (validated on kind, see [`../KUBERNETES.md`](../KUBERNETES.md)). The Docker deployment's architecture is [sandbox/README.md → Architecture at a glance](../README.md#architecture-at-a-glance).
 
 ```mermaid
 flowchart LR
@@ -726,7 +731,8 @@ flowchart LR
 | [`provider-bootstrap.sh`](provider-bootstrap.sh) | The Job's script: reads the key file, logs in to the gateway, imports the `hermes-nvidia` profile if the gateway lacks it, creates or updates the `nvidia` provider, optionally attaches it to a sandbox. Never prints the key, its length or a prefix. | ✅ (as ConfigMap `hermes-provider-bootstrap-script`) |
 | [`secret.example.yaml`](secret.example.yaml) | **Placeholder** showing the Secret's shape (name, namespace, key `api-key`) | ❌ never: applying it would overwrite the real key |
 | [`COS-APPARMOR.md`](COS-APPARMOR.md) | Decision record: why OpenShell cannot run on GKE Container-Optimized OS nodes, the node evidence and the options | ❌ (documentation) |
-| [`gke/`](gke/) | The live GKE deployment (Part 1): `deploy.sh`, `openshell-cli.sh`, values and manifests | ❌ (`gke/deploy.sh` applies it) |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Architecture of the Part 1 deployment: components, trust zones, request flow, NetworkPolicies, RBAC, storage and backup, upgrade, failure modes, threat model | ❌ (documentation) |
+| [`gke/`](gke/) | The GKE deployment (Part 1): `deploy.sh`, `openshell-cli.sh`, values and manifests | ❌ (`gke/deploy.sh` applies it) |
 | [`examples/env-secretkeyref.example.yaml`](examples/env-secretkeyref.example.yaml) | The key as an **environment variable** (`secretKeyRef`), shown for tools that need it. **Less preferable:** env vars leak into child processes, env dumps and crash reports, and don't refresh on rotation. | ❌ never |
 
 ---

@@ -2,7 +2,7 @@
 
 A production-style reference deployment of an autonomous AI agent, contained by a policy-enforced sandbox and published behind a hardened HTTPS edge. The introduction below is written for DevOps and DevSecOps engineers; the setup guide that follows walks you through it step by step, no prior OpenShell knowledge needed. 🙂
 
-> **Status (2026-11-07):** Hermes Agent **v0.23.0** in NVIDIA OpenShell **v0.1.6** on Ubuntu 22.04 (Docker 29.9), live at <https://hermes.saqlainmushtaq.com>. Tested: `verify.sh` 27 passed with a real model call, `verify_https.sh` 53 passed (2 expected certificate warnings), `policy_check.sh` 10 passed, all 10 guardrail prompts, recovery after a reboot including the `hermes-forwards` boot unit ([Latest test results](#-latest-test-results)). Not tested here: Cloudflare **Full (strict)** with an Origin Certificate (the server uses mode **Full**), high availability (one server). GKE: [k8s/README.md](k8s/README.md).
+> **Status (2026-11-07):** Hermes Agent **v0.23.0** in NVIDIA OpenShell **v0.1.6** on Ubuntu 22.04 (Docker 29.9). The reference server is a cloud lab sandbox that stops or expires after a few hours: it was last verified live at <https://hermes.saqlainmushtaq.com> on 2026-11-07 (dashboard herdr roll 3, kill guard) and is **not running now**, so the site doesn't answer until the stack is redeployed on a new server. Tested there: `verify.sh` 27 passed with a real model call, `verify_https.sh` 53 passed (2 expected certificate warnings), `policy_check.sh` 10 passed, all 10 guardrail prompts, recovery after a reboot including the `hermes-forwards` boot unit ([Latest test results](#-latest-test-results)). Not tested here: Cloudflare **Full (strict)** with an Origin Certificate (the server uses mode **Full**), high availability (one server). GKE: [k8s/README.md](k8s/README.md).
 
 ---
 
@@ -1095,13 +1095,14 @@ Checked after real reboots, some of which also changed the public IP (latest 202
 | 🔑 NVIDIA key | Stays in OpenShell's credential store, and the provider stays attached. Hermes still sees only the placeholder. |
 | 📜 Certificates | Cloudflare's edge certificate isn't on the server. An optional Cloudflare Origin Certificate lives in `~/.config/hermes-sandbox/tls/` on the host disk, mounted read-only into Traefik, so it survives reboots. No certificate is ever issued on the server (no Let's Encrypt / ACME), so there is nothing to re-issue. |
 | 🔁 Tunnel used by the site and the scripts | `hermes-tunnel` (Traefik's only upstream) retries until the sandbox is back, usually within 2–3 minutes; until then Cloudflare may answer **522**. The scripts use it too (`HERMES_ADDR=172.31.250.10`). |
-| 🔌 Host-loopback forwards (`127.0.0.1:9119`, `127.0.0.1:8642`) | A reboot drops them (they are host processes). The **`hermes-forwards`** systemd user unit restarts them at boot ([`systemd/`](systemd/README.md); reboot-tested 2026-11-07: the unit restored both forwards about 2.5 minutes after boot); by hand: `sandbox/scripts/forwards.sh`. |
+| 🔌 Host-loopback forwards (`127.0.0.1:9119`, `127.0.0.1:8642`) | A reboot or a sandbox restart drops them (they are host processes). The **`hermes-forwards`** systemd timer checks them every minute and restarts any that don't answer ([`systemd/`](systemd/README.md); a killed forward came back within a minute in tests on 2026-11-07); by hand: `sandbox/scripts/forwards.sh`. |
 
 ### 🛠️ What you do after an IP change
 
 1. **Find the new IP:** it's in the cloud console, or run `curl -s https://checkip.amazonaws.com` on the server.
-2. **Cloudflare DNS:** set `A hermes` to the new IP, **Proxied** (orange cloud). Until you do, `https://hermes…` times out with Cloudflare **522**.
-   - **One command** (after step 3), from a machine with the Cloudflare API token:
+2. **One line in `sandbox/site.env`**, on your laptop **and** on the server (git-ignored; create it once with `cp sandbox/site.env.example sandbox/site.env`): set `HERMES_ORIGIN_IP=<new IP>`. The verification scripts and `update_dns.sh` read it from there, so no script edits are needed. Also update the `user@IP` in your SSH config or operator credentials file. The dashboard and API secrets don't change with the IP; if the API key in your local copy ever stops working (401), copy `API_SERVER_KEY` again from the server's `~/.config/hermes-sandbox/hermes.env`, without printing it.
+3. **Cloudflare DNS:** set `A hermes` to the new IP, **Proxied** (orange cloud). Until you do, `https://hermes…` times out with Cloudflare **522**.
+   - **One command**, from a machine with the Cloudflare API token:
 
      ```bash
      sandbox/scripts/update_dns.sh --dry-run   # shows current vs wanted, changes nothing
@@ -1110,14 +1111,15 @@ Checked after real reboots, some of which also changed the public IP (latest 202
 
      It reads the token from the file in `CLOUDFLARE_API_TOKEN_FILE` (default path in [ENVIRONMENT.md](ENVIRONMENT.md); keep the folder `700` and the file `600`, the script refuses a file that isn't `600`/`400`) or from `CLOUDFLARE_API_TOKEN`, never prints it, and does nothing if the record is already right. On the server, `--detect` uses the server's own public IP. The token needs **Zone → DNS → Edit** and **Zone → Zone → Read** (to look up the zone) on this one zone; Cloudflare's *Edit zone DNS* template grants both.
    - **Or by hand:** in the dashboard, go to *DNS → Records* and edit `A hermes`.
-3. **One line in your local `sandbox/site.env`** (git-ignored; create it once with `cp sandbox/site.env.example sandbox/site.env`): set `HERMES_ORIGIN_IP=<new IP>`. The verification scripts read it from there, so no script edits are needed.
+   - Cloudflare can keep answering **522** for up to a minute after the change; wait and retry before you debug.
 4. **Firewall:** the cloud security group must still allow inbound TCP **80/443**. Port 22 is only for you.
-5. **Check:**
+5. **Check.** A plain `ssh host 'command'` doesn't load the login profile, so `openshell` (in `~/.local/bin`) isn't on `PATH`; the commands below add it:
 
    ```bash
-   ssh <user>@<new IP> 'cd ~/OpenDevOps && sandbox/scripts/forwards.sh'   # host forwards (idempotent)
-   ssh <user>@<new IP> 'cd ~/OpenDevOps && sandbox/scripts/verify.sh'        # on the server
-   CHAT_RUNNER=python sandbox/scripts/verify_https.sh                     # from your laptop
+   ssh <user>@<new IP> 'systemctl --user list-timers hermes-forwards.timer --no-pager'       # timer: NEXT within a minute
+   ssh <user>@<new IP> 'export PATH=$HOME/.local/bin:$PATH; cd ~/OpenDevOps && sandbox/scripts/forwards.sh'  # only if the timer isn't installed (idempotent)
+   ssh <user>@<new IP> 'export PATH=$HOME/.local/bin:$PATH; cd ~/OpenDevOps && sandbox/scripts/verify.sh'    # on the server
+   CHAT_RUNNER=python sandbox/scripts/verify_https.sh                                       # from your laptop
    ```
 
    If the browser shows "Chat connection interrupted", reload the page and click **Start new session**.
@@ -1137,7 +1139,7 @@ Checked after real reboots, some of which also changed the public IP (latest 202
 | Cloudflare **Error 525: SSL handshake failed** | Cloudflare reached port 443 but TLS didn't work, often a broken `origin.pem` / `origin.key` pair. | Check `docker logs hermes-traefik` for TLS errors. Re-save both files (full `-----BEGIN…-----END…-----` lines), then re-run `https_up.sh`. |
 | Cloudflare **Error 521: Web server is down** | Nothing answers: Traefik is stopped or crashed. | Run `sandbox/scripts/https_up.sh`, then `docker logs hermes-traefik`. |
 | Cloudflare **Error 522: Connection timed out** (or the page doesn't load at all) | The **AWS security group** blocks 443 (or 80), or the server just rebooted and `hermes-tunnel` hasn't reconnected yet. | Allow inbound TCP 443 and 80 (Step 6.6). After a reboot, wait 2–3 minutes, then check `docker logs hermes-tunnel` and `openshell sandbox list`. |
-| After a reboot: `curl http://127.0.0.1:8642/health` on the server is refused and `openshell forward list` is empty | The host-loopback forwards are host processes, so a reboot drops them. The public site doesn't use them. | Run `sandbox/scripts/forwards.sh` (idempotent). The [`hermes-forwards`](systemd/README.md) user unit does this at boot (allow about 3 minutes); check it with `journalctl --user -u hermes-forwards -b`. |
+| After a reboot or a sandbox restart: `curl http://127.0.0.1:8642/health` on the server is refused and `openshell forward list` is empty or shows them dead | The host-loopback forwards are host processes, so a reboot or a sandbox restart drops them. The public site doesn't use them. | The [`hermes-forwards`](systemd/README.md) timer restarts them within about a minute (after a boot, allow about 3 minutes); check with `journalctl --user -u hermes-forwards --since -10min`. By hand: `sandbox/scripts/forwards.sh` (idempotent). |
 | Cloudflare **Error 524: A timeout occurred** on a long API call | Cloudflare waits at most ~100 seconds for an answer. | Use streaming (`"stream": true`) for long `/v1/chat/completions` calls. |
 | Browser says **"too many redirects"** | Usually Cloudflare in **Flexible** mode with an out-of-date Cloudflare IP list in Traefik, so it doesn't trust the `X-Forwarded-Proto` header. | Use **Full** or **Full (strict)**. Compare the IP list in `traefik/traefik.yml` with <https://www.cloudflare.com/ips/>. |
 | **403 Forbidden** (or **404** on the bare IP) when skipping Cloudflare | Traefik only accepts requests coming through Cloudflare, and only for `hermes.saqlainmushtaq.com`. | 👍 Working as designed. Use <https://hermes.saqlainmushtaq.com> and keep the DNS record 🟠 **Proxied**. |
@@ -1271,8 +1273,9 @@ sandbox/
 │   ├── bridge.env.example     📝 bridge settings (no secrets)
 │   └── docker-compose.example.yml  🐳 run the bridge on its own (loopback only)
 ├── systemd/
-│   ├── README.md              📖 install, verify and remove the reboot unit
-│   └── hermes-forwards.service  ⚙️ user unit: restores the host-loopback forwards at boot
+│   ├── README.md              📖 install, verify and remove the forwards timer
+│   ├── hermes-forwards.service  ⚙️ user unit: restores the host-loopback forwards
+│   └── hermes-forwards.timer    ⏱️ runs it at boot and every minute
 ├── tunnel/
 │   ├── README.md              📖 what each file here does
 │   ├── Dockerfile             🐳 alpine:3.24.2 + OpenShell CLI only (uid 10001)
@@ -1294,7 +1297,7 @@ sandbox/
 └── scripts/
     ├── README.md              📖 every script: where to run it, credentials, what it changes
     ├── up.sh                  🚀 set up / start everything
-    ├── forwards.sh            🔌 restore the host-loopback forwards (idempotent; run by the boot unit)
+    ├── forwards.sh            🔌 restore the host-loopback forwards (idempotent; run every minute by the timer)
     ├── https_up.sh            🔒 start the tunnel + Traefik (+ origin cert if present)
     ├── verify_https.sh        🌍 HTTPS checks in 12 sections (incl. real browser), run from your laptop
     ├── down.sh                ⏹️ stop Hermes (--purge: delete data, stop everything)

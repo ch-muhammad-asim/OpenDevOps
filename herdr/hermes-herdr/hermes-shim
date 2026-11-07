@@ -1,8 +1,8 @@
 #!/bin/sh
-# `hermes` for herdr-hermes: loads the model API key for the Hermes process tree only. The entrypoint moved it from
-# the container environment into a 0600 file on the tmpfs, so the herdr server and pane shells don't carry it.
-if [ -r /tmp/.hermes-herdr/model.key ]; then
-  NVIDIA_API_KEY="$(cat /tmp/.hermes-herdr/model.key)"
+# `hermes` for herdr-hermes: loads the model API key for the Hermes process tree only, from the read-only file mount
+# /run/secrets/nvidia_api_key. The container environment, the herdr server and the pane shells never carry it.
+if [ -r /run/secrets/nvidia_api_key ]; then
+  NVIDIA_API_KEY="$(tr -d '\r\n' </run/secrets/nvidia_api_key)"
   export NVIDIA_API_KEY
 fi
 exec /opt/hermes/.venv/bin/hermes "$@"
