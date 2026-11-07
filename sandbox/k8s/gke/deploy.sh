@@ -12,7 +12,6 @@
 #   NVIDIA key      ~/Desktop/sandbox/creds/nvidia/api   (line "API: nvapi-...")
 #   Cloudflare DNS  ~/Desktop/sandbox/creds/cloudflare/dns/api  (cfat_... token)
 #   Hermes env      ~/.config/hermes-sandbox/gke/hermes.env      (dashboard hash, API key)
-#   Edge htpasswd   ~/.config/hermes-sandbox/gke/edge-htpasswd   (Traefik basic auth)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SANDBOX_DIR="$(cd "$HERE/../.." && pwd)"
@@ -26,8 +25,10 @@ AGENT_SANDBOX_VERSION="${AGENT_SANDBOX_VERSION:-v1.0.3}"
 OPENSHELL_CHART_VERSION="${OPENSHELL_CHART_VERSION:-0.1.6}"
 CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.21.2}"
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-42.0.0}"
-HERMES_CPU="${HERMES_CPU:-1}"
+HERMES_CPU="${HERMES_CPU:-900m}"   # an e2-standard-2 node has ~950m CPU left after the GKE system pods
 HERMES_MEMORY="${HERMES_MEMORY:-3Gi}"
+HERMES_TAG="${HERMES_TAG:-v0.23.0-herdr0.9.5}"   # Hermes Agent release (+ herdr layer from gke/herdr/; plain "v0.23.0" = no herdr)
+HERMES_CMD="${HERMES_CMD:-start-hermes-herdr}"   # sandbox entrypoint; use "start-hermes" with the plain image
 STEPS="${STEPS:-base certmanager traefik netpol bridge openshell provider sandbox tunnel edge dns}"
 # Helm's OCI client trips over a Docker credsStore it cannot run; use an empty config.
 HELM_REG="$(mktemp -d)"; echo '{}' > "$HELM_REG/config.json"; trap 'rm -rf "$HELM_REG"' EXIT
@@ -62,6 +63,27 @@ os() {  # openshell CLI; extra docker args before "--"
     --entrypoint openshell "$REGISTRY/hermes-tunnel:0.1.6" "$@"
 }
 
+# Rolling to a new image: STEPS="recreate-sandbox sandbox restore-data tunnel-restart". OpenShell deletes the
+# workspace PVC with the sandbox, so /sandbox/hermes (chats, settings, memory) is saved to a private, timestamped
+# file first and restored into the new sandbox (config.yaml is re-seeded from the image). Fails closed: if the
+# backup is missing, empty or unreadable, nothing is deleted. Test: sandbox/k8s/gke/test-recreate-backup.sh
+HERMES_BACKUP_DIR="${HERMES_BACKUP_DIR:-$GKE_SECRETS}"
+backup_hermes_data() {   # prints the backup path; exits 1 (before any delete) on failure
+  local f rc=0 n
+  f="$HERMES_BACKUP_DIR/hermes-data-backup-$(date -u +%Y%m%dT%H%M%SZ).tgz"
+  ( umask 077
+    # Hermes keeps running: tar exits 1 for "file changed as we read it" (accepted), >1 is an error.
+    os -- sandbox exec -n hermes --no-tty -- tar -C /sandbox --warning=no-file-changed --exclude='*.sock' \
+      -czf - hermes > "$f.tmp" ) || rc=$?
+  if [ "$rc" -gt 1 ]; then echo "backup failed: sandbox exec/tar exited $rc; nothing deleted" >&2; rm -f "$f.tmp"; exit 1; fi
+  n="$(tar -tzf "$f.tmp" 2>/dev/null | grep -c '^hermes/' || true)"
+  if [ "${n:-0}" -lt 1 ] || ! tar -tzf "$f.tmp" hermes/config.yaml >/dev/null 2>&1; then
+    echo "backup failed: archive empty, unreadable or without hermes/config.yaml; nothing deleted" >&2; rm -f "$f.tmp"; exit 1
+  fi
+  mv "$f.tmp" "$f"
+  echo "backup ok: $f ($n entries, $(du -h "$f" | cut -f1))" >&2
+  printf '%s\n' "$f"
+}
 if want base; then
   log "Namespaces, LimitRange, Agent Sandbox controller $AGENT_SANDBOX_VERSION"
   kubectl apply -f "$HERE/namespaces.yaml"
@@ -126,6 +148,14 @@ if want provider; then
   os -- provider list
 fi
 
+if want recreate-sandbox; then   # not in the default STEPS
+  log "Back up /sandbox/hermes to $HERMES_BACKUP_DIR (fails closed), then delete sandbox hermes"
+  HERMES_BACKUP="$(backup_hermes_data)" || exit 1
+  [ -s "$HERMES_BACKUP" ] || { echo "no backup file; nothing deleted" >&2; exit 1; }
+  os -- sandbox delete hermes || true
+  for _ in $(seq 1 30); do kubectl -n openshell get pod default--hermes >/dev/null 2>&1 || break; sleep 5; done
+fi
+
 if want delete-sandbox; then   # not in the default STEPS: re-create or tear down the sandbox
   log "Delete sandbox hermes (and its workspace PVC)"
   os -- sandbox delete hermes || true
@@ -138,6 +168,9 @@ if want sandbox; then
   if os -- sandbox get hermes >/dev/null 2>&1; then
     echo "sandbox hermes already exists"
   else
+    # By digest: the node caches images (IfNotPresent), so a rebuilt image under the same tag would not be pulled.
+    HERMES_DIGEST="$(gcloud artifacts docker images describe "$REGISTRY/hermes-openshell:$HERMES_TAG" --format='value(image_summary.digest)')"
+    echo "image $REGISTRY/hermes-openshell:$HERMES_TAG = $HERMES_DIGEST"
     env_args=(); env_from=()
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in ''|'#'*) continue ;; esac
@@ -145,7 +178,7 @@ if want sandbox; then
       env_args+=(-e "${line%%=*}"); env_from+=(--env-from "${line%%=*}")
     done < "$GKE_SECRETS/hermes.env"
     os "${env_args[@]}" -- sandbox create --name hermes \
-      --from "$REGISTRY/hermes-openshell:v0.22.5" \
+      --from "$REGISTRY/hermes-openshell@$HERMES_DIGEST" \
       --policy /repo/hermes/policy.yaml \
       --env HERMES_DASHBOARD_PORT=9119 --env API_SERVER_ENABLED=true \
       --env API_SERVER_HOST=0.0.0.0 --env API_SERVER_PORT=8642 \
@@ -154,12 +187,34 @@ if want sandbox; then
       "${env_from[@]}" --no-credential-warnings \
       --provider nvidia --no-auto-providers \
       --cpu "$HERMES_CPU" --memory "$HERMES_MEMORY" \
-      --detach --restart-policy on-failure -- start-hermes
+      --detach --restart-policy on-failure -- "$HERMES_CMD"
   fi
   for _ in $(seq 1 60); do  # capture first: grep -q under pipefail would break the pipe
     out="$(os -- sandbox get hermes 2>/dev/null || true)"; case "$out" in *"Phase: Ready"*) break ;; esac; sleep 10
   done
   printf '%s\n' "$out" | sed -n 1,20p
+fi
+
+if want restore-data; then   # not in the default STEPS: see recreate-sandbox
+  # The backup from this run, or HERMES_BACKUP=<file>, or the newest one in HERMES_BACKUP_DIR.
+  HERMES_BACKUP="${HERMES_BACKUP:-$(ls -1t "$HERMES_BACKUP_DIR"/hermes-data-backup-*.tgz 2>/dev/null | head -1)}"
+  [ -s "$HERMES_BACKUP" ] || { echo "restore-data: no backup found in $HERMES_BACKUP_DIR" >&2; exit 1; }
+  log "Restore /sandbox/hermes from $HERMES_BACKUP (except config.yaml), restart the sandbox"
+  # `sandbox exec` limits piped stdin to 4 MiB: send the archive in 3 MiB chunks to /tmp (writable, cleared on
+  # restart), check its SHA-256, then extract.
+  chunks="$(mktemp -d)"; split -b 3M "$HERMES_BACKUP" "$chunks/part."
+  os -- sandbox exec -n hermes --no-tty -- rm -f /tmp/hermes-data.tgz
+  for c in "$chunks"/part.*; do os -- sandbox exec -n hermes -- sh -c 'cat >> /tmp/hermes-data.tgz' < "$c"; done
+  rm -rf "$chunks"
+  sum="$(sha256sum "$HERMES_BACKUP" | cut -d' ' -f1)"
+  os -- sandbox exec -n hermes --no-tty -- sh -c "echo '$sum  /tmp/hermes-data.tgz' | sha256sum -c - >/dev/null \
+    && tar -C /sandbox -xzf /tmp/hermes-data.tgz --exclude=hermes/config.yaml; rc=\$?; rm -f /tmp/hermes-data.tgz; exit \$rc"
+  os -- sandbox stop hermes && os -- sandbox start hermes   # stop/start keeps the workspace
+fi
+
+if want tunnel-restart; then   # not in the default STEPS: the tunnel re-forwards to a re-created sandbox
+  kubectl -n hermes-edge rollout restart deploy/hermes-tunnel
+  kubectl -n hermes-edge rollout status deploy/hermes-tunnel --timeout=300s
 fi
 
 if want tunnel; then
@@ -174,9 +229,7 @@ if want tunnel; then
 fi
 
 if want edge; then
-  log "Dashboard basic-auth Secret, origin certificate, routes"
-  kubectl -n hermes-edge get secret hermes-dashboard-basic-auth >/dev/null 2>&1 || \
-    kubectl -n hermes-edge create secret generic hermes-dashboard-basic-auth --from-file=users="$GKE_SECRETS/edge-htpasswd"
+  log "Origin certificate, routes"
   kubectl apply -f "$HERE/certificate.yaml"
   kubectl apply -f "$HERE/traefik-routes.yaml"
 fi

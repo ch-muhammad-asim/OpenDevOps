@@ -1,0 +1,36 @@
+# Managed ("administrator") config for the dashboard Hermes with herdr, installed root-owned at
+# /etc/hermes/config.yaml: Hermes applies it over the profile config and refuses to change these keys at runtime.
+# The herdr deny globs are the same as the herdr-hermes POC (herdr/hermes-herdr/hermes-managed.yaml).
+approvals:
+  mode: "manual"                  # a human approves every flagged command (no model auto-approval)
+  timeout: 45                     # no answer = denied (unattended API calls fail closed quickly)
+  cron_mode: "deny"
+  single_query_mode: "deny"
+  unattended_mode: "deny"
+  denial_breaker_threshold: 3
+  deny:                           # case-insensitive globs over the whole command; blocked even under --yolo
+    - "*herdr server stop*"
+    - "*herdr * close*"
+    - "*herdr --machine*"
+    - "*herdr --remote*"
+    - "*herdr --session*"
+    - "*herdr update*"
+    - "*herdr integration*"
+    - "*herdr config*"
+    - "*herdr agent send-keys*"
+    - "*herdr agent prompt*"
+    - "*herdr agent start*"
+    - "*herdr machine*"
+    - "*pkill*herdr*"
+    - "*killall*herdr*"
+    - "*herdr -r*"                # short forms of --remote/--session/--machine
+    - "*herdr -s*"
+    - "*herdr -m*"
+    - "*libexec/herdr*"           # the real binary behind the allowlist wrapper (/usr/local/bin/herdr)
+command_allowlist: []             # "always allow" answers are not stored
+skills:
+  external_dirs: ["/opt/hermes-sandbox/skills"]   # root-owned, read-only: the herdr-operator skill
+  creation_nudge_interval: 0
+  write_approval: true            # skill changes are staged for a human
+  guard_agent_created: true
+  inline_shell: false

@@ -1,0 +1,25 @@
+#!/usr/bin/python3 -I
+"""/usr/local/bin/herdr in the dashboard sandbox: the `herdr` command Hermes and its shells find on PATH.
+
+Checks argv with the exact-argv allowlist of the herdr-hermes POC (herdr/hermes-herdr/work/herdr-broker, installed
+unchanged as /usr/local/lib/herdr-allowlist/herdr-broker; only its parse() is used) and execs the real herdr binary.
+Allowed: `herdr pane list|get|layout|read|wait-output|split|run|rename` with fixed options and pane ids, plus
+`herdr status` and `herdr --version`. Everything else (server stop, close, --remote, update, agent, config, ...)
+exits 126 before herdr runs. No shell, no string matching.
+"""
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+REAL = "/usr/local/libexec/herdr/herdr"
+BROKER = "/usr/local/lib/herdr-allowlist/herdr-broker"
+
+argv = sys.argv[1:]
+if argv not in (["status"], ["--version"]):
+    loader = importlib.machinery.SourceFileLoader("herdr_broker", BROKER)
+    spec = importlib.util.spec_from_loader("herdr_broker", loader)
+    broker = importlib.util.module_from_spec(spec)
+    loader.exec_module(broker)
+    broker.parse(argv)   # exits 126 with "herdr-broker: denied: ..." unless allowed
+os.execv(REAL, [REAL, *argv])

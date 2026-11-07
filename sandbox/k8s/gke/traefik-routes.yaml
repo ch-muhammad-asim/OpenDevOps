@@ -3,7 +3,7 @@
 #
 #   /auth/password-login   -> dashboard, login rate limit       hermes-tunnel:9119
 #   /v1, /v1/...           -> Hermes API (own Bearer key)        hermes-tunnel:8642
-#   everything else        -> dashboard + basic auth + Hermes's own login  hermes-tunnel:9119
+#   everything else        -> dashboard, Hermes's own login     hermes-tunnel:9119
 #
 # websecure (:443): always served, certificate from Secret hermes-gke-tls
 # (cert-manager, certificate.yaml).
@@ -13,9 +13,7 @@
 # every route also requires a Cloudflare source IP.
 #
 # WebSockets: Traefik proxies Upgrade natively; none of these middlewares
-# (ipAllowList, headers, basicAuth, rateLimit) touch Upgrade/Connection. The
-# browser sends basic-auth credentials on the WebSocket handshake too
-# (same origin), so /api/ws keeps working behind basicAuth.
+# (ipAllowList, headers, rateLimit) touch Upgrade/Connection.
 #
 # Everything except the TLSOption lives in hermes-edge, so IngressRoutes only
 # reference same-namespace Middlewares, Services and Secrets
@@ -124,21 +122,6 @@ spec:
     sourceCriterion:
       requestHeaderName: CF-Connecting-IP
 ---
-# Extra layer in front of the dashboard (Hermes's own login still applies).
-# Secret hermes-dashboard-basic-auth (namespace hermes-edge) holds key "users"
-# in htpasswd format; created by the `edge` step of deploy.sh; rotate as in ../README.md, How to log in (never on a command line).
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: dashboard-basic-auth
-  namespace: hermes-edge
-spec:
-  basicAuth:
-    secret: hermes-dashboard-basic-auth
-    realm: hermes
-    # Don't forward the basic-auth Authorization header to Hermes.
-    removeHeader: true
----
 # ---- :443 ---------------------------------------------------------------------
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -155,12 +138,10 @@ spec:
         - name: cloudflare-only
         - name: security-headers
         - name: login-ratelimit
-        - name: dashboard-basic-auth
       services:
         - name: hermes-tunnel
           port: 9119
-    # API: no basic auth (it has its own Bearer key, and basicAuth would
-    # clash with the Authorization: Bearer header).
+    # API: its own Bearer key (no dashboard login).
     - kind: Rule
       match: Host(`hermes-gke.saqlainmushtaq.com`) && (Path(`/v1`) || PathPrefix(`/v1/`))
       priority: 200
@@ -176,7 +157,6 @@ spec:
       middlewares:
         - name: cloudflare-only
         - name: security-headers
-        - name: dashboard-basic-auth
       services:
         - name: hermes-tunnel
           port: 9119
@@ -200,7 +180,6 @@ spec:
         - name: cloudflare-only
         - name: security-headers
         - name: login-ratelimit
-        - name: dashboard-basic-auth
       services:
         - name: hermes-tunnel
           port: 9119
@@ -219,7 +198,6 @@ spec:
       middlewares:
         - name: cloudflare-only
         - name: security-headers
-        - name: dashboard-basic-auth
       services:
         - name: hermes-tunnel
           port: 9119
