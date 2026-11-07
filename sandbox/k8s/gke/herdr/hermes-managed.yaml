@@ -23,6 +23,12 @@ approvals:
     - "*herdr machine*"
     - "*pkill*herdr*"
     - "*killall*herdr*"
+    - "kill *"                    # signalling processes (the herdr server, its supervisor); naive forms only
+    - "* kill *"
+    - "*;kill *"
+    - "*/kill *"
+    - "*pkill *"                  # any pkill / killall, not only the ones naming herdr
+    - "*killall *"
     - "*herdr -r*"                # short forms of --remote/--session/--machine
     - "*herdr -s*"
     - "*herdr -m*"

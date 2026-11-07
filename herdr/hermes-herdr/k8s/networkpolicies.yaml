@@ -1,0 +1,86 @@
+# Kubernetes equivalent of the compose networks (enforced by GKE Dataplane V2):
+#   herdr-hermes      -> hermes-workbench :2222, hermes-herdr-egress :8888, DNS. No ingress.
+#   hermes-herdr-work -> hermes-workbench :2222 (work pane shells), DNS. Ingress: workbench :2222 (herdr-broker).
+#   hermes-workbench  -> hermes-herdr-work :2222 (herdr-broker), DNS. Ingress: herdr-hermes and work on :2222.
+#                        No internet, no proxy.
+#   hermes-herdr-egress -> TCP 443 on public addresses only, DNS. Ingress: herdr-hermes :8888.
+# DNS is allowed to kube-dns and to GKE's NodeLocal DNSCache (node-local-dns answers the kube-dns address).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: hermes-herdr}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-dns, namespace: hermes-herdr}
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app.kubernetes.io/name, operator: In, values: [herdr-hermes, hermes-herdr-work, hermes-workbench, hermes-herdr-egress]}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: node-local-dns}}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: herdr-hermes, namespace: hermes-herdr}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: herdr-hermes}}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: hermes-workbench}}}]
+      ports: [{protocol: TCP, port: 2222}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-egress}}}]
+      ports: [{protocol: TCP, port: 8888}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: hermes-herdr-work, namespace: hermes-herdr}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-work}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: hermes-workbench}}}]
+      ports: [{protocol: TCP, port: 2222}]
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: hermes-workbench}}}]
+      ports: [{protocol: TCP, port: 2222}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: hermes-workbench, namespace: hermes-herdr}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: hermes-workbench}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: herdr-hermes}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-work}}
+      ports: [{protocol: TCP, port: 2222}]
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-work}}}]
+      ports: [{protocol: TCP, port: 2222}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: hermes-herdr-egress, namespace: hermes-herdr}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-egress}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: herdr-hermes}}}]
+      ports: [{protocol: TCP, port: 8888}]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 34.118.224.0/20]
+      ports: [{protocol: TCP, port: 443}]

@@ -1,0 +1,86 @@
+# herdr-hermes: herdr server + Hermes Agent TUI pane. The only pod with the NVIDIA key: Secret nvidia-api-key mounted
+# read-only at /run/secrets/nvidia_api_key; only the Hermes process tree reads it (never in the environment). No Service and no
+# ingress: it is controlled with `kubectl exec … herdr …` (scripts/hh with the kubectl shim). Hermes's ssh key and the
+# workbench's pinned host key come from Secret herdr-hermes-keys; sessions and herdr state stay on the PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: herdr-hermes-data, namespace: hermes-herdr}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: herdr-hermes, namespace: hermes-herdr, labels: {app.kubernetes.io/name: herdr-hermes}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: herdr-hermes}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: herdr-hermes}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+        fsGroupChangePolicy: OnRootMismatch   # no recursive chown/chmod on every start (keeps 0600 sockets/keys as written)
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: install-keys
+          image: herdr-hermes
+          command: [sh, -euc]
+          args:
+            - |
+              umask 077
+              mkdir -p /data/hermes/ssh
+              install -m 0600 /secret/id_ed25519 /data/hermes/ssh/id_ed25519
+              umask 022
+              install -m 0644 /secret/id_ed25519.pub /data/hermes/ssh/id_ed25519.pub
+              install -m 0644 /secret/workbench_known_hosts /pub/workbench_known_hosts
+          securityContext: &csc
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities: {drop: [ALL]}
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 64Mi}}
+          volumeMounts:
+            - {name: secret, mountPath: /secret, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: pub, mountPath: /pub}
+      containers:
+        - name: herdr-hermes
+          image: herdr-hermes
+          securityContext: *csc
+          env:
+            - {name: HTTPS_PROXY, value: "http://hermes-herdr-egress:8888"}
+            - {name: HTTP_PROXY, value: "http://hermes-herdr-egress:8888"}
+            - {name: NO_PROXY, value: "localhost,127.0.0.1"}
+          resources:
+            requests: {cpu: 300m, memory: 1Gi}
+            limits: {cpu: "1", memory: 2Gi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: pub, mountPath: /workbench-pub, readOnly: true}
+            - {name: keys, mountPath: /keys}
+            - {name: tmp, mountPath: /tmp}
+            - {name: optdata, mountPath: /opt/data}
+            # The model key as a read-only file (as in compose); only the Hermes process tree loads it (hermes-shim).
+            - {name: nvidia-key, mountPath: /run/secrets/nvidia_api_key, subPath: nvidia_api_key, readOnly: true}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: herdr-hermes-data}
+        - name: secret
+          secret: {secretName: herdr-hermes-keys, defaultMode: 0440}   # group-readable: fsGroup 10000
+        - {name: pub, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+        - {name: keys, emptyDir: {medium: Memory, sizeLimit: 1Mi}}     # the entrypoint publishes its public key here (unused on k8s)
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 256Mi}}
+        - {name: optdata, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+        - name: nvidia-key
+          secret:
+            secretName: nvidia-api-key
+            defaultMode: 0440            # group-readable: fsGroup 10000
+            items: [{key: api-key, path: nvidia_api_key}]

@@ -1,0 +1,62 @@
+# hermes-herdr-egress: tinyproxy allowlist proxy (HTTPS CONNECT to the NVIDIA model API only). The image is the
+# compose image; only tinyproxy.conf differs: on Kubernetes pod addresses are not fixed, so `Allow` names the pod
+# range and the NetworkPolicy admits only herdr-hermes on :8888 (the workbench never reaches the proxy).
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: hermes-herdr-egress-conf, namespace: hermes-herdr}
+data:
+  tinyproxy.conf: |
+    Port 8888
+    Listen 0.0.0.0
+    Timeout 600
+    MaxClients 20
+    # Pod range; callers are limited to herdr-hermes by the NetworkPolicy hermes-herdr-egress.
+    Allow 10.196.0.0/14
+    DisableViaHeader Yes
+    ConnectPort 443
+    FilterDefaultDeny Yes
+    FilterType ere
+    Filter "/etc/tinyproxy/allowlist"
+    LogLevel Connect
+---
+apiVersion: v1
+kind: Service
+metadata: {name: hermes-herdr-egress, namespace: hermes-herdr}
+spec:
+  selector: {app.kubernetes.io/name: hermes-herdr-egress}
+  ports: [{name: proxy, port: 8888, targetPort: 8888}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: hermes-herdr-egress, namespace: hermes-herdr, labels: {app.kubernetes.io/name: hermes-herdr-egress}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-egress}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: hermes-herdr-egress}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: hermes-herdr-egress
+          image: hermes-herdr-egress
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities: {drop: [ALL]}
+          ports: [{name: proxy, containerPort: 8888}]
+          readinessProbe: {tcpSocket: {port: 8888}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 64Mi}
+          volumeMounts:
+            - {name: conf, mountPath: /etc/tinyproxy/tinyproxy.conf, subPath: tinyproxy.conf, readOnly: true}
+      volumes:
+        - name: conf
+          configMap: {name: hermes-herdr-egress-conf}

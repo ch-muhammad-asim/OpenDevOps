@@ -1,0 +1,85 @@
+# hermes-herdr-work: the work herdr server for the herdr-operator skill, reachable only through herdr-broker
+# (sshd :2222 ForceCommand, exact-argv allowlist). Its panes are SSH shells into the workbench. Keys come from
+# Secret hermes-herdr-work-keys; herdr state stays on the PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: hermes-herdr-work-data, namespace: hermes-herdr}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: hermes-herdr-work, namespace: hermes-herdr}
+spec:
+  selector: {app.kubernetes.io/name: hermes-herdr-work}
+  ports: [{name: ssh, port: 2222, targetPort: 2222}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: hermes-herdr-work, namespace: hermes-herdr, labels: {app.kubernetes.io/name: hermes-herdr-work}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: hermes-herdr-work}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: hermes-herdr-work}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+        fsGroupChangePolicy: OnRootMismatch   # no recursive chown/chmod on every start (keeps 0600 sockets/keys as written)
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: install-keys
+          image: hermes-herdr-work
+          command: [sh, -euc]
+          args:
+            - |
+              umask 077
+              mkdir -p /data/home /data/ssh /data/hostkey
+              install -m 0600 /secret/ssh_host_ed25519_key /data/hostkey/
+              install -m 0600 /secret/pane_ed25519 /data/ssh/
+              umask 022
+              install -m 0644 /secret/ssh_host_ed25519_key.pub /data/hostkey/
+              install -m 0644 /secret/pane_ed25519.pub /data/ssh/
+              mkdir -p /auth/ctlkeys /auth/panekeys
+              chmod 0755 /auth/ctlkeys /auth/panekeys
+              install -m 0644 /secret/ctlkeys_authorized_keys /auth/ctlkeys/authorized_keys
+              install -m 0644 /secret/workbench_known_hosts /auth/ctlkeys/workbench_known_hosts
+              chmod 0644 /auth/ctlkeys/*
+          securityContext: &csc
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities: {drop: [ALL]}
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 64Mi}}
+          volumeMounts:
+            - {name: secret, mountPath: /secret, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: auth, mountPath: /auth}
+      containers:
+        - name: hermes-herdr-work
+          image: hermes-herdr-work
+          securityContext: *csc
+          ports: [{name: ssh, containerPort: 2222}]
+          readinessProbe: {tcpSocket: {port: 2222}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: auth, mountPath: /ctlkeys, subPath: ctlkeys, readOnly: true}
+            - {name: auth, mountPath: /panekeys, subPath: panekeys}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: hermes-herdr-work-data}
+        - name: secret
+          secret: {secretName: hermes-herdr-work-keys, defaultMode: 0440}   # group-readable: fsGroup 10000
+        - {name: auth, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}

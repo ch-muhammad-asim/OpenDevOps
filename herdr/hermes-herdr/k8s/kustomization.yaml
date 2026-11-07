@@ -1,0 +1,16 @@
+# herdr + Hermes POC on Kubernetes (GKE). Images are pinned by digest by k8s/deploy.sh (kustomize edit set image).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hermes-herdr
+resources:
+  - namespace.yaml
+  - networkpolicies.yaml
+  - egress.yaml
+  - workbench.yaml
+  - work.yaml
+  - herdr-hermes.yaml
+images:
+  - name: herdr-hermes
+  - name: hermes-workbench
+  - name: hermes-herdr-work
+  - name: hermes-herdr-egress

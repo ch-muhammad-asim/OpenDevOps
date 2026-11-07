@@ -1,0 +1,11 @@
+# Namespace for the herdr + Hermes POC on Kubernetes. Pod Security "restricted" is enforced, so every pod must run
+# non-root with seccomp RuntimeDefault, no privilege escalation and all capabilities dropped.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes-herdr
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

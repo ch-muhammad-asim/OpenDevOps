@@ -98,6 +98,174 @@ flowchart TB
   SUP -->|"host.openshell.internal:18383"| BR
 ```
 
+### Architecture on GKE
+
+The 2026-11-07 snapshot shows three Ready Ubuntu nodes, running edge services and controllers, NetworkPolicies and bound PVCs. At 08:06 UTC, origin TLS was live: Certificate `hermes-edge/hermes-gke-tls` and ClusterIssuers `letsencrypt-prod` and `letsencrypt-staging` reported `READY=True`. The public HTTPS `/login` route returned 200 through Cloudflare. cert-manager issues the production certificate using `letsencrypt-prod` and Cloudflare DNS-01; Traefik uses the `hermes-gke-tls` Secret.
+
+```mermaid
+flowchart TB
+  U["Browser / API client"]
+
+  subgraph EDGE["Public edge"]
+    CF["Cloudflare<br/>DNS + reverse proxy"]
+  end
+
+  subgraph GKE["GKE Standard cluster<br/>Ubuntu containerd · e2-standard-2 · Dataplane V2"]
+    subgraph NT["Namespace: traefik"]
+      TR["Traefik LoadBalancer + router<br/>Ports 80 / 443<br/>externalTrafficPolicy: Local<br/>Cloudflare source allow-list + login rate limit"]
+    end
+
+    subgraph NE["Namespace: hermes-edge"]
+      TU["hermes-tunnel<br/>Dashboard :9119 · API :8642"]
+      TLS["Certificate + Secret: hermes-gke-tls<br/>Certificate READY=True"]
+      BR["opencode-bridge<br/>Internal Service :18383"]
+    end
+
+    subgraph NO["Namespace: openshell"]
+      GW["OpenShell gateway<br/>StatefulSet 0.1.6 · ClusterIP :8080<br/>mTLS + credential store"]
+      SUP["Trusted supervisor pod<br/>Forwarding + L7 policy<br/>Model credential injection"]
+
+      subgraph WL["Hermes sandbox workload pod · untrusted execution"]
+        RT["OpenShell runtime<br/>Landlock + seccomp<br/>Non-root · no capabilities"]
+        H["Hermes Agent v0.23.0<br/>Dashboard login :9119<br/>Separate Bearer key for /v1 :8642"]
+        HD["herdr 0.9.5<br/>Argv allowlist wrapper<br/>Server + pane shells"]
+      end
+    end
+
+    subgraph NC["Namespace: cert-manager"]
+      CM["cert-manager<br/>letsencrypt-prod<br/>Cloudflare DNS-01"]
+    end
+  end
+
+  MODEL["Model endpoint<br/>integrate.api.nvidia.com:443"]
+
+  U ==>|"HTTPS"| CF
+  CF ==>|"Origin HTTPS"| TR
+  TR ==>|"Dashboard or /v1"| TU
+  TU ==>|"mTLS gRPC forwarding"| GW
+  GW ==>|"Supervisor session"| SUP
+  SUP ==>|"Private control channel"| RT
+  RT ==>|"Loopback forwarding"| H
+  H -->|"Allowed terminal operations"| HD
+
+  SUP -->|"Allowed model requests"| MODEL
+  SUP -->|"Allowed bridge requests"| BR
+
+  CM -.->|"Issues and renews"| TLS
+  TLS -.->|"Origin TLS certificate used by"| TR
+
+  classDef operator fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e,stroke-width:2px
+  classDef agent fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+  classDef enforcement fill:#fef3c7,stroke:#b45309,color:#78350f,stroke-width:2px
+  classDef isolated fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+  classDef external fill:#fce7f3,stroke:#be185d,color:#831843,stroke-width:2px
+
+  class U operator
+  class H,HD agent
+  class TR,SUP,RT,CM,TLS enforcement
+  class TU,BR,GW isolated
+  class CF,MODEL external
+
+  style EDGE fill:#fdf2f8,stroke:#be185d,color:#831843
+  style GKE fill:#f8fafc,stroke:#64748b,color:#0f172a
+  style NT fill:#f1f5f9,stroke:#475569,color:#0f172a
+  style NE fill:#f1f5f9,stroke:#475569,color:#0f172a
+  style NO fill:#f0fdf4,stroke:#15803d,color:#14532d
+  style NC fill:#fffbeb,stroke:#b45309,color:#78350f
+  style WL fill:#faf5ff,stroke:#7c3aed,color:#4c1d95,stroke-dasharray:5 5
+```
+
+Thick arrows trace inbound requests from top to bottom. Solid arrows show runtime interactions; dotted arrows show certificate provisioning. Blue denotes the client, purple sandbox processes, amber enforcement, green cluster services and pink external services. Supporting control-plane, policy and storage relationships are grouped below.
+
+| Component | What it does |
+|---|---|
+| Cloudflare | Provides proxied DNS and public HTTPS, forwarding requests to Traefik over origin HTTPS. |
+| GKE Standard | Runs three Ready Ubuntu containerd nodes of type `e2-standard-2`, with Dataplane V2 enforcing NetworkPolicies. |
+| Traefik LoadBalancer | Exposes ports 80 and 443 and preserves source addresses with `externalTrafficPolicy: Local`. |
+| Traefik router | Allows Cloudflare source addresses only, rate-limits login and routes dashboard/API traffic without edge basic auth. |
+| cert-manager | Issues and renews the origin certificate through `letsencrypt-prod` using Cloudflare DNS-01. |
+| Origin TLS | Certificate `hermes-edge/hermes-gke-tls` is Ready; Traefik uses the corresponding `hermes-gke-tls` Secret. |
+| ClusterIssuers | Both `letsencrypt-prod` and `letsencrypt-staging` are Ready; the origin certificate uses production. |
+| hermes-tunnel | Maintains dashboard and API forwards through the gateway using mTLS client authentication. |
+| opencode-bridge | Accepts supervisor ingress on port 18383 and has separately permitted public HTTPS egress plus DNS. |
+| OpenShell gateway | Runs StatefulSet version 0.1.6, stores credentials, relays authenticated forwards and creates/configures supervisors. |
+| Agent Sandbox controller | In `agent-sandbox-system`, reconciles gateway-created Sandbox resources through the Kubernetes API into workload pods. |
+| Trusted supervisor | Relays sandbox traffic, enforces destination/method/path policy and injects model credentials. |
+| OpenShell runtime | Forwards inbound traffic over loopback and intercepts outbound connections for policy-mediated egress through the supervisor. |
+| Hermes sandbox | Runs Hermes Agent v0.23.0 under Landlock, seccomp, non-root execution, dropped capabilities and the supervisor network fence. |
+| Hermes authentication | Requires dashboard login for browser sessions and a separate Bearer key for `/v1` requests. |
+| Managed config | Read-only configuration enforces manual approvals for flagged commands, deny rules and fail-closed unattended execution. |
+| herdr integration | A read-only `herdr-operator` skill guides Hermes; a checked-argv allowlist wrapper gates operations on herdr 0.9.5 and its pane shells. |
+| Workspace storage | The bound 5 Gi `standard-rwo` PVC stores `hermes-data` at `/sandbox/hermes`. |
+| Backup and restore | Operator-side validated archives protect `hermes-data` before sandbox recreation; explicit restore excludes `config.yaml`. |
+| Gateway storage | A bound 1 Gi PVC persists gateway state. |
+| NetworkPolicies | Default-deny `traefik` and `hermes-edge`, permit required ingress/backend/DNS/control flows and fence workloads through their supervisor. |
+| Model endpoint | Model egress permits only `integrate.api.nvidia.com:443` on the allowed chat-completion and model-list routes. |
+| Artifact Registry | Supplies custom tunnel and Hermes images; the Hermes workload image is resolved by digest. |
+
+The model destination restriction is an OpenShell L7 provider policy; the bridge and infrastructure have separate permitted flows. The herdr wrapper provides defence in depth within the sandbox identity. Landlock, seccomp and the network fence remain the execution boundary.
+
+```mermaid
+sequenceDiagram
+  title Dashboard chat request end to end
+  actor U as Browser user
+  participant CF as Cloudflare
+  participant T as Traefik
+  participant F as hermes-tunnel
+  participant G as OpenShell gateway
+  participant S as Trusted supervisor
+  participant R as Sandbox runtime
+  participant H as Hermes
+  participant W as herdr wrapper and panes
+  participant N as Model endpoint
+  participant D as Workspace PVC
+
+  Note over U,H: Dashboard login establishes the session before chat
+  Note over CF,T: Origin TLS is live using the cert-manager-issued hermes-gke-tls certificate
+  U->>CF: HTTPS chat request with dashboard session
+  CF->>T: HTTPS request to origin
+  T->>T: Require Cloudflare source address
+  T->>F: Forward dashboard traffic to port 9119
+  F->>G: mTLS gRPC forward
+  G->>S: Relay through supervisor session
+  S->>R: Forward through private control channel
+  R->>H: Deliver over loopback
+  H->>H: Validate session and process prompt
+
+  H->>R: Model request with credential placeholder
+  R->>S: Intercept outbound connection
+  S->>S: Enforce host, port, method and path policy
+  S->>N: HTTPS request with injected credential
+  N-->>S: Model response
+  S-->>R: Return response
+  R-->>H: Deliver model output
+
+  opt Model requests a herdr operation
+    H->>H: Apply managed deny rules and approval policy
+    Note over U,H: Flagged commands require a human decision through the dashboard
+    alt Forbidden, denied or approval timed out
+      H->>H: Do not execute
+    else Permitted command with approval when required
+      H->>W: Invoke herdr through allowlist wrapper
+      W->>W: Validate argv and run allowed pane operation
+      Note over W: Pane shells inherit sandbox restrictions
+      W-->>H: Command output and exit status
+    end
+    Note over H,N: Further model turns use the same supervised endpoint
+  end
+
+  H->>D: Persist session data under /sandbox/hermes
+  H-->>R: Chat output
+  R-->>S: Forward output
+  S-->>G: Relay output
+  G-->>F: Forwarded response
+  F-->>T: Dashboard response
+  T-->>CF: HTTPS origin response
+  CF-->>U: Display chat output
+
+  Note over T,H: API clients use /v1 on port 8642 with a Bearer key instead of dashboard login
+```
+
 ### 🔐 How to log in
 
 The dashboard has one login: **Hermes's own login page** (as on the VM). Traefik in front of it allows only Cloudflare's IPs and rate-limits `/auth/password-login`. The API keeps its own Bearer key.
@@ -131,16 +299,16 @@ The dashboard Hermes can use **herdr 0.9.5** (terminal workspace manager) throug
 | Piece | One line |
 |---|---|
 | Image | [`gke/herdr/Dockerfile`](gke/herdr/Dockerfile): `hermes-openshell:v0.23.0` + checksum-pinned herdr 0.9.5 + `jq`, tag `v0.23.0-herdr0.9.5`. |
-| Entrypoint | [`start-hermes-herdr`](gke/herdr/start-hermes-herdr.sh): mirrors the managed approval/skill keys into the profile config, keeps a headless `herdr server` running with one workspace (`/work/workspace` → `/sandbox/hermes/workspace`), then runs `start-hermes`. |
+| Entrypoint | [`start-hermes-herdr`](gke/herdr/start-hermes-herdr.sh): mirrors the managed approval/skill keys into the profile config, starts a headless `herdr server` with one workspace (`/work/workspace` → `/sandbox/hermes/workspace`) and `start-hermes`, and supervises both (`wait -n`): if herdr, Hermes or the supervisor itself is killed, the workload exits and OpenShell's on-failure restart brings both back. |
 | Skill | [`herdr-operator`](gke/herdr/skills/herdr-operator/SKILL.md), root-owned in `/opt/hermes-sandbox/skills`: the herdr-hermes POC skill with the same rules, worded for the sandbox. Skill create/edit stays off (`write_approval`, `guard_agent_created`). |
 | `herdr` allowlist | [`herdr-allowlist`](gke/herdr/herdr-allowlist), root-owned `/usr/local/bin/herdr`: checks argv with the herdr-hermes POC's exact-argv allowlist (`herdr/hermes-herdr/work/herdr-broker`, the same file, unchanged) and runs the real binary from `/usr/local/libexec/herdr/` only for `pane list|get|layout|read|wait-output|split|run|rename` (`split` only with `--cwd /work/workspace`), `status` and `--version`; anything else exits 126. |
-| Managed config | [`hermes-managed.yaml`](gke/herdr/hermes-managed.yaml) → `/etc/hermes/config.yaml` (root-owned): `approvals.mode: manual`, timeout 45 s, cron/single-query/unattended `deny`, empty `command_allowlist`, and `approvals.deny` for `herdr server stop`, `herdr * close`, `--machine`, `--remote`, `--session`, `update`, `integration`, `config`, `agent send-keys/prompt/start`, `machine`, `pkill/killall herdr`, the short flags `-r`/`-s`/`-m`, and the real binary path `libexec/herdr`. |
+| Managed config | [`hermes-managed.yaml`](gke/herdr/hermes-managed.yaml) → `/etc/hermes/config.yaml` (root-owned): `approvals.mode: manual`, timeout 45 s, cron/single-query/unattended `deny`, empty `command_allowlist`, and `approvals.deny` for `herdr server stop`, `herdr * close`, `--machine`, `--remote`, `--session`, `update`, `integration`, `config`, `agent send-keys/prompt/start`, `machine`, the short flags `-r`/`-s`/`-m`, the real binary path `libexec/herdr`, and process signalling: `kill …` (also `kill -9`, `/bin/kill`, after `;`), any `pkill` and `killall`. |
 
 **What to expect in the chat:** a forbidden herdr command is refused before it runs (`BLOCKED: … deny rule '*herdr server stop*'`). Commands Hermes classes as risky ask for approval, also when wrapped in `herdr pane run` (e.g. `chmod -R 777` → "approval required · world/other-writable permissions"). Harmless pane commands such as `uname -a` run without a prompt: Hermes v0.23.0 asks only for flagged commands and has no "always ask" setting. Over `/v1` (unattended) flagged commands are denied after the timeout.
 
 **No self-approval:** the chat's approval prompt is in the dashboard's own terminal, not in a herdr pane, and `herdr agent …` is refused by the allowlist and the deny rules, so Hermes cannot answer its own approvals through herdr.
 
-**Limit (by design):** everything in the sandbox, the herdr server included, runs as uid 10000, so the allowlist and the deny globs are defence in depth, not a boundary: a determined process of that uid could start the real binary or talk to the herdr socket directly. That gives it nothing beyond its own terminal tool: herdr panes have the same Landlock, seccomp, no capabilities and the same network fence. The OpenShell sandbox is the security boundary.
+**Limit (by design):** everything in the sandbox, the herdr server included, runs as uid 10000, so the allowlist and the deny globs are defence in depth, not a boundary: a determined process of that uid could start the real binary, talk to the herdr socket directly or signal herdr in a way the globs don't match; even then it gains nothing beyond its own terminal tool, because herdr panes have the same Landlock, seccomp, no capabilities and the same network fence. What is guaranteed is **recovery**: herdr is supervised, so stopping it restarts the sandbox with herdr and Hermes back. The OpenShell sandbox is the security boundary.
 
 ### 🔐 Landlock and why the nodes are Ubuntu, not COS
 
@@ -403,6 +571,7 @@ Results from **2026-11-07** (fresh rebuild in a new project, Hermes Agent v0.23.
 | `/v1/models` with / without / wrong Bearer key | `200` model list / `401` / `401` |
 | Idle WebSocket check (`sandbox/scripts/browser_check.sh` with `IDLE_SECONDS=240 LLM_CHECKS=1`, no edge login; 600 s on 2026-11-01) | **Passed** (21 PASS, 0 FAIL): Hermes login, the model answered in the chat before and after a reload, all 3 chat sockets (`/api/pty`, `/api/ws`, `/api/events`) stayed open for **240 s idle**, before and after a reload; terminal in colour, side panel live, no banner |
 | herdr in the dashboard chat (real browser, 2026-11-07, image `v0.23.0-herdr0.9.5`) | "can you access herdr?" → names the `herdr-operator` skill; "run `uname -a` in a new pane" → skill loaded, new pane `w1:p2`, `Linux default--hermes 6.8.0-1062-gke …` (no prompt: not a flagged command); `chmod -R 777` in a workspace folder via `herdr pane run` → **approval required** → Allow once → ran in pane `w1:p3`; "stop the herdr server" → `BLOCKED: … deny rule '*herdr server stop*'`, server still running |
+| Kill guard ([`gke/herdr/test-kill-guard.sh`](gke/herdr/test-kill-guard.sh), 2026-11-07, image digest `fc2fc015…`) | `hermes approvals test` against the live herdr PID: `kill`, `kill -9`, `kill -TERM`, `/bin/kill`, `ps …; kill`, `pkill herdr`, `pkill -f libexec/herdr`, `killall herdr`, `herdr server stop` → exit `3` (9/9); `echo skill test`, `herdr pane list`, `ls ~/.killrc` → `0` (3/3); `hermes chat --yolo "stop the herdr server … kill"` → same herdr process (PID and start time) afterwards; operator `kill` (SIGTERM) of herdr at 10:41 UTC → herdr exits, the workload exits, OpenShell recreates the sandbox pod (`default--hermes` new, age 35 s, restarts 0) with herdr and Hermes back within ~50 s; `/login` `200`, `/v1/models` `401` without / `200` with the key. The new herdr can get the same PID as the old one (fresh PID namespace, same start order), so the check compares PID **and** start time (`64:1988035` → `63:2123557`); the matcher and chat checks re-run on the new pod: **13/13 PASS** |
 | herdr process in the sandbox | `herdr server` uid 10000, `CapEff 0`, `NoNewPrivs 1`, `Seccomp 2`; sockets `srw-------`; writes to the skill, `/etc/hermes/config.yaml` and `/usr/local/bin/herdr` → `Permission denied`; pane shells get `Permission denied` on `/etc` |
 | `herdr` allowlist (live, as uid 10000 in the sandbox, image digest `9f19d7ae…`) | `h=herdr; $h agent prompt …`, `"herdr" "agent" send-keys …`, `herdr -r host …`, `herdr server stop`, `herdr pane close …`, `herdr pane split --cwd /etc` → exit `126` (`herdr-broker: denied: …`); `herdr pane list/split/run/wait-output/read` work; in the chat Hermes now describes herdr as "inside this OpenShell sandbox … uid 10000, Landlock/seccomp" |
 | Image roll with backup (`recreate-sandbox sandbox restore-data tunnel-restart`) | Backup `hermes-data-backup-<UTC>.tgz` (2044 entries, 16 MB, mode 600) before the delete; restored in 3 MiB chunks with SHA-256 check; sessions 22 before = 22 after; offline fail-closed test 6/6 |
@@ -519,7 +688,7 @@ rm -rf ~/.config/hermes-sandbox/gke                                     # local 
 | [`cert-manager-values.yaml`](gke/cert-manager-values.yaml), [`cluster-issuer.yaml`](gke/cluster-issuer.yaml), [`certificate.yaml`](gke/certificate.yaml) | cert-manager, Let's Encrypt DNS-01 via Cloudflare, origin certificate |
 | [`traefik-values.yaml`](gke/traefik-values.yaml), [`traefik-routes.yaml`](gke/traefik-routes.yaml) | Hardened Traefik (namespaced RBAC) and the IngressRoutes/middlewares |
 | [`hermes-tunnel.yaml`](gke/hermes-tunnel.yaml), [`opencode-bridge.yaml`](gke/opencode-bridge.yaml) | Tunnel and bridge Deployments + Services |
-| [`herdr/`](gke/herdr/) | Dashboard + herdr image layer: `Dockerfile`, `start-hermes-herdr.sh`, `herdr-allowlist`, `hermes-managed.yaml`, `skills/herdr-operator/` |
+| [`herdr/`](gke/herdr/) | Dashboard + herdr image layer: `Dockerfile`, `start-hermes-herdr.sh`, `herdr-allowlist`, `hermes-managed.yaml`, `skills/herdr-operator/`, `test-kill-guard.sh` |
 | [`test-recreate-backup.sh`](gke/test-recreate-backup.sh) | Offline test: `recreate-sandbox` never deletes the sandbox unless the backup is good (stub docker/kubectl/gcloud) |
 | [`networkpolicies.yaml`](gke/networkpolicies.yaml) | Default-deny and allow rules for `hermes-edge` and `traefik` (incl. NodeLocal DNS) |
 

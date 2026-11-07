@@ -5,6 +5,9 @@ The workbench's `herdr` command is a client that sends its argv NUL-separated on
 argv exactly (no shell, no string matching), allows only the pane operations the herdr-operator skill needs, and
 execs the real herdr binary with the validated argv. Anything else is refused with exit code 126.
 The command line sent by the ssh client (SSH_ORIGINAL_COMMAND) is ignored.
+
+parse(argv) is also imported by the GKE dashboard image (sandbox/k8s/gke/herdr): keep it module-level and free of
+side effects other than deny() (SystemExit 126), and keep the rules in sync for both.
 """
 import os
 import re
@@ -12,8 +15,9 @@ import sys
 
 REAL = "/usr/local/bin/herdr"
 MAX_REQUEST = 64 * 1024
-PANE = re.compile(r"^w[0-9]{1,4}:p[0-9]{1,4}$")
-WORKSPACE = re.compile(r"^w[0-9]{1,4}$")
+# herdr ids are alphanumeric counters: w1:p9 is followed by w1:pA, w1:pB, ... (and workspaces w9 -> wA).
+PANE = re.compile(r"^w[0-9A-Za-z]{1,6}:p[0-9A-Za-z]{1,6}$")
+WORKSPACE = re.compile(r"^w[0-9A-Za-z]{1,6}$")
 LABEL = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 SOURCES = {"visible", "recent", "recent-unwrapped"}
 

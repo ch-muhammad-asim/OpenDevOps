@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# `docker` shim for running the POC's scripts (scripts/hh, scripts/e2e-test.sh) against Kubernetes, unchanged:
+#   PATH="$PWD/herdr/hermes-herdr/k8s/bin:$PATH" herdr/hermes-herdr/scripts/e2e-test.sh
+# Container names map 1:1 to Deployments (and their container) in namespace $HERMES_HERDR_NS (default hermes-herdr).
+# Supported: exec [-i] [-t], logs, restart, port, inspect (the hardening fields, read from the live pod spec), ps.
+# Anything else fails loudly instead of guessing.
+set -euo pipefail
+NS="${HERMES_HERDR_NS:-hermes-herdr}"
+k() { kubectl -n "$NS" "$@"; }
+pod() { k get pods -l "app.kubernetes.io/name=$1" --field-selector=status.phase=Running \
+          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  exec)
+    flags=()
+    while [[ "${1:-}" == -* ]]; do
+      case "$1" in -i) flags+=(-i) ;; -t) flags+=(-t) ;; -it|-ti) flags+=(-i -t) ;; *) echo "docker shim: exec $1 unsupported" >&2; exit 125 ;; esac
+      shift
+    done
+    name="$1"; shift
+    # kubectl adds "command terminated with exit code N" on stderr; docker exec doesn't. Drop that line, keep the code.
+    # If the stream to the API server drops (a transport error, not the command's own failure), retry once, and only
+    # without -i (stdin cannot be replayed). The suite's direct exec calls are reads or idempotent.
+    err="$(mktemp)"; trap 'rm -f "$err"' EXIT
+    for attempt in 1 2; do
+      rc=0
+      kubectl -n "$NS" exec "${flags[@]}" "deploy/$name" -c "$name" -- "$@" 2>"$err" || rc=$?
+      if [[ $rc -ne 0 && $attempt == 1 && " ${flags[*]} " != *" -i "* ]] \
+         && grep -q -E 'error reading from error stream|connection reset by peer|http2: client connection lost|unable to upgrade connection|TLS handshake timeout|i/o timeout|error dialing backend|Unable to connect to the server|unexpected EOF|connection refused' "$err"; then
+        # Every retry is recorded (default ./docker-shim-retries.log) so test evidence shows it.
+        printf '%s exec %s %s: %s\n' "$(date -u +%FT%TZ)" "$name" "$*" "$(grep -m1 -o -E 'error reading from error stream|connection reset by peer|http2: client connection lost|unable to upgrade connection|TLS handshake timeout|i/o timeout|error dialing backend|Unable to connect to the server|unexpected EOF|connection refused' "$err")" \
+          >>"${DOCKER_SHIM_RETRY_LOG:-./docker-shim-retries.log}"
+        echo "docker shim: transport error, retrying once" >&2; continue
+      fi
+      break
+    done
+    grep -v -E '^command terminated with exit code |^E[0-9]{4} .*Unhandled Error' "$err" >&2 || true
+    exit "$rc" ;;
+  logs)
+    name="${!#}"; exec kubectl -n "$NS" logs "deploy/$name" -c "$name" ;;
+  restart)
+    for name in "$@"; do
+      k rollout restart "deploy/$name" >/dev/null
+      k rollout status "deploy/$name" --timeout=300s >/dev/null
+      echo "$name"
+    done ;;
+  port)
+    # Published ports = hostPort on the pod, or a Service of type NodePort/LoadBalancer selecting it. ClusterIP only = none.
+    name="$1"
+    k get deploy "$name" -o json | jq -r '.spec.template.spec.containers[].ports[]? | select(.hostPort) | "\(.containerPort)/tcp -> 0.0.0.0:\(.hostPort)"'
+    k get svc -o json | jq -r --arg n "$name" '.items[] | select(.spec.selector["app.kubernetes.io/name"] == $n and .spec.type != "ClusterIP")
+      | .spec.ports[] | "\(.targetPort)/tcp -> \(.nodePort // .port)"' ;;
+  inspect)
+    # Only the hardening template used by e2e-test.sh; values come from the running pod's spec, mapped to Docker's terms:
+    # user=runAsUser:runAsGroup, ro=readOnlyRootFilesystem, no-new-privileges = allowPrivilegeEscalation false,
+    # ports = hostPorts, mem = memory limit (bytes), pids = node podPidsLimit (kubelet), mounts = volume type:path.
+    name="$1"; p="$(pod "$name")"; [[ -n "$p" ]] || { echo "docker shim: no running pod for $name" >&2; exit 1; }
+    if [[ "$*" == *".Config.Env"* ]]; then
+      # The container's environment from the pod spec (image ENV is not in the pod spec: read it from the image if
+      # needed). valueFrom entries are shown by reference (NAME=<secretKeyRef:secret/key>), never resolved.
+      k get pod "$p" -o json | jq -c --arg n "$name" '[.spec.containers[] | select(.name == $n) | .env[]? |
+        "\(.name)=" + (.value // ("<" + ((.valueFrom | keys[0]) // "ref") + ">"))]'
+      exit 0
+    fi
+    k get pod "$p" -o json | jq -r --arg n "$name" '
+      .spec as $s | ($s.containers[] | select(.name == $n)) as $c
+      | ($s.securityContext // {}) as $ps | ($c.securityContext // {}) as $cs
+      | ($s.volumes | map({(.name): (if .persistentVolumeClaim then "volume" elif .emptyDir then (if .emptyDir.medium == "Memory" then "tmpfs" else "volume" end) elif .secret then "secret" elif .configMap then "configmap" else "other" end)}) | add) as $vt
+      | "user=\($cs.runAsUser // $ps.runAsUser):\($cs.runAsGroup // $ps.runAsGroup)"
+        + " ro=\($cs.readOnlyRootFilesystem // false)"
+        + " capdrop=\($cs.capabilities.drop // [] | "[" + join(" ") + "]")"
+        + " capadd=\($cs.capabilities.add // [] | "[" + join(" ") + "]")"
+        + " sec=[" + (if $cs.allowPrivilegeEscalation == false then "no-new-privileges:true " else "" end)
+        + "seccomp=\(($cs.seccompProfile // $ps.seccompProfile).type)]"
+        + " priv=\($cs.privileged // false)"
+        + " ports=map[" + ([$c.ports[]? | select(.hostPort) | "\(.containerPort):\(.hostPort)"] | join(" ")) + "]"
+        + " mem=\($c.resources.limits.memory // "none") pids=node-podPidsLimit"
+        + " mounts=" + ([$c.volumeMounts[] | "\($vt[.name]):\(.mountPath)"] | join(" ")) + " "' ;;
+  ps)
+    # Names of Deployments in the namespace with all replicas ready (enough for `--format '{{.Names}}'`).
+    k get deploy -o json | jq -r '.items[] | select(.status.readyReplicas == .spec.replicas) | .metadata.name' ;;
+  *)
+    echo "docker shim: '$cmd' is not supported on Kubernetes" >&2; exit 125 ;;
+esac
