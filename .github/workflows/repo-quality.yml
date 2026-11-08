@@ -1,0 +1,38 @@
+name: repository quality
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - LICENSE
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - CODE_OF_CONDUCT.md
+      - .github/ISSUE_TEMPLATE/**
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .github/scripts/check_repo_health.py
+      - .github/workflows/repo-quality.yml
+  pull_request:
+    paths:
+      - README.md
+      - LICENSE
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - CODE_OF_CONDUCT.md
+      - .github/ISSUE_TEMPLATE/**
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .github/scripts/check_repo_health.py
+      - .github/workflows/repo-quality.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-and-links:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate root OSS documentation and local links
+        run: python3 .github/scripts/check_repo_health.py
