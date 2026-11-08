@@ -1,0 +1,49 @@
+---
+title: Telemetry — traces, metrics, queries and alerts
+---
+flowchart LR
+  %% Sources: apps/README.md, hermes/README.md, helm/otel-collector/values*.yaml,
+  %% helm/tempo/values.yaml, helm/tempo-distributed/values.yaml, helm/grafana/values*.yaml,
+  %% helm/kube-prometheus-stack/values*.yaml and scripts/deploy.sh.
+  subgraph senders["Telemetry producers"]
+    apps["Apps: OpenTelemetry SDKs<br/>nextjs-web / nodejs-orders / python-inventory<br/>Traces only; W3C trace context"]
+    hermes["hermes-gateway native OTLP exporter<br/>Content-free health spans, metrics, diagnostic logs<br/>No prompts, messages or tool output"]
+  end
+  subgraph collector["observability / otel-collector"]
+    receiver["OTLP receiver<br/>HTTP :4318 / gRPC :4317"]
+    processors["memory_limiter → k8s_attributes<br/>→ resource → batch"]
+    traces["otlp_grpc/tempo<br/>Retry + bounded in-memory queue"]
+    metrics["prometheus exporter :8889<br/>OTLP metrics"]
+    logs["debug exporter<br/>Basic verbosity; no log backend"]
+    receiver --> processors
+    processors -->|traces| traces
+    processors -->|metrics| metrics
+    processors -->|logs| logs
+  end
+  subgraph tempo["observability / Tempo — logical paths in both profiles"]
+    ingest["OTLP gRPC :4317<br/>Lab: tempo<br/>Production: tempo-distributor"]
+    store["Trace storage + query API<br/>Lab: tempo :3200<br/>Production: tempo-query-frontend :3200"]
+    mg["metrics-generator<br/>span-metrics + service-graphs"]
+    ingest -->|trace storage path| store
+    ingest -->|span processing path; Kafka in production| mg
+  end
+  subgraph monitoring["monitoring / kube-prometheus-stack"]
+    prom["Prometheus<br/>prometheus-kube-prometheus-prometheus :9090<br/>Remote-write receiver enabled"]
+    rules["PrometheusRule evaluation<br/>App SLOs, Hermes and platform alerts"]
+    am["Alertmanager"]
+    prom --> rules -->|firing alerts| am
+  end
+  graf["observability / grafana"]
+  apps -->|OTLP/HTTP :4318 — traces| receiver
+  hermes -->|OTLP/HTTP :4318 — all three signals| receiver
+  traces -->|traces| ingest
+  metrics -->|metrics pulled by Prometheus / ServiceMonitor| prom
+  mg -->|remote write /api/v1/write; each replica in production| prom
+  graf -->|PromQL / metrics + exemplars| prom
+  graf -->|TraceQL / traces| store
+  classDef telemetry fill:#f0fdf4,stroke:#16a34a,color:#14532d
+  classDef source fill:#faf5ff,stroke:#9333ea,color:#581c87
+  classDef query fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  class receiver,processors,traces,metrics,ingest,store,mg,prom telemetry
+  class apps,hermes source
+  class graf,rules,am query

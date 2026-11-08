@@ -1,0 +1,7 @@
+# python-inventory manifests (namespace tempo-apps). Render: kubectl kustomize apps/python/k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml

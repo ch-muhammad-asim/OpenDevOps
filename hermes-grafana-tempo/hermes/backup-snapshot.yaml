@@ -1,0 +1,21 @@
+# OPTIONAL backup of HERMES_HOME (not part of kustomization.yaml; creates a billable disk snapshot).
+#   kubectl apply -f hermes/backup-snapshot.yaml
+#   kubectl -n hermes get volumesnapshot hermes-home-manual -w      # READYTOUSE=true
+# Restore: create a PVC with dataSource {kind: VolumeSnapshot, name: <snapshot>, apiGroup: snapshot.storage.k8s.io},
+# point the Deployment's "data" volume at it, apply. Schedule regular snapshots with Backup for GKE or a CronJob.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: pd-csi-snapshot
+driver: pd.csi.storage.gke.io
+deletionPolicy: Retain      # keep the cloud snapshot if the Kubernetes object is deleted
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: hermes-home-manual
+  namespace: hermes
+spec:
+  volumeSnapshotClassName: pd-csi-snapshot
+  source:
+    persistentVolumeClaimName: hermes-home

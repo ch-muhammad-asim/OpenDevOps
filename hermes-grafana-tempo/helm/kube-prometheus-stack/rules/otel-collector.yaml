@@ -1,0 +1,119 @@
+# Alerts for the OpenTelemetry Collector (contrib 0.165.0, release otel-collector, ns observability).
+# Source: the Collector's internal telemetry on :8888 (ServiceMonitor endpoint "metrics", job
+# "otel-collector"). The Collector exposes counters WITHOUT the "_total" suffix (internal
+# telemetry default without_type_suffix: true), e.g. otelcol_receiver_refused_spans.
+# Picked up from any namespace (ruleSelectorNilUsesHelmValues: false).
+# Apply: kubectl apply -f helm/kube-prometheus-stack/rules/
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  groups:
+    - name: otel-collector
+      rules:
+        - alert: OtelCollectorDown
+          expr: |
+            up{job="otel-collector", endpoint="metrics"} == 0
+            or
+            absent(up{job="otel-collector", endpoint="metrics"})
+          for: 5m
+          labels:
+            severity: critical
+            namespace: observability
+          annotations:
+            summary: OpenTelemetry Collector is down or not scraped
+            description: 'Collector {{ $labels.pod }} has not answered scrapes for 5 minutes (or no Collector target exists). Apps and Hermes cannot export traces or metrics.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectordown
+
+        - alert: OtelCollectorReceiverRefusing
+          expr: |
+            sum by (namespace, pod, receiver, transport) (
+              rate({__name__=~"otelcol_receiver_refused_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Collector receiver is refusing telemetry
+            description: 'Receiver {{ $labels.receiver }} on {{ $labels.pod }} refuses {{ $value | humanize }} items/s (usually memory_limiter back-pressure or a full exporter queue). Senders retry, then drop.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorreceiverrefusing
+
+        - alert: OtelCollectorReceiverFailed
+          expr: |
+            sum by (namespace, pod, receiver, transport) (
+              rate({__name__=~"otelcol_receiver_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Collector receiver fails to process telemetry
+            description: 'Receiver {{ $labels.receiver }} on {{ $labels.pod }} fails {{ $value | humanize }} items/s because of internal errors (bad payloads, decoding errors).'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorreceiverfailed
+
+        - alert: OtelCollectorMemoryLimiterRefusing
+          expr: |
+            sum by (namespace, pod) (
+              rate({__name__=~"otelcol_processor_memory_limiter_refused_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Collector memory_limiter is refusing data
+            description: 'memory_limiter on {{ $labels.pod }} refuses {{ $value | humanize }} items/s: the pod is near its memory limit. Scale out or raise the memory limit.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectormemorylimiterrefusing
+
+        - alert: OtelCollectorExporterSendFailing
+          expr: |
+            sum by (namespace, pod, exporter) (
+              rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            )
+            /
+            (
+              sum by (namespace, pod, exporter) (
+                rate({__name__=~"otelcol_exporter_sent_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+              )
+              +
+              sum by (namespace, pod, exporter) (
+                rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+              )
+            ) > 0.01
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Collector exporter is dropping data after retries
+            description: 'Exporter {{ $labels.exporter }} on {{ $labels.pod }} fails {{ $value | humanizePercentage }} of sends after retries; that data is lost. Check the backend (Tempo) health and network policy.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorexportersendfailing
+
+        - alert: OtelCollectorExporterEnqueueFailed
+          expr: |
+            sum by (namespace, pod, exporter) (
+              rate({__name__=~"otelcol_exporter_enqueue_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Collector exporter queue is full, data is dropped
+            description: 'Exporter {{ $labels.exporter }} on {{ $labels.pod }} cannot enqueue {{ $value | humanize }} items/s: the sending queue is full and new data is dropped.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorexporterenqueuefailed
+
+        - alert: OtelCollectorExporterQueueSaturated
+          expr: |
+            max by (namespace, pod, exporter) (otelcol_exporter_queue_size{job="otel-collector"})
+            /
+            max by (namespace, pod, exporter) (otelcol_exporter_queue_capacity{job="otel-collector"})
+            > 0.8
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Collector exporter queue is over 80% full
+            description: 'Queue of {{ $labels.exporter }} on {{ $labels.pod }} is {{ $value | humanizePercentage }} full; the backend is slower than ingest. Enqueue failures (data loss) follow when it reaches 100%.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorexporterqueuesaturated

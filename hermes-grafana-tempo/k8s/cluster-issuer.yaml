@@ -1,0 +1,44 @@
+# Let's Encrypt ClusterIssuers, DNS-01 via Cloudflare (zone saqlainmushtaq.com).
+# Token: Secret cloudflare-api-token (key api-token) in namespace cert-manager
+# (the cluster resource namespace for ClusterIssuers), created from a file
+# before this is applied; see README.md. The token needs Zone:DNS:Edit only.
+# Staging has high rate limits and untrusted certs: use it to test issuance,
+# then point certificates.yaml at letsencrypt-prod.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # No contact address: Let's Encrypt no longer sends expiry mail.
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - saqlainmushtaq.com
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - saqlainmushtaq.com
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

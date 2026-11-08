@@ -1,0 +1,15 @@
+# Keep at least one nextjs pod serving during voluntary disruptions (node drains, upgrades).
+# maxUnavailable (not minAvailable) so a 1-replica lab profile never blocks a drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nextjs
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/name: nextjs
+    app.kubernetes.io/part-of: tempo-apps
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nextjs

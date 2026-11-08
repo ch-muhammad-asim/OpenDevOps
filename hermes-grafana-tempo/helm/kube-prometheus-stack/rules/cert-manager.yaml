@@ -1,0 +1,70 @@
+# Alerts for cert-manager (release cert-manager, ns cert-manager). Only meaningful with
+# TLS_MODE=letsencrypt: with TLS_MODE=cloudflare there is no cert-manager and no Certificate, the
+# expressions match nothing and never fire (there is deliberately no absent() alert).
+# Needs cert-manager metrics scraped: set prometheus.enabled=true and
+# prometheus.servicemonitor.enabled=true in k8s/cert-manager-values.yaml and allow Prometheus to
+# reach port 9402 (job "cert-manager"). Every alert carries the label tls_mode="letsencrypt".
+# Apply: kubectl apply -f helm/kube-prometheus-stack/rules/
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cert-manager
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  groups:
+    - name: cert-manager
+      rules:
+        - alert: CertManagerDown
+          expr: up{job="cert-manager"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            tls_mode: letsencrypt
+          annotations:
+            summary: cert-manager controller is not scraped
+            description: 'cert-manager {{ $labels.pod }} has not answered scrapes for 10 minutes; certificates will not renew while it is down.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#certmanagerdown
+
+        - alert: CertManagerCertificateNotReady
+          expr: |
+            max by (name, namespace, exported_namespace) (
+              certmanager_certificate_ready_status{job="cert-manager", condition=~"False|Unknown"}
+            ) == 1
+          for: 15m
+          labels:
+            severity: critical
+            tls_mode: letsencrypt
+          annotations:
+            summary: Certificate is not ready
+            description: 'Certificate {{ $labels.name }} has not been Ready for 15 minutes (issuance or renewal failing, for example the DNS-01 challenge).'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#certmanagercertificatenotready
+
+        - alert: CertManagerCertificateExpiringSoon
+          expr: |
+            min by (name, namespace, exported_namespace) (
+              certmanager_certificate_expiration_timestamp_seconds{job="cert-manager"}
+            ) - time() < 21 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            tls_mode: letsencrypt
+          annotations:
+            summary: Certificate expires in less than 21 days
+            description: 'Certificate {{ $labels.name }} expires in {{ $value | humanizeDuration }}. Let''s Encrypt certificates renew 30 days before expiry, so renewal is failing.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#certmanagercertificateexpiringsoon
+
+        - alert: CertManagerCertificateExpiryCritical
+          expr: |
+            min by (name, namespace, exported_namespace) (
+              certmanager_certificate_expiration_timestamp_seconds{job="cert-manager"}
+            ) - time() < 7 * 24 * 3600
+          for: 1h
+          labels:
+            severity: critical
+            tls_mode: letsencrypt
+          annotations:
+            summary: Certificate expires in less than 7 days
+            description: 'Certificate {{ $labels.name }} expires in {{ $value | humanizeDuration }}. Fix renewal now or the public host will serve an expired certificate.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#certmanagercertificateexpiringsoon

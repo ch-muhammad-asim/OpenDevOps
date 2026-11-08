@@ -1,0 +1,68 @@
+# Local test stack: OTel Collector + Tempo + Prometheus + the three sample apps.
+# Host ports are offset (1xxxx) to avoid clashing with other local services.
+name: tempo-apps-local
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=local,service.namespace=tempo-apps,service.version=dev
+services:
+  tempo:
+    image: grafana/tempo:3.1.1
+    command: ["-target=all", "-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "13200:3200"
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.165.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "14317:4317"
+      - "14318:4318"
+    depends_on: [tempo]
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    command:
+      - --config.file=/etc/prometheus.yaml
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus.yaml:ro
+    ports:
+      - "19090:9090"
+  python:
+    build: ../python
+    image: tempo-apps/python:dev
+    environment:
+      <<: *otel-env
+    ports:
+      - "18000:8000"
+    depends_on: [otel-collector]
+  nodejs:
+    build: ../nodejs
+    image: tempo-apps/nodejs:dev
+    environment:
+      <<: *otel-env
+      INVENTORY_URL: http://python:8000
+    ports:
+      - "13001:3000"
+    depends_on: [otel-collector, python]
+  nextjs:
+    build: ../nextjs
+    image: tempo-apps/nextjs:dev
+    environment:
+      <<: *otel-env
+      ORDERS_URL: http://nodejs:3000
+    ports:
+      - "13000:3000"
+    depends_on: [otel-collector, nodejs]
+volumes:
+  tempo-data: {}
+networks:
+  default:
+    ipam:
+      config:
+        # Fixed subnet: avoids host routes (VPN/overlay) that may shadow Docker's default ranges.
+        - subnet: 172.29.40.0/24

@@ -1,0 +1,56 @@
+---
+title: Tempo — lab versus production profiles
+---
+flowchart TB
+  %% Sources: helm/README.md, helm/tempo/values.yaml,
+  %% helm/tempo-distributed/README.md and values.yaml, scripts/deploy.sh.
+  %% These are alternate deployments, not a migration or replication link.
+  subgraph lab["LAB — PROFILE=lab — GKE: 3 × e2-standard-2"]
+    direction TB
+    lc["otel-collector<br/>1 replica"]
+    lt["tempo — single binary<br/>grafana-community/tempo<br/>1 replica; in-process span delivery; no Kafka<br/>Embedded metrics-generator"]
+    lp[("PVC: 10Gi standard-rwo<br/>Trace blocks + WAL + generator WAL<br/>24h trace retention")]
+    lg["grafana"]
+    lm["Prometheus<br/>1 replica"]
+    lc -->|OTLP :4317| lt
+    lt -->|local backend| lp
+    lg -->|query :3200| lt
+    lt -->|span metrics / service graph remote write| lm
+  end
+  subgraph prod["PRODUCTION — PROFILE=prod — regional GKE, at least 2 zones; larger node pool"]
+    direction TB
+    pc["otel-collector<br/>HPA: 3–12 replicas"]
+    subgraph distributed["observability — grafana-community/tempo-distributed / release: tempo"]
+      d["tempo-distributor<br/>HPA: 3–9"]
+      live["tempo-live-store-zone-a / -b<br/>3 replicas per zone; 20Gi PVC each"]
+      bb["tempo-block-builder<br/>3 replicas"]
+      mg["tempo-metrics-generator<br/>2 replicas"]
+      qf["tempo-query-frontend<br/>2 replicas"]
+      q["tempo-querier<br/>HPA: 3–9"]
+      bs["tempo-backend-scheduler<br/>1 replica"]
+      bw["tempo-backend-worker<br/>2 replicas; compaction + retention"]
+      wi["ServiceAccount: observability/tempo<br/>GKE Workload Identity Federation<br/>Keyless; IAM scoped to trace bucket"]
+    end
+    kafka[("External Kafka-compatible queue<br/>Topic: tempo-traces<br/>TLS + SCRAM; replication factor 3<br/>Required; not installed by Tempo chart")]
+    gcs[("Google Cloud Storage<br/>Trace blocks<br/>14-day Tempo retention")]
+    pg["grafana"]
+    pm["Prometheus<br/>2 replicas; remote write to each pod"]
+    pc -->|OTLP :4317| d
+    d -->|produce spans| kafka
+    kafka -->|consume| live & bb & mg
+    bb -->|write blocks| gcs
+    pg -->|query :3200| qf
+    qf --> q
+    q -->|recent traces| live
+    q -->|historical blocks| gcs
+    bs -->|schedule jobs| bw
+    bw -->|compact / delete expired blocks| gcs
+    wi -.->|authorizes GCS access for Tempo components| gcs
+    mg -->|span metrics / service graph remote write| pm
+  end
+  classDef storage fill:#fff7ed,stroke:#ea580c,color:#7c2d12
+  classDef tempo fill:#f0fdf4,stroke:#16a34a,color:#14532d
+  classDef access fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  class lp,kafka,gcs storage
+  class lt,d,live,bb,mg,qf,q,bs,bw tempo
+  class wi,lc,pc,lg,pg,lm,pm access

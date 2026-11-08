@@ -1,0 +1,57 @@
+---
+title: Hermes + Grafana Tempo — GKE lab architecture
+---
+flowchart TB
+  %% Sources: README.md, hermes/README.md, helm/*, apps/*, k8s/*, scripts/*.
+  %% Namespace boundaries are logical; workloads are scheduled across the node pool.
+  cf["Cloudflare<br/>Proxied DNS + public TLS"]
+  subgraph gke["GKE — lab: 3 × e2-standard-2 nodes"]
+    subgraph edge["namespace: traefik"]
+      tr["traefik<br/>LoadBalancer Service + IngressRoutes<br/>Cloudflare-only allow-list"]
+    end
+    subgraph apps["namespace: tempo-apps"]
+      nx["nextjs :3000<br/>service.name: nextjs-web"]
+      nd["nodejs :3000<br/>service.name: nodejs-orders"]
+      py["python :8000<br/>service.name: python-inventory"]
+      nx -->|HTTP / traceparent| nd
+      nd -->|HTTP / traceparent| py
+    end
+    subgraph hermes["namespace: hermes"]
+      subgraph pod["hermes-gateway Deployment — shared pod and HERMES_HOME"]
+        dash["dashboard container<br/>hermes-dashboard Service :9119<br/>Hermes dashboard login"]
+        gw["gateway container<br/>Hermes gateway + local API server<br/>Native content-free OTLP exporter"]
+        dash -->|local API| gw
+      end
+    end
+    subgraph obs["namespace: observability"]
+      col["otel-collector<br/>OpenTelemetry Collector"]
+      tempo["tempo<br/>Single-binary Tempo + PVC"]
+      graf["grafana<br/>Dashboards + TraceQL"]
+      col -->|OTLP traces| tempo
+      graf -->|query traces| tempo
+    end
+    subgraph mon["namespace: monitoring — kube-prometheus-stack / release: prometheus"]
+      prom["Prometheus<br/>prometheus-kube-prometheus-prometheus"]
+      am["Alertmanager"]
+      exporters["kube-state-metrics + node-exporter<br/>Kubernetes metrics"]
+      operator["Prometheus Operator<br/>ServiceMonitor + PrometheusRule"]
+      exporters -->|scraped metrics| prom
+      operator -.->|configures| prom
+      prom -->|firing alerts| am
+    end
+    tr -->|HTTP| nx & nd & py
+    tr -->|HTTP :80| graf
+    tr -->|HTTP :9119| dash
+    nx & nd & py -->|OTLP/HTTP :4318| col
+    gw -->|OTLP/HTTP :4318| col
+    col -->|metrics scraped on :8889| prom
+    tempo -->|metrics-generator remote write| prom
+    graf -->|PromQL queries| prom
+  end
+  cf -->|HTTPS to origin / Traefik :443| tr
+  classDef edgeStyle fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  classDef telemetry fill:#f0fdf4,stroke:#16a34a,color:#14532d
+  classDef workload fill:#faf5ff,stroke:#9333ea,color:#581c87
+  class cf,tr edgeStyle
+  class col,tempo,graf,prom,am telemetry
+  class nx,nd,py,dash,gw workload

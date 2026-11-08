@@ -1,0 +1,30 @@
+# Lab profile: the production base (../base) without the persistent disk and with smaller requests.
+# kubectl apply -k hermes/lab/   (or: HERMES_PROFILE=lab hermes/deploy.sh)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+patches:
+  # No PVC: HERMES_HOME is wiped on every restart (fine for a demo; telemetry is unaffected).
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: hermes-home
+        namespace: hermes
+  - target:
+      kind: Deployment
+      name: hermes-gateway
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/1
+        value:
+          name: data
+          emptyDir:
+            sizeLimit: 1Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 50m, memory: 256Mi}
+          limits: {memory: 768Mi}

@@ -1,0 +1,24 @@
+# Lab overlay for traefik-values.yaml (PROFILE=lab, 3 x e2-standard-2, one zone).
+#   helm upgrade --install traefik traefik/traefik --version 42.3.1 \
+#     -n traefik -f traefik-values.yaml -f traefik-values-lab.yaml
+# Only HA and sizing change; all security settings come from traefik-values.yaml.
+# Not highly available: a node drain or Traefik restart drops public traffic briefly.
+
+deployment:
+  replicas: 1
+
+# A PDB on a single replica would block node drains (minAvailable 1 of 1).
+podDisruptionBudget:
+  enabled: false
+
+# One pod: nothing to spread.
+topologySpreadConstraints: []
+
+# Small requests, bounded memory (GOMAXPROCS 1, GOMEMLIMIT 230MiB).
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

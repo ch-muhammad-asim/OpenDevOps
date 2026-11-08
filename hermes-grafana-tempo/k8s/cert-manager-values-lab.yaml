@@ -1,0 +1,40 @@
+# Lab overlay for cert-manager-values.yaml (PROFILE=lab, TLS_MODE=letsencrypt only).
+#   helm upgrade --install cert-manager jetstack/cert-manager --version v1.21.3 \
+#     -n cert-manager -f cert-manager-values.yaml -f cert-manager-values-lab.yaml
+# One replica each, small requests. Images, digests and security settings come from
+# cert-manager-values.yaml. A PDB on a single replica would block node drains.
+
+replicaCount: 1
+podDisruptionBudget:
+  enabled: false
+topologySpreadConstraints: []
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+webhook:
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+  topologySpreadConstraints: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+cainjector:
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+  topologySpreadConstraints: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

@@ -1,0 +1,9 @@
+# nodejs-orders manifests. Deployed with the other apps by `kubectl apply -k apps/`,
+# which also rewrites the image `tempo-apps/nodejs` to the registry path.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tempo-apps
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml

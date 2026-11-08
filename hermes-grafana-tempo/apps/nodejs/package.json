@@ -1,0 +1,21 @@
+{
+  "name": "nodejs-orders",
+  "version": "1.0.2",
+  "private": true,
+  "description": "Orders API with planted code issues, traced with OpenTelemetry and Grafana Tempo",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "start": "node --require ./instrumentation.js server.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/auto-instrumentations-node": "0.83.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.301.0",
+    "@opentelemetry/sdk-node": "0.301.0",
+    "express": "5.3.0"
+  }
+}

@@ -1,0 +1,82 @@
+# Lab overlay for kube-prometheus-stack 93.1.0: applied AFTER values.yaml when PROFILE=lab
+#   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version 93.1.0 -n monitoring \
+#     -f helm/kube-prometheus-stack/values.yaml -f helm/kube-prometheus-stack/values-lab.yaml
+# Target: 3 x e2-standard-2 in one zone (~5.8 vCPU / 17.6 GiB allocatable shared by everything).
+# Only what differs from production: one replica each, no PDBs, short retention, small PVC,
+# small requests, no alert receivers (and so no receivers Secret). Images/digests, selectors,
+# remote-write receiver, exemplars, security contexts and the route tree stay as in production.
+
+prometheus:
+  podDisruptionBudget:
+    enabled: false               # one replica: a minAvailable=1 PDB would block node drains
+  prometheusSpec:
+    replicas: 1
+    retention: 1d
+    retentionSize: 5GiB          # below the 10Gi PVC to leave room for the WAL
+    resources:
+      requests:
+        cpu: 300m
+        memory: 1Gi
+      limits:
+        memory: 1536Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          resources:
+            requests:
+              storage: 10Gi
+
+alertmanager:
+  podDisruptionBudget:
+    enabled: false
+  config:
+    # Same route tree as production, receivers without integrations (alerts are visible in the
+    # Alertmanager and Grafana UIs, nothing is sent out).
+    receivers:
+      - name: "null"
+      - name: default
+      - name: critical
+  alertmanagerSpec:
+    replicas: 1
+    retention: 24h
+    secrets: []                  # no receivers Secret in the lab
+    storage: null                # emptyDir, as before (silences are lost on restart)
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # config-reloader sidecar in the Prometheus and Alertmanager pods (measured ~1m CPU / ~11Mi
+  # each in the lab): +10m / +32Mi requests in total.
+  prometheusConfigReloader:
+    resources:
+      requests:
+        cpu: 5m
+        memory: 16Mi
+      limits:
+        memory: 48Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi

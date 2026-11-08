@@ -1,0 +1,46 @@
+# Alerts for Traefik (release traefik, ns traefik). Source: Traefik's Prometheus metrics on the
+# internal "metrics" entry point (ServiceMonitor job "traefik-metrics", see k8s/traefik-values.yaml).
+# The router/service label is "exported_service" (Prometheus renames Traefik's own "service" label).
+# Apply: kubectl apply -f helm/kube-prometheus-stack/rules/
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: traefik
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  groups:
+    - name: traefik
+      rules:
+        - alert: TraefikDown
+          expr: |
+            sum(up{job="traefik-metrics"}) == 0
+            or
+            absent(up{job="traefik-metrics"})
+          for: 5m
+          labels:
+            severity: critical
+            namespace: traefik
+          annotations:
+            summary: Traefik is down or not scraped
+            description: No Traefik pod has answered scrapes for 5 minutes. Every public host (Grafana, sample apps) is unreachable.
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#traefikdown
+
+        - alert: TraefikHigh5xxRatio
+          expr: |
+            (
+              sum by (exported_service) (rate(traefik_service_requests_total{job="traefik-metrics", code=~"5.."}[5m]))
+              /
+              sum by (exported_service) (rate(traefik_service_requests_total{job="traefik-metrics"}[5m]))
+            ) > 0.05
+            and
+            sum by (exported_service) (rate(traefik_service_requests_total{job="traefik-metrics"}[5m])) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            namespace: traefik
+          annotations:
+            summary: More than 5% of requests to a Traefik service return 5xx
+            description: '{{ $labels.exported_service }} returns {{ $value | humanizePercentage }} 5xx responses over 5 minutes (only alerted above 0.1 req/s).'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#traefikhigh5xxratio

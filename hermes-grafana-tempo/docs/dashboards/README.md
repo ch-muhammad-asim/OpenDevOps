@@ -1,0 +1,399 @@
+# 📊 Grafana dashboards, explained
+
+Every dashboard in this project's Grafana (<https://grafana-tempo.saqlainmushtaq.com>), in plain language: what it is
+for, who looks at it and when, what each key panel measures, where the number comes from, the query behind it, what
+good and bad look like, and a "try it" step with the demo apps.
+
+**Inventory:** 34 dashboards in 4 folders, listed live from the Grafana API on 2026-11-08 (lab profile). Log in with
+the Grafana admin user (Secret `observability/grafana-admin`, see [`helm/grafana/`](../../helm/grafana/README.md)).
+Dashboards are provisioned from Git (ConfigMaps labelled `grafana_dashboard`), so edits made in the UI are lost on the
+next restart: change the source file instead.
+
+## 📏 How metrics are measured
+
+### Three kinds of metric
+
+| Type | What it is | Example here | How you query it |
+|---|---|---|---|
+| **Counter** | A number that only goes up (resets to 0 on restart) | `traces_spanmetrics_calls_total` (requests seen), `container_cpu_usage_seconds_total` | Never plot it raw; use `rate()` or `increase()` |
+| **Gauge** | A value that goes up and down, read as is | `hermes_gateway_up`, `container_memory_working_set_bytes`, `k6_vus` | Plot directly; `max`/`avg`/`sum` across series |
+| **Histogram** | Counters per latency bucket (`_bucket{le="0.5"}` = requests that took ≤ 0.5 s), plus `_sum` and `_count` | `traces_spanmetrics_latency_bucket`, `k6_http_req_duration_milliseconds_bucket` | `histogram_quantile()` over `rate()` of the buckets |
+
+([Prometheus metric types](https://prometheus.io/docs/concepts/metric_types/))
+
+### `rate()` and `increase()`
+
+`rate(x[5m])` is the per-second speed at which counter `x` grew over the last 5 minutes (it handles restarts).
+`increase(x[5m])` is the same thing as a total over the window. Dashboards use `$__rate_interval`, a window Grafana
+picks so that there are always enough samples. Rule of thumb: the time range must be at least 3 × the window, or the
+panel shows "No data". ([Querying functions](https://prometheus.io/docs/prometheus/latest/querying/functions/#rate),
+[Grafana `$__rate_interval`](https://grafana.com/docs/grafana/latest/datasources/prometheus/template-variables/#use-__rate_interval))
+
+### Percentiles from histograms
+
+p95 = the latency 95 % of requests were faster than. It is estimated from the buckets:
+
+```promql
+histogram_quantile(0.95, sum by (le, service) (rate(traces_spanmetrics_latency_bucket[5m])))
+```
+
+Keep `le` in the `sum by`, or the result is `NaN`. p50 is the typical request, p95/p99 the slow tail users notice;
+averages hide the slow tail. The value is an estimate inside a bucket, so it moves in steps.
+([Histograms and summaries](https://prometheus.io/docs/practices/histograms/))
+
+### RED and USE
+
+| Method | For | Signals | Where in these dashboards |
+|---|---|---|---|
+| **RED** | Services (requests) | **R**ate (requests/s), **E**rrors (failed/s or %), **D**uration (p95) | Stress tests, Tempo Reads/Writes, span metrics |
+| **USE** | Resources (CPU, memory, disk, network) | **U**tilisation (% busy), **S**aturation (queued work, throttling, page faults), **E**rrors | Node Exporter / USE Method, Kubernetes / Compute Resources, Stress tests pod row |
+
+### Span metrics (traces turned into numbers)
+
+Tempo's [metrics-generator](https://grafana.com/docs/tempo/latest/metrics-generator/) reads every span the apps send
+and writes RED metrics to Prometheus (remote write), so you get request rates and percentiles without adding metrics
+code to the apps:
+
+| Metric | Meaning | Labels |
+|---|---|---|
+| `traces_spanmetrics_calls_total` | Counter: spans seen | `service`, `span_name`, `span_kind`, `status_code` (`STATUS_CODE_ERROR` = failed) |
+| `traces_spanmetrics_latency_bucket` | Histogram: span duration | same, plus `le` |
+| `traces_service_graph_request_total` / `_failed_total` | Counters: calls from one service to another | `client`, `server` |
+
+Use `service=` (not `service_name=`); look at one series' labels first if a query says "No data":
+`{__name__=~"traces_spanmetrics.*"}`. Server spans (`span_kind="SPAN_KIND_SERVER"`) are the requests a service
+answered. ([OpenTelemetry traces](https://opentelemetry.io/docs/concepts/signals/traces/),
+[span kind](https://opentelemetry.io/docs/specs/otel/trace/api/#spankind))
+
+### Where the numbers come from
+
+| Source | What it measures | Metric prefix |
+|---|---|---|
+| Tempo metrics-generator | Span metrics and the service graph, from OpenTelemetry traces | `traces_spanmetrics_*`, `traces_service_graph_*` |
+| cAdvisor (in the kubelet) | Container CPU, memory, throttling, network, disk | `container_*` |
+| kube-state-metrics | Kubernetes objects: requests/limits, restarts, termination reasons, replicas | `kube_*` |
+| node-exporter | Node CPU, memory, load, disk, network | `node_*`, `instance:node_*` (recording rules) |
+| Hermes OTLP export | Hermes gateway health (via the OTel Collector `:8889`) | `hermes_*` |
+| k6 OpenTelemetry output | Load-test requests, latency, virtual users (via the Collector) | `k6_*` |
+| Tempo `/metrics` | Tempo's own ingest, query, storage and compaction health | `tempo_*`, `tempodb_*` |
+| Kubernetes, Grafana, Alertmanager, Prometheus `/metrics` | Each component's own health | `apiserver_*`, `kubelet_*`, `grafana_*`, `alertmanager_*`, `prometheus_*` |
+
+## 🗂️ Inventory
+
+| Folder | Dashboard | Data in the lab |
+|---|---|---|
+| Hermes | [Hermes Agent gateway](#hermes-agent-gateway) | ✅ |
+| Tests | [Stress tests](#stress-tests) | ✅ while/after a k6 run |
+| Tempo | [Tempo Service Graph](#tempo-service-graph) | ✅ |
+| Tempo | [Tempo Operational](#tempo-operational) | ✅ mostly (Memcached, Vulture rows empty) |
+| Tempo | [Tempo / Writes](#tempo--writes) | ✅ gateway and distributor rows; Envoy, Kafka, Memcached rows production only |
+| Tempo | [Tempo / Reads](#tempo--reads) | ✅ gateway, frontend, querier rows; partition, Memcached, external rows production only |
+| Tempo | [Tempo / Livestore](#tempo--livestore) | partly: live traces, resources; lag, zones, KEDA production only |
+| Tempo | [Tempo / Resources](#tempo--resources) | ✅ (every row shows the one `tempo-0` pod in the lab) |
+| Tempo | [Tempo / Tenants](#tempo--tenants) | ✅ (one tenant: `single-tenant`) |
+| Tempo | [Tempo - Backend Work](#tempo---backend-work) | partly: blocklist, compaction, jobs; redaction and KEDA rows usually empty |
+| General | [Alertmanager / Overview](#alertmanager--overview) | ✅ |
+| General | [Grafana Overview](#grafana-overview) | ✅ |
+| General | [Prometheus / Overview](#prometheus--overview) | ✅ |
+| General | [Kubernetes mixin (16 dashboards)](#kubernetes-mixin-dashboards) | ✅ |
+| General | [Node Exporter (5 dashboards)](#node-exporter-dashboards) | ✅ Nodes and USE; AIX and MacOS empty (Linux nodes) |
+
+There is no CoreDNS dashboard: GKE runs kube-dns, and its metrics are not scraped in this stack.
+
+---
+
+## 🤖 Hermes folder
+
+### Hermes Agent gateway
+
+**What it is for:** shows whether the Hermes Agent gateway is up and healthy, and links to its spans in Tempo.
+**Who and when:** whoever runs Hermes, when chat stops answering or an alert such as `HermesGatewayDown` fires.
+**Source:** Hermes's built-in OTLP export (content-free: no prompts or replies) → OTel Collector → Prometheus;
+spans → Tempo. Every query uses `max(...)` over the `$instance` variable so a restarted pod's old series do not
+double-count. Details: [`hermes/`](../../hermes/README.md).
+
+| Panel | Measures | Query | Good / bad |
+|---|---|---|---|
+| Gateway | Gauge: 1 while the gateway reports itself up | `max(hermes_gateway_up)` | Green **UP** (1) / red **DOWN** (0) or no data (pod or export gone) |
+| State | The current state label | `max by (hermes_gateway_state) (hermes_gateway_state) == 1` | `running` / `starting`, `draining` for minutes |
+| Active agents, Busy | Agent runs in progress; busy flag | `max(hermes_gateway_active_agents)`, `max(hermes_gateway_busy)` | Rises during a chat, back to 0 after |
+| Restart requested | A restart is pending | `max(hermes_gateway_restart_requested)` | 0 / 1 for > 10 min (alert) |
+| Platform up / degraded | Per platform (here `api_server`) | `max by (hermes_platform) (hermes_platform_up)` | UP and OK / DOWN or DEGRADED |
+| Cron: jobs enabled, running, overdue, store writable, heartbeat age | Scheduler health | `max(hermes_cron_jobs_overdue)`, `max(hermes_cron_store_writable)` | overdue 0, writable 1 / overdue > 0 for 15 min, writable 0 (disk full) |
+| Gateway up and active agents | History of the above | same queries over time | Flat line at 1 |
+| Hermes gateway spans | Trace table from Tempo | TraceQL `{ resource.service.name = "hermes-gateway" }` | A `gateway.health_snapshot` span every ~15 s, a `gateway.lifecycle` span per start |
+
+**Try it:** log in at <https://hermes-gke.saqlainmushtaq.com>, open **Chat** and ask a question; watch *Active
+agents* and *Busy* go to 1 and back. Click a trace ID in the table to see a health span's attributes.
+
+## 🧪 Tests folder
+
+### Stress tests
+
+**What it is for:** one screen for load tests: what k6 sent, how the apps answered, and what it did to their pods.
+**Who and when:** whoever sizes the apps or checks a release, during and after a run of `tests/run.sh`
+([`tests/`](../../tests/README.md)). Pick the run with the `testid` variable.
+**Source:** k6's OpenTelemetry output (via the Collector), Tempo span metrics, cAdvisor and kube-state-metrics.
+
+| Panel | Source | Query | Good / bad |
+|---|---|---|---|
+| k6 requests per second | k6 | `sum by (testid) (rate(k6_http_reqs_total[$__rate_interval]))` | Follows the scenario's ramp / flattens while VUs keep rising = saturated |
+| k6 p95 latency | k6 | `histogram_quantile(0.95, sum by (le, testid) (rate(k6_http_req_duration_milliseconds_bucket[$__rate_interval])))` | load/soak < 500 ms, stress/spike < 2 s (the k6 thresholds) |
+| k6 error rate (non-2xx) | k6 | non-2xx `rate(k6_http_reqs_total{status!~"2.."})` ÷ all | load/soak < 1 %, stress/spike < 5 % |
+| k6 virtual users | k6 | `sum by (testid) (k6_vus)` | The scenario's shape (e.g. 20 → 150 VUs for `stress`) |
+| App server p95 latency | Span metrics | `histogram_quantile(0.95, sum by (le, service) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[$__rate_interval])))` | The server-side view of the same latency; < 1 s (alert threshold) |
+| CPU used vs limit | cAdvisor + kube-state-metrics | `rate(container_cpu_usage_seconds_total[...])` vs `kube_pod_container_resource_limits{resource="cpu"}` | Below the limit line / at the limit = CPU-bound |
+| CPU throttling | cAdvisor | throttled CFS periods ÷ all periods | ~0 % / > 25 % means the limit slows requests |
+| Working-set memory vs limit | cAdvisor + kube-state-metrics | `container_memory_working_set_bytes` vs memory limit | Flat, well under the limit / climbing towards it (OOM risk; alert at 85 %) |
+| Restarts, OOMKilled | kube-state-metrics | `increase(kube_pod_container_status_restarts_total[5m])`, termination reason `OOMKilled` | 0 / any restart or OOM kill |
+| Service graph: failed calls per second | Span metrics | `sum by (client, server) (rate(traces_service_graph_request_failed_total[$__rate_interval]))` | 0 / a `nextjs-web → nodejs-orders` line while a dependency is down |
+| Stress spans, Error traces | Tempo | `{ name =~ "stress.*" }`, `{ resource.service.namespace = "tempo-apps" && status = error }` | Click through to the exact slow or failed request |
+
+**Try it:** `tests/run.sh nextjs stress` (90 s, in-cluster). Watch k6 p95 bend upwards while VUs ramp, CPU hit the
+limit line and throttling rise: that bend is the breaking point. `tests/run.sh nodejs dependency` makes the failed-calls
+panel show `nextjs-web → nodejs-orders`.
+
+## 🔭 Tempo folder
+
+These are the official [Tempo mixin](https://grafana.com/docs/tempo/latest/operations/monitor/) dashboards. They read
+Tempo's own `/metrics` (`tempo_*`, `tempodb_*`) plus cAdvisor. They are written for **distributed** Tempo (production
+profile); in the lab's single-binary Tempo every component is the one `tempo-0` pod, and rows for parts the lab does
+not run (Kafka, Memcached, Envoy, Vulture, KEDA, zone-aware live-stores) stay empty. Use them when traces are missing
+or slow to appear, or when Tempo itself alerts.
+
+### Tempo Service Graph
+
+**What it is for:** a live map of which service calls which, drawn from traces. **Who and when:** anyone new to the
+system, or during an incident to see which hop fails.
+
+| Panel | Measures | Query |
+|---|---|---|
+| Service Topology (node graph) | Every `client → server` pair seen in the time range | `traces_service_graph_request_total` grouped by `client`, `server` |
+
+**How to read it:** you should see `nextjs-web → nodejs-orders → python-inventory`. A missing edge means one service
+stopped sending spans or stopped propagating `traceparent`. For call rates and failures per edge, use Explore → Tempo →
+**Service Graph**, which colours failing edges red.
+**Try it:** open <https://tempo-nextjs.saqlainmushtaq.com/api/dashboard> a few times and refresh the dashboard after
+~1 minute.
+
+### Tempo Operational
+
+**What it is for:** Tempo's overall health on one page: Go runtime, maintenance, reads, writes, storage, compaction.
+**Who and when:** the platform team, first stop for any Tempo problem.
+
+| Row: panel | Measures | Query (simplified) | Good / bad |
+|---|---|---|---|
+| General: go heap, goroutines, cpu, working set | Tempo process resources | `go_memstats_heap_inuse_bytes`, `rate(container_cpu_usage_seconds_total{pod=~"tempo-.*"})` | Stable saw-tooth / steady growth (leak) or at the limit |
+| General: data volume free | Free space on Tempo's PVC | `kubelet_volume_stats_available_bytes` | Plenty free / falling towards 0 (lab: 10Gi, 24h retention) |
+| Maintenance: blocklist length, retention | Blocks Tempo tracks; blocks deleted by retention | `tempodb_blocklist_length`, `increase(tempodb_retention_deleted_total)` | Flat once retention runs / ever-growing (retention not deleting) |
+| Maintenance: maintenance errors, restarts | Compaction errors; pod restarts | `increase(tempodb_compaction_errors_total)`, `increase(kube_pod_container_status_restarts_total[5m])` | 0 / any |
+| Read: queries/s and p99 latency (trace ID and search) | Query load and speed per stage | `rate(tempo_request_duration_seconds_count{route=~".*traces_traceid\|.*api_search.*"})`, p99 of `_bucket` | p99 under a few seconds / tens of seconds, 5xx codes |
+| Write: spans received, distributor queue, push failures | Ingest volume and backlog | `rate(tempo_distributor_spans_received_total)`, `tempo_distributor_queue_length` | Follows app traffic, queue ~0 / growing queue, push failures > 0 |
+| Write: generator spans/s | Spans feeding span metrics | `rate(tempo_metrics_generator_spans_received_total)` | ≈ spans received / 0 means no span metrics |
+| Backend: requests and latency by operation | Object storage calls (local disk in the lab, GCS in production) | `rate(tempodb_backend_request_duration_seconds_count)` | Low latency, 2xx / errors, rising latency |
+| Compactor: objects/bytes written, blocks compacted | Compaction progress | `rate(tempodb_compaction_objects_written_total)`, `increase(tempodb_compaction_blocks_total[5m])` | Steady activity / none while blocks pile up |
+
+**Try it:** run `scripts/load.sh public 20` and watch *Spans Received* and *Generator Spans/second* rise together.
+
+### Tempo / Writes
+
+**What it is for:** the write path: is every span the Collector sends accepted and stored?
+**Who and when:** when traces are missing, or the Collector logs export errors.
+
+| Row: panel | Measures | Query (simplified) | Good / bad |
+|---|---|---|---|
+| Gateway: QPS, latency | OTLP push requests and their p99 | `rate(tempo_request_duration_seconds_count{route=~"...traceservice_export\|otlp_v1_traces"})` by status | 2xx only, p99 low / 4xx-5xx, rising latency |
+| Distributor: spans/s, bytes/s, latency | Accepted spans and push p99 | `rate(tempo_receiver_accepted_spans)`, `histogram_quantile(0.99, ... tempo_distributor_push_duration_seconds_bucket)` | Matches app traffic / drops to 0 |
+| Discarded spans | Spans rejected, by reason | `rate(tempo_discarded_spans_total) by (reason)` | No data or 0 / any (limits hit, traces too large) |
+| Kafka produced records, Kafka writes | Distributor → Kafka (production only) | `rate(tempo_distributor_produce_records_total)`, `..._produce_failures_total` | Empty in the lab; production: failures 0 |
+| Envoy, Memcached, Backend - Compactor | Proxy, cache and storage writes | `envoy_*`, `tempo_memcache_*`, `tempodb_backend_*{operation=~"PUT\|POST"}` | Envoy/Memcached empty in this stack |
+
+**Try it:** open <https://tempo-python.saqlainmushtaq.com/inventory/report> a few times; the distributor
+spans/s line steps up (each request creates one SQL span per row).
+
+### Tempo / Reads
+
+**What it is for:** the query path, from Grafana's request down to storage. **Who and when:** when Explore → Tempo is
+slow or a trace "is not found".
+
+| Row: panel | Measures | Query (simplified) | Good / bad |
+|---|---|---|---|
+| Gateway / Query Frontend / Querier: QPS, latency | Queries by status and their p99 per stage | `rate(tempo_request_duration_seconds_count{route=~"api_.*"})` by status, p99 × 1000 (ms) | 2xx, p99 ≲ 1–3 s / 5xx, p99 tens of seconds |
+| Livestore: QPS, latency, pending queue, completed blocks | Recent-trace lookups and block completion | `tempo_live_store_complete_queue_length`, `rate(tempo_live_store_blocks_completed_total)` | Queue near 0 / growing |
+| Livestore partitions: lag | Kafka consumer lag (production only) | `tempo_ingest_group_partition_lag_seconds` | Empty in the lab; production: seconds, not minutes |
+| Memcached, Backend, External requests | Cache, storage GETs, external endpoints | `tempo_memcache_*`, `tempodb_backend_*{operation="GET"}` | Backend 2xx; others empty in this stack |
+
+**Try it:** search `{ status = error }` in Explore → Tempo, then watch the Query Frontend QPS and latency move.
+
+### Tempo / Livestore
+
+**What it is for:** the part of Tempo that holds the most recent traces in memory before they become blocks.
+**Who and when:** production on-call when new traces appear late or live-stores push back.
+In the lab only *Live traces*, *Live trace memory* and the resource row have data.
+
+| Row: panel | Measures | Good / bad |
+|---|---|---|
+| Triage cockpit: read p99, read QPS, max ingest lag, backpressure, complete queue | One-glance health per zone | Lag in seconds, backpressure 0 / lag growing, backpressure > 0 |
+| Consistency: ingest lag, worst partition, records/bytes processed | How far live-stores trail Kafka (`tempo_ingest_group_partition_lag_seconds`) | Flat and low / rising for one partition |
+| Backpressure and readiness: seconds/s by reason, readiness, catch-up | Whether live-stores refuse work | 0 backpressure, all ready / any sustained backpressure |
+| WAL completion: duration, blocks completed/failed, block size | Turning live data into blocks | Completions steady, failures 0 |
+| Live traces and tenant pressure | `tempo_live_store_live_traces`, `tempo_live_store_live_trace_bytes`, top tenants | Follows traffic / runaway growth (memory risk) |
+| Resource pressure, Autoscaling/KEDA | CPU, memory, restarts, desired replicas | Below limits; KEDA rows empty unless KEDA is installed |
+
+**Try it:** run `scripts/load.sh public 20`; *Live traces* rises with traffic and falls back after the run.
+
+### Tempo / Resources
+
+**What it is for:** CPU, working-set memory and Go heap per Tempo component. **Who and when:** capacity planning,
+and when a component is OOM-killed or throttled. In the lab every row shows the same single `tempo-0` pod.
+
+| Panel (per component) | Query | Good / bad |
+|---|---|---|
+| CPU | `sum by (pod) (rate(container_cpu_usage_seconds_total{container="tempo"}[$__rate_interval]))` | Below the request most of the time / at the limit |
+| Memory (working set) | `container_memory_working_set_bytes{container="tempo"}` | Below the limit (lab: 2Gi) / approaching it |
+| Memory (Go heap in use) | `go_memstats_heap_inuse_bytes` | Saw-tooth / only rising |
+
+**Try it:** compare the Tempo CPU line before and during `scripts/load.sh public 50`.
+
+### Tempo / Tenants
+
+**What it is for:** per-tenant limits and usage. This stack has one tenant, `single-tenant`.
+**Who and when:** production, when one team's traces hit a limit.
+
+| Row: panel | Query | Good / bad |
+|---|---|---|
+| Tenant info: limits | `tempo_limits_overrides` or `tempo_limits_defaults` | Reference values |
+| Ingestion: bytes/s, spans/s, live traces | `rate(tempo_distributor_bytes_received_total{tenant=...})` | Well below the limits / near them (spans get discarded) |
+| Reads: queries/s (ID lookup, search) | `rate(tempo_query_frontend_queries_total) by (status)` | Successes only |
+| Storage: blocklist length, outstanding compactions | `tempodb_blocklist_length`, `tempodb_compaction_outstanding_blocks` | Flat / growing backlog |
+| Metrics generator: bytes/s, active series | `tempo_metrics_generator_registry_active_series` | Stable / exploding series (high-cardinality span names) |
+
+**Try it:** check *Active series* after `scripts/load.sh`; low-cardinality span names keep it stable.
+
+### Tempo - Backend Work
+
+**What it is for:** background jobs that keep storage tidy: blocklist polling, retention, compaction, redaction.
+**Who and when:** production, when storage grows or old traces are not deleted.
+
+| Row: panel | Query (simplified) | Good / bad |
+|---|---|---|
+| Blocklist maintenance: length, poll duration, retention | `tempodb_blocklist_length`, p99 of `tempodb_blocklist_poll_duration_seconds_bucket`, `increase(tempodb_retention_deleted_total)` | Retention deleting regularly / blocklist only growing |
+| Jobs: active, completed, failed, retry, dropped, duration | `tempo_backend_scheduler_jobs_*` | Failed and dropped 0 |
+| Redaction | `tempo_backend_scheduler_jobs_*{job_type="JOB_TYPE_REDACTION"}` | Usually empty: only used when traces are redacted |
+| Compactions: outstanding blocks, objects/bytes written | `tempodb_compaction_outstanding_blocks` | Low and stable / growing backlog |
+| Resources: backend-scheduler, backend-worker (+ KEDA autoscaling) | cAdvisor CPU/memory | Below limits; KEDA panels empty without KEDA |
+
+**Try it:** leave the stack running for an hour and watch *Outstanding blocks* stay low while compactions run.
+
+## 🧰 General folder
+
+### Alertmanager / Overview
+
+**What it is for:** are alerts arriving and are notifications delivered? **Who and when:** whoever owns alert routing,
+when a page was expected but did not come.
+
+| Panel | Query | Good / bad |
+|---|---|---|
+| Alerts | `sum(alertmanager_alerts) by (instance)` | A few (the always-on `Watchdog`) / a sudden jump |
+| Alerts receive rate | `rate(alertmanager_alerts_received_total)`, `rate(alertmanager_alerts_invalid_total)` | Invalid 0 |
+| Notifications send rate / duration (per integration) | `rate(alertmanager_notifications_total)`, `..._failed_total`, p99 of `alertmanager_notification_latency_seconds_bucket` | Failed 0, seconds / any failed (bad receiver secret or URL) |
+
+**Try it:** `scripts/load.sh public 50` drives the apps' error ratio up (the planted 500/502/504s);
+`TempoAppsErrorBudgetFastBurn` goes pending in Prometheus (Alerting) and, if the load lasts long enough, fires and
+reaches Alertmanager (receive rate rises).
+
+### Grafana Overview
+
+**What it is for:** Grafana's own health. **Who and when:** when dashboards load slowly or show errors.
+
+| Panel | Query | Good / bad |
+|---|---|---|
+| Firing alerts, dashboards, build info | `grafana_alerting_result_total{state="alerting"}`, `grafana_stat_totals_dashboard`, `grafana_build_info` | Version and dashboard count as expected |
+| RPS by status | `sum by (status_code) (irate(grafana_http_request_duration_seconds_count[1m]))` | Mostly 200 / many 5xx |
+| Request latency p50/p99 | `histogram_quantile(0.99, ... grafana_http_request_duration_seconds_bucket)` | Sub-second / seconds |
+
+**Try it:** open a few heavy dashboards (Tempo Operational) and watch RPS and p99 move.
+
+### Prometheus / Overview
+
+**What it is for:** is Prometheus scraping everything and keeping up? **Who and when:** when panels show "No data" or
+gaps.
+
+| Panel | Measures | Good / bad |
+|---|---|---|
+| Targets, Target sync, Scrape failures | Number of scrape targets, sync time, failed scrapes | Failures 0 / any (a target down or blocked by a NetworkPolicy) |
+| Average scrape interval duration | Actual time between scrapes | ≈ the configured interval / much longer |
+| Appended samples, Head series, Head chunks | Ingest volume and in-memory series (`prometheus_tsdb_head_series`) | Stable / sudden growth (a new high-cardinality label) |
+| Query rate, Stage duration | Query load and how long evaluation takes | Low latency / slow queries |
+
+**Try it:** Status → Targets in the Prometheus UI should match the *Targets* panel; all `up`.
+
+### Kubernetes mixin dashboards
+
+From the [kubernetes-mixin](https://github.com/kubernetes-monitoring/kubernetes-mixin) shipped by kube-prometheus-stack.
+Sources: cAdvisor (`container_*`), kube-state-metrics (`kube_*`), the kubelet and the API server. Pick the cluster,
+namespace, workload or pod with the variables at the top. USE view: *Utilisation* = usage ÷ capacity, *Requests /
+Limits Commitment* = sum of requests or limits ÷ allocatable (over 100 % limits commitment is normal; over 100 %
+requests commitment means pods cannot all be scheduled).
+
+| Dashboard | One line |
+|---|---|
+| Compute Resources / Cluster | Cluster-wide CPU and memory use vs requests and limits, by namespace; network and storage I/O |
+| Compute Resources / Multi-Cluster | The same across clusters (one cluster here) |
+| Compute Resources / Namespace (Pods) | CPU and memory per pod in one namespace, vs requests/limits (e.g. `tempo-apps`) |
+| Compute Resources / Namespace (Workloads) | The same grouped by Deployment/StatefulSet |
+| Compute Resources / Node (Pods) | Which pods use a node's CPU and memory |
+| Compute Resources / Nodes Overview | CPU and memory per node |
+| Compute Resources / Pod | One pod's containers: CPU, throttling, memory, network |
+| Compute Resources / Workload | One Deployment/StatefulSet across its pods |
+| Kubelet | Kubelet health: running pods and containers, operation rates and latencies, volume and PLEG timings |
+| API server | Kubernetes API availability, request rate, errors and latency (managed control plane metrics on GKE) |
+| Networking / Cluster | Bytes and packets received/transmitted and dropped, by namespace |
+| Networking / Namespace (Pods) | Network per pod in a namespace |
+| Networking / Namespace (Workload) | Network per workload in a namespace |
+| Networking / Pod | One pod's network |
+| Networking / Workload | One workload's network |
+| Persistent Volumes | PVC space and inode use (`kubelet_volume_stats_*`); alert before 100 % |
+
+**Try it:** open *Compute Resources / Namespace (Pods)* for `tempo-apps`, then open
+<https://tempo-nodejs.saqlainmushtaq.com/orders/report> a few times: the `nodejs` pod's CPU spikes (the report is a
+planted CPU hog).
+
+### Node Exporter dashboards
+
+From the [node-mixin](https://github.com/prometheus/node_exporter/tree/master/docs/node-mixin), source node-exporter.
+
+| Dashboard | One line |
+|---|---|
+| Nodes | One node: CPU, load, memory, disk I/O and space, network |
+| USE Method / Cluster | Utilisation and saturation of CPU, memory, network and disk across all nodes |
+| USE Method / Node | The same for one node |
+| AIX | For AIX hosts: empty here (Linux nodes) |
+| MacOS | For macOS hosts: empty here (Linux nodes) |
+
+**How to read the USE panels:** CPU utilisation under ~70 % with load-per-CPU under 1 is comfortable; memory major
+page faults should stay near 0; any network drops or disk I/O saturation near 1 means the node is the bottleneck.
+**Try it:** during `tests/run.sh nextjs stress`, *USE Method / Cluster* shows CPU utilisation climbing on the node that
+runs the `nextjs` pod.
+
+## 🧪 Try it: a 5-minute tour
+
+1. Open <https://tempo-nextjs.saqlainmushtaq.com> and click **Report** 5–10 times (a CPU-bound report in
+   `nodejs-orders`).
+2. After ~1 minute, Explore → Prometheus:
+   `histogram_quantile(0.95, sum by (le, service) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[5m])))`;
+   the `nextjs-web` and `nodejs-orders` p95 rise.
+3. Click **Stock check** a few times (a 2 s upstream timeout → 504); error ratio:
+   `service:spanmetrics_server_error_ratio:rate5m` goes up for `nextjs-web`.
+4. Explore → Tempo: `{ resource.service.name = "nextjs-web" && status = error }`, open a trace and see where it failed.
+5. Open **Tempo Service Graph** and **Kubernetes / Compute Resources / Namespace (Pods)** (`tempo-apps`) to see the
+   same requests as a map and as CPU.
+
+## 🔗 References
+
+- Grafana: [dashboards](https://grafana.com/docs/grafana/latest/dashboards/), [Explore](https://grafana.com/docs/grafana/latest/explore/), [provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards)
+- Tempo: [metrics-generator](https://grafana.com/docs/tempo/latest/metrics-generator/), [service graphs](https://grafana.com/docs/tempo/latest/metrics-generator/service_graphs/), [TraceQL](https://grafana.com/docs/tempo/latest/traceql/), [monitoring Tempo](https://grafana.com/docs/tempo/latest/operations/monitor/)
+- Prometheus: [metric types](https://prometheus.io/docs/concepts/metric_types/), [querying basics](https://prometheus.io/docs/prometheus/latest/querying/basics/), [functions](https://prometheus.io/docs/prometheus/latest/querying/functions/), [histograms](https://prometheus.io/docs/practices/histograms/)
+- OpenTelemetry: [traces](https://opentelemetry.io/docs/concepts/signals/traces/), [metrics](https://opentelemetry.io/docs/concepts/signals/metrics/), [Collector](https://opentelemetry.io/docs/collector/)
+- k6: [OpenTelemetry output](https://grafana.com/docs/k6/latest/results-output/real-time/opentelemetry/)
+- Methods: [The RED method](https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/), [USE method](https://www.brendangregg.com/usemethod.html)

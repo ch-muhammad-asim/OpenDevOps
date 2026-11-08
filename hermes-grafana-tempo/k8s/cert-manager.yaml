@@ -1,0 +1,65 @@
+# cert-manager namespace + NetworkPolicies. Applied ONLY with TLS_MODE=letsencrypt
+# (scripts/deploy.sh `certmanager` step), before the cert-manager chart.
+# Default TLS_MODE=cloudflare installs no cert-manager.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# Only exists with TLS_MODE=letsencrypt (the namespace is created either way).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# kube-apiserver -> cert-manager webhook (validating + mutating admission). Any
+# source: see the admission webhook note in networkpolicies.yaml. Controller metrics (9402) are
+# allowed from Prometheus only, by the policy below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: webhook-from-apiserver
+  namespace: cert-manager
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: cert-manager
+      app.kubernetes.io/component: webhook
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 10250
+---
+# cert-manager controller metrics (:9402) for the cert-manager alert rules (TLS_MODE=letsencrypt only).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-metrics-from-prometheus
+  namespace: cert-manager
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9402

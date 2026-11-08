@@ -1,0 +1,176 @@
+# Helm values for jetstack/cert-manager chart v1.21.3 (cert-manager v1.21.3). PRODUCTION defaults.
+# Used ONLY with TLS_MODE=letsencrypt (scripts/deploy.sh). The default TLS_MODE=cloudflare
+# installs no cert-manager: Traefik serves its default certificate to Cloudflare.
+#   helm upgrade --install cert-manager jetstack/cert-manager --version v1.21.3 \
+#     -n cert-manager -f cert-manager-values.yaml                                # PROFILE=prod
+#     -n cert-manager -f cert-manager-values.yaml -f cert-manager-values-lab.yaml  # PROFILE=lab
+# cert-manager-values-lab.yaml only shrinks HA and sizing.
+#
+# Pod Security "restricted": the chart defaults already set runAsNonRoot, seccomp
+# RuntimeDefault, no privilege escalation, drop ALL and a read-only rootfs; they are
+# repeated below so a chart upgrade cannot silently weaken them.
+
+crds:
+  # Install and keep the CRDs with the release (helm uninstall leaves them).
+  enabled: true
+  keep: true
+
+# Images pinned by tag AND digest (multi-arch manifest lists on quay.io/jetstack, v1.21.3).
+# Kubernetes pulls by the digest; update tag and digest together on upgrade.
+image:
+  repository: quay.io/jetstack/cert-manager-controller
+  tag: v1.21.3
+  digest: sha256:9f4f96a33c7774cef24466fcd85031997531a03a8d117f151126baa8d1290dcc
+
+# ---- controller: 2 replicas (leader election, one active), PDB, spread ----------
+replicaCount: 2
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/instance: cert-manager
+        app.kubernetes.io/component: controller
+    matchLabelKeys: [pod-template-hash]
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/instance: cert-manager
+        app.kubernetes.io/component: controller
+    matchLabelKeys: [pod-template-hash]
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+securityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# ---- webhook: 2 replicas (every cert-manager API write goes through it) ----------
+webhook:
+  replicaCount: 2
+  image:
+    repository: quay.io/jetstack/cert-manager-webhook
+    tag: v1.21.3
+    digest: sha256:055ac8e9de6a0ba6763794838fe38944acc650f68ebe1b01dd8be079e580f458
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/instance: cert-manager
+          app.kubernetes.io/component: webhook
+      matchLabelKeys: [pod-template-hash]
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/instance: cert-manager
+          app.kubernetes.io/component: webhook
+      matchLabelKeys: [pod-template-hash]
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+# ---- cainjector: 2 replicas (leader election, one active) -----------------------
+cainjector:
+  replicaCount: 2
+  image:
+    repository: quay.io/jetstack/cert-manager-cainjector
+    tag: v1.21.3
+    digest: sha256:083d0e906f8eb44e255fe4ff817ae54e49f9ed82e22f1011bb4e9e4f4b8a641f
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/instance: cert-manager
+          app.kubernetes.io/component: cainjector
+      matchLabelKeys: [pod-template-hash]
+  resources:
+    requests:
+      cpu: 20m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+# ---- acmesolver: only for HTTP-01 challenges (this project uses DNS-01); pinned anyway.
+acmesolver:
+  image:
+    repository: quay.io/jetstack/cert-manager-acmesolver
+    tag: v1.21.3
+    digest: sha256:c8c1225bb2fe8ab37a330b77f0d8c2ee6a41210fcb54fc07ca606ab9a022b8b7
+
+# ---- startupapicheck: post-install Job that waits until the webhook answers -------
+startupapicheck:
+  image:
+    repository: quay.io/jetstack/cert-manager-startupapicheck
+    tag: v1.21.3
+    digest: sha256:1c519d4afca1413d1e4ccd78bdc756184418ab55a34569a3b3de39d32f9974e1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+# No ServiceMonitor: the controller metrics port 9402 is not scraped (and is closed by
+# the cert-manager default-deny NetworkPolicy). See README "Production checklist".
+prometheus:
+  # Metrics on :9402 scraped through a ServiceMonitor; feeds helm/kube-prometheus-stack/rules/cert-manager.yaml.
+  enabled: true
+  servicemonitor:
+    enabled: true

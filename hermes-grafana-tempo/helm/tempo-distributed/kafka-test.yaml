@@ -1,0 +1,162 @@
+# TEST ONLY: single-broker Apache Kafka 4.4.0 (KRaft, combined broker+controller) so the
+# tempo-distributed write path can be exercised without a managed Kafka service.
+# Not for production: replication factor 1, no TLS, no SASL, one pod = single point of failure.
+# Use together with values-kafka-test.yaml:
+#   kubectl apply -f helm/tempo-distributed/kafka-test.yaml
+#   helm upgrade --install tempo grafana-community/tempo-distributed --version 3.27.0 \
+#     -n observability -f helm/tempo-distributed/values.yaml \
+#     -f helm/tempo-distributed/values-kafka-test.yaml \
+#     --set storage.trace.gcs.bucket_name="$TEMPO_BUCKET"
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-kafka
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: tempo-kafka
+    app.kubernetes.io/part-of: tempo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tempo-kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-kafka-headless
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: tempo-kafka
+    app.kubernetes.io/part-of: tempo
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: tempo-kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: controller
+      port: 9093
+      targetPort: controller
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tempo-kafka
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: tempo-kafka
+    app.kubernetes.io/part-of: tempo
+spec:
+  serviceName: tempo-kafka-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo-kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tempo-kafka
+        app.kubernetes.io/part-of: tempo
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000      # "appuser" in the official image
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka
+          image: docker.io/apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: PLAINTEXT://:9092,CONTROLLER://:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://tempo-kafka.observability.svc:9092
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@localhost:9093
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data/kraft   # subdirectory: keeps lost+found out of the log dir
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_MESSAGE_MAX_BYTES        # Tempo produces record batches up to 16000000 bytes
+              value: "16000000"
+            - name: KAFKA_LOG_RETENTION_HOURS      # Tempo guidance: 24h starting point, never < 40m
+              value: "24"
+            - name: KAFKA_LOG_CLEANUP_POLICY
+              value: delete
+            - name: KAFKA_HEAP_OPTS
+              value: -Xms768m -Xmx768m
+          readinessProbe:
+            tcpSocket:
+              port: kafka
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: kafka
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 500m, memory: 1536Mi}
+            limits: {cpu: "1", memory: 1536Mi}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+            - name: config            # entrypoint renders server.properties here
+              mountPath: /opt/kafka/config
+            - name: logs
+              mountPath: /opt/kafka/logs
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi

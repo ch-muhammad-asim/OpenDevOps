@@ -1,0 +1,65 @@
+# Lab profile: the production manifests sized for a 3 x e2-standard-2 cluster.
+# Only differences: 1 replica per app and deployment.environment.name=lab.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../python/k8s
+  - ../nodejs/k8s
+  - ../nextjs/k8s
+  - ../monitoring
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/part-of=tempo-apps
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: python
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: python
+      spec:
+        template:
+          spec:
+            containers:
+              - name: python
+                env:
+                  - name: DEPLOY_ENV
+                    value: lab
+  - target:
+      kind: Deployment
+      name: nodejs
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nodejs
+      spec:
+        template:
+          spec:
+            containers:
+              - name: nodejs
+                env:
+                  - name: DEPLOY_ENV
+                    value: lab
+  - target:
+      kind: Deployment
+      name: nextjs
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nextjs
+      spec:
+        template:
+          spec:
+            containers:
+              - name: nextjs
+                env:
+                  - name: DEPLOY_ENV
+                    value: lab

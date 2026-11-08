@@ -1,0 +1,308 @@
+# OPT-IN default-deny EGRESS for observability and tempo-apps (GKE Dataplane V2).
+# Not applied by scripts/deploy.sh. Apply it after networkpolicies.yaml on a
+# staging cluster first, run scripts/verify.sh, then promote:
+#   kubectl apply -f networkpolicies-egress.yaml
+# Remove with: kubectl delete -f networkpolicies-egress.yaml
+#
+# Flows allowed (everything else leaving these two namespaces is dropped):
+#   all pods        -> DNS: kube-dns and NodeLocal DNSCache pods in kube-system, 53 UDP/TCP
+#   tempo-apps      -> tempo-apps (app-to-app calls), OTel Collector 4317/4318
+#   grafana         -> Prometheus 9090, Alertmanager 9093, Tempo 3200,
+#                      other Grafana pods 9094 TCP/UDP (prod alerting gossip),
+#                      external database 5432 (PostgreSQL) / 3306 (MySQL) TCP to
+#                      GRAFANA_DB_CIDR (prod; see grafana-egress),
+#                      HTTPS 443 (kube-apiserver for the dashboard/datasource
+#                      sidecars, grafana.com update checks)
+#   otel-collector  -> Tempo 4317/4318 (lab tempo-0, prod tempo-distributor),
+#                      other Collector pods 4317/4318 (load-balancing tier),
+#                      HTTPS 443 (kube-apiserver: k8sattributes and the
+#                      loadbalancing exporter's k8s resolver)
+#   tempo           -> Tempo (all ports: memberlist 7946, gRPC 9095, 3200, memcached),
+#                      Prometheus 9090 (metrics-generator remote write), HTTPS 443
+#                      (GCS, kube-apiserver for the rollout-operator), Kafka 9092/9093
+#                      (prod ingest; in-namespace test broker or a managed service),
+#                      GKE metadata server for Workload Identity tokens
+#
+# "HTTPS 443" is 0.0.0.0/0 minus the metadata address: the kube-apiserver and Google
+# APIs have no stable, portable address to list. On Dataplane V2 an ipBlock never
+# matches pod IPs, so in-cluster flows must be (and are) listed by selector.
+# GKE metadata server (Workload Identity): 169.254.169.254/32 port 80 (Dataplane V2)
+# and 169.254.169.252/32 port 988, per the GKE Workload Identity docs; 988 on
+# 169.254.169.254 is allowed too.
+# Only Tempo may reach it; for every other pod it stays blocked.
+# Kafka on other ports: change 9092/9093 in tempo-egress.
+
+# ============================ tempo-apps ======================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: tempo-apps
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: apps-egress
+  namespace: tempo-apps
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: k8s-app
+                operator: In
+                values: [kube-dns, node-local-dns]
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # nextjs -> nodejs:3000 -> python:8000.
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+---
+# ============================ observability ===================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dns-egress
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: k8s-app
+                operator: In
+                values: [kube-dns, node-local-dns]
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-egress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: grafana
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - protocol: TCP
+          port: 9093
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+      ports:
+        - protocol: TCP
+          port: 3200
+    # Prod: unified-alerting gossip between Grafana replicas (ingress side in networkpolicies.yaml).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: UDP
+          port: 9094
+    # Prod: external Grafana database (Secret grafana-db). GRAFANA_DB_CIDR defaults to the
+    # RFC 1918 block 10.0.0.0/8, which holds a Cloud SQL private IP. Narrow it to the database's
+    # range, e.g. the private services access range allocated to the VPC (example: 10.20.0.0/24,
+    # see "gcloud compute addresses list --global --filter=purpose=VPC_PEERING"), or to the
+    # database IP as /32. Keep only the port of the engine in use (5432 PostgreSQL, 3306 MySQL).
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8   # GRAFANA_DB_CIDR
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 3306
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.169.254/32, 169.254.169.252/32]
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-egress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: otel-collector
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    # Load-balancing tier -> tail-sampling tier (trace-ID routing).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.169.254/32, 169.254.169.252/32]
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tempo-egress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: tempo
+  policyTypes: [Egress]
+  egress:
+    # Between Tempo components (memberlist 7946, gRPC 9095, memcached) and itself.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+    # In-namespace test Kafka (helm/tempo-distributed/kafka-test.yaml).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo-kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+    # GCS + kube-apiserver (443) and a managed Kafka service (9092/9093), never the
+    # metadata address.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.169.254/32, 169.254.169.252/32]
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9093
+    # GKE metadata server: Workload Identity access tokens for GCS.
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 988
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.252/32
+      ports:
+        - protocol: TCP
+          port: 988
+---
+# TEST ONLY Kafka broker (no-op when absent): KRaft traffic to itself.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tempo-kafka-test-egress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tempo-kafka
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo-kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9093

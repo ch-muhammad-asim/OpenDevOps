@@ -1,0 +1,41 @@
+# LAB overlay on values.yaml (small 3-node, single-zone cluster). scripts/deploy.sh adds it with PROFILE=lab:
+#   helm upgrade --install otel-collector open-telemetry/opentelemetry-collector --version 0.178.2 \
+#     --namespace observability --create-namespace \
+#     -f helm/otel-collector/values.yaml -f helm/otel-collector/values-lab.yaml
+#
+# One replica, small requests, single-binary Tempo. Same image digest, security context, receivers,
+# processors and pipelines as production; only scale, sizing and the Tempo endpoint differ.
+
+replicaCount: 1
+autoscaling:
+  enabled: false
+podDisruptionBudget:
+  enabled: false        # a PDB on one replica would block node drains
+topologySpreadConstraints: []
+terminationGracePeriodSeconds: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+config:
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch:
+      send_batch_size: 1024
+      send_batch_max_size: 0   # no hard cap (chart/Collector default)
+      timeout: 5s
+  exporters:
+    otlp_grpc/tempo:
+      endpoint: tempo.observability:4317   # helm/tempo single binary
+      # Collector defaults (1000 batches); memory_limiter bounds the real memory use.
+      sending_queue:
+        sizer: requests
+        queue_size: 1000
+        num_consumers: 10

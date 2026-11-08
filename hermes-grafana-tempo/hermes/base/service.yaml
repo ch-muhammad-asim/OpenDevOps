@@ -1,0 +1,14 @@
+# In-cluster Service for the Hermes dashboard; reachable only from Traefik (networkpolicy.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-dashboard
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: hermes-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hermes-gateway
+  ports:
+    - {name: http, port: 9119, targetPort: http, protocol: TCP}

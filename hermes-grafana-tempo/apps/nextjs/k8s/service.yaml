@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextjs
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/name: nextjs
+    app.kubernetes.io/part-of: tempo-apps
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nextjs
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

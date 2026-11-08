@@ -1,0 +1,381 @@
+# Traefik CRDs for the four public hosts.
+#
+#   grafana-tempo.saqlainmushtaq.com  -> observability/grafana:80
+#   tempo-nextjs.saqlainmushtaq.com   -> tempo-apps/nextjs:3000
+#   tempo-python.saqlainmushtaq.com   -> tempo-apps/python:8000
+#   tempo-nodejs.saqlainmushtaq.com   -> tempo-apps/nodejs:3000
+#
+# websecure (:443): always served. Certificate per TLS_MODE (scripts/deploy.sh):
+# cloudflare = Traefik's default certificate; letsencrypt = the <host>-tls Secret
+# (cert-manager, certificates.yaml), patched into each route by deploy.sh.
+# web (:80): protocol-aware: X-Forwarded-Proto https (Cloudflare SSL mode
+# "Flexible") -> serve; otherwise -> permanent redirect to https.
+# X-Forwarded-Proto is trusted only from Cloudflare (traefik-values.yaml), and
+# every route also requires a Cloudflare source IP.
+#
+# Middlewares are duplicated per namespace because IngressRoutes may only
+# reference same-namespace Middlewares, Services and Secrets
+# (providers.kubernetesCRD.allowCrossNamespace=false).
+
+# ---- TLS options (cluster-wide "default", applies to every router) ----------
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  namespace: traefik
+spec:
+  minVersion: VersionTLS12
+  # Cloudflare always sends SNI; kept false so a missing/renewing cert never
+  # breaks handshakes (Traefik serves its default cert instead).
+  sniStrict: false
+  cipherSuites:
+    # TLS 1.2 only; TLS 1.3 suites are not configurable (all are strong).
+    - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+    - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+    - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+  curvePreferences:
+    - X25519
+    - CurveP256
+---
+# ==================== Middlewares: observability ===========================
+# Only Cloudflare's edge may reach the origin (TCP source address, preserved by
+# externalTrafficPolicy=Local). Source: https://www.cloudflare.com/ips/
+# (checked 2026-10-30). Keep in sync with traefik-values.yaml trustedIPs.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: cloudflare-only
+  namespace: observability
+spec:
+  ipAllowList:
+    sourceRange:
+      - 173.245.48.0/20
+      - 103.21.244.0/22
+      - 103.22.200.0/22
+      - 103.31.4.0/22
+      - 141.101.64.0/18
+      - 108.162.192.0/18
+      - 190.93.240.0/20
+      - 188.114.96.0/20
+      - 197.234.240.0/22
+      - 198.41.128.0/17
+      - 162.158.0.0/15
+      - 104.16.0.0/13
+      - 104.24.0.0/14
+      - 172.64.0.0/13
+      - 131.0.72.0/22
+      - 2400:cb00::/32
+      - 2606:4700::/32
+      - 2803:f800::/32
+      - 2405:b500::/32
+      - 2405:8100::/32
+      - 2a06:98c0::/29
+      - 2c0f:f248::/32
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: to-https
+  namespace: observability
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+# Browser hardening. No full CSP on purpose (would break the Grafana SPA and
+# the sample app pages); framing restricted to same origin.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: observability
+spec:
+  headers:
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    # Also on the :80 "Flexible" routes (visitor-to-Cloudflare is HTTPS there).
+    forceSTSHeader: true
+    contentTypeNosniff: true
+    customFrameOptionsValue: SAMEORIGIN
+    contentSecurityPolicy: "frame-ancestors 'self'"
+    referrerPolicy: strict-origin-when-cross-origin
+    customResponseHeaders:
+      Server: ""
+      X-Powered-By: ""
+---
+# ==================== Middlewares: tempo-apps ==============================
+# Only Cloudflare's edge may reach the origin (TCP source address, preserved by
+# externalTrafficPolicy=Local). Source: https://www.cloudflare.com/ips/
+# (checked 2026-10-30). Keep in sync with traefik-values.yaml trustedIPs.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: cloudflare-only
+  namespace: tempo-apps
+spec:
+  ipAllowList:
+    sourceRange:
+      - 173.245.48.0/20
+      - 103.21.244.0/22
+      - 103.22.200.0/22
+      - 103.31.4.0/22
+      - 141.101.64.0/18
+      - 108.162.192.0/18
+      - 190.93.240.0/20
+      - 188.114.96.0/20
+      - 197.234.240.0/22
+      - 198.41.128.0/17
+      - 162.158.0.0/15
+      - 104.16.0.0/13
+      - 104.24.0.0/14
+      - 172.64.0.0/13
+      - 131.0.72.0/22
+      - 2400:cb00::/32
+      - 2606:4700::/32
+      - 2803:f800::/32
+      - 2405:b500::/32
+      - 2405:8100::/32
+      - 2a06:98c0::/29
+      - 2c0f:f248::/32
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: to-https
+  namespace: tempo-apps
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+# Browser hardening. No full CSP on purpose (would break the Grafana SPA and
+# the sample app pages); framing restricted to same origin.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: tempo-apps
+spec:
+  headers:
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    # Also on the :80 "Flexible" routes (visitor-to-Cloudflare is HTTPS there).
+    forceSTSHeader: true
+    contentTypeNosniff: true
+    customFrameOptionsValue: SAMEORIGIN
+    contentSecurityPolicy: "frame-ancestors 'self'"
+    referrerPolicy: strict-origin-when-cross-origin
+    customResponseHeaders:
+      Server: ""
+      X-Powered-By: ""
+---
+# ==================== grafana-tempo.saqlainmushtaq.com ============
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-tempo-websecure
+  namespace: observability
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`grafana-tempo.saqlainmushtaq.com`)
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: grafana
+          port: 80
+  tls: {}
+    # TLS_MODE=cloudflare (default): Traefik's default certificate; Cloudflare SSL mode "Full".
+    # TLS_MODE=letsencrypt: scripts/deploy.sh patches in secretName: grafana-tempo-tls (certificates.yaml).
+    # TLSOption "default" (namespace traefik) applies automatically.
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-tempo-web
+  namespace: observability
+spec:
+  entryPoints: [web]
+  routes:
+    # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
+    - kind: Rule
+      match: Host(`grafana-tempo.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      priority: 100
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: grafana
+          port: 80
+    # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
+    # redirect answers first); a real service keeps the router valid.
+    - kind: Rule
+      match: Host(`grafana-tempo.saqlainmushtaq.com`)
+      priority: 10
+      middlewares:
+        - name: cloudflare-only
+        - name: to-https
+      services:
+        - name: grafana
+          port: 80
+---
+# ==================== tempo-nextjs.saqlainmushtaq.com =============
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tempo-nextjs-websecure
+  namespace: tempo-apps
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`tempo-nextjs.saqlainmushtaq.com`)
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: nextjs
+          port: 3000  # port confirmed by apps/
+  tls: {}
+    # TLS_MODE=cloudflare (default): Traefik's default certificate; Cloudflare SSL mode "Full".
+    # TLS_MODE=letsencrypt: scripts/deploy.sh patches in secretName: tempo-nextjs-tls (certificates.yaml).
+    # TLSOption "default" (namespace traefik) applies automatically.
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tempo-nextjs-web
+  namespace: tempo-apps
+spec:
+  entryPoints: [web]
+  routes:
+    # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
+    - kind: Rule
+      match: Host(`tempo-nextjs.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      priority: 100
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: nextjs
+          port: 3000  # port confirmed by apps/
+    # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
+    # redirect answers first); a real service keeps the router valid.
+    - kind: Rule
+      match: Host(`tempo-nextjs.saqlainmushtaq.com`)
+      priority: 10
+      middlewares:
+        - name: cloudflare-only
+        - name: to-https
+      services:
+        - name: nextjs
+          port: 3000  # port confirmed by apps/
+---
+# ==================== tempo-python.saqlainmushtaq.com =============
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tempo-python-websecure
+  namespace: tempo-apps
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`tempo-python.saqlainmushtaq.com`)
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: python
+          port: 8000  # port confirmed by apps/
+  tls: {}
+    # TLS_MODE=cloudflare (default): Traefik's default certificate; Cloudflare SSL mode "Full".
+    # TLS_MODE=letsencrypt: scripts/deploy.sh patches in secretName: tempo-python-tls (certificates.yaml).
+    # TLSOption "default" (namespace traefik) applies automatically.
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tempo-python-web
+  namespace: tempo-apps
+spec:
+  entryPoints: [web]
+  routes:
+    # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
+    - kind: Rule
+      match: Host(`tempo-python.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      priority: 100
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: python
+          port: 8000  # port confirmed by apps/
+    # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
+    # redirect answers first); a real service keeps the router valid.
+    - kind: Rule
+      match: Host(`tempo-python.saqlainmushtaq.com`)
+      priority: 10
+      middlewares:
+        - name: cloudflare-only
+        - name: to-https
+      services:
+        - name: python
+          port: 8000  # port confirmed by apps/
+---
+# ==================== tempo-nodejs.saqlainmushtaq.com =============
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tempo-nodejs-websecure
+  namespace: tempo-apps
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`tempo-nodejs.saqlainmushtaq.com`)
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: nodejs
+          port: 3000  # port confirmed by apps/
+  tls: {}
+    # TLS_MODE=cloudflare (default): Traefik's default certificate; Cloudflare SSL mode "Full".
+    # TLS_MODE=letsencrypt: scripts/deploy.sh patches in secretName: tempo-nodejs-tls (certificates.yaml).
+    # TLSOption "default" (namespace traefik) applies automatically.
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tempo-nodejs-web
+  namespace: tempo-apps
+spec:
+  entryPoints: [web]
+  routes:
+    # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
+    - kind: Rule
+      match: Host(`tempo-nodejs.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      priority: 100
+      middlewares:
+        - name: cloudflare-only
+        - name: security-headers
+      services:
+        - name: nodejs
+          port: 3000  # port confirmed by apps/
+    # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
+    # redirect answers first); a real service keeps the router valid.
+    - kind: Rule
+      match: Host(`tempo-nodejs.saqlainmushtaq.com`)
+      priority: 10
+      middlewares:
+        - name: cloudflare-only
+        - name: to-https
+      services:
+        - name: nodejs
+          port: 3000  # port confirmed by apps/

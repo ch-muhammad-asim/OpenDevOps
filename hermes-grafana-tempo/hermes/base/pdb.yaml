@@ -1,0 +1,13 @@
+# The gateway is a singleton: two replicas would both answer the same platform messages and share one
+# HERMES_HOME. A PDB with minAvailable: 1 would block every node drain and GKE upgrade forever, so this
+# PDB states the intent (at most one pod down, i.e. the single pod may be evicted and is recreated).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hermes-gateway
+  namespace: hermes
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-gateway

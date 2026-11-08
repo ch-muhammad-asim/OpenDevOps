@@ -1,0 +1,479 @@
+# NetworkPolicies (enforced by GKE Dataplane V2): INGRESS. Every namespace this
+# directory owns (traefik, observability, tempo-apps, monitoring; cert-manager in cert-manager.yaml) has
+# a default-deny-ingress policy plus explicit allows. The hermes namespace carries
+# its own default-deny (hermes/base/networkpolicy.yaml).
+# Egress stays open here (DNS, Kubernetes API, image pulls, Let's Encrypt, Cloudflare
+# API, object storage). Opt-in default-deny EGRESS for observability and tempo-apps:
+# networkpolicies-egress.yaml (see README "Production checklist").
+# Kubelet probes come from the node and are always allowed. Pods with hostNetwork
+# (node-exporter) are not subject to NetworkPolicy at all.
+#
+# Pod labels used (chart defaults, release names from the shared contract; checked
+# against the running pods):
+#   traefik pods      app.kubernetes.io/name=traefik           (ns traefik)
+#   cert-manager      app.kubernetes.io/component=webhook      (ns cert-manager)
+#   grafana           app.kubernetes.io/instance=grafana       (ns observability)
+#   tempo             app.kubernetes.io/instance=tempo         (ns observability).
+#                     Lab: the single-binary pod tempo-0. Prod (tempo-distributed):
+#                     every component (distributor, query-frontend, querier,
+#                     live-store, block-builder, metrics-generator, backend-*,
+#                     memcached, rollout-operator) carries the same label.
+#   otel-collector    app.kubernetes.io/instance=otel-collector (ns observability)
+#   prometheus        app.kubernetes.io/name=prometheus        (ns monitoring,
+#                     set by the Prometheus operator)
+#   alertmanager      app.kubernetes.io/name=alertmanager      (ns monitoring)
+#   operator          app.kubernetes.io/name=kube-prometheus-stack-prometheus-operator
+#   kube-state-metrics app.kubernetes.io/name=kube-state-metrics
+#   node-exporter     app.kubernetes.io/name=prometheus-node-exporter
+#   sample apps       any pod in ns tempo-apps
+#   Hermes Agent      any pod in ns hermes
+# NetworkPolicy ports are POD (container) ports, not Service ports: Grafana's
+# Service port 80 maps to container port 3000.
+#
+# Admission webhooks (cert-manager webhook 10250, Prometheus operator 10250, Tempo
+# rollout-operator 8443 in prod) are
+# called by the kube-apiserver. On GKE that traffic reaches the pod from the
+# control plane or through the konnectivity-agent pods, and neither source is
+# portable to select, so those two ports are open to any source. The webhooks
+# only accept TLS from the API server's admission client and serve no data.
+
+# ============================== traefik =======================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: traefik
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# LB traffic (source = Cloudflare edge IPs, preserved by
+# externalTrafficPolicy=Local) on the container ports. Open to all sources
+# here; Traefik's cloudflare-only ipAllowList filters per request.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8443
+---
+# Prometheus scrapes Traefik metrics (entry point "metrics", 9100; ServiceMonitor from
+# traefik-values.yaml). Not exposed on the LoadBalancer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: traefik-metrics-from-prometheus
+  namespace: traefik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9100
+---
+# ============================ observability ===================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Traefik -> Grafana UI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-from-traefik
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: grafana
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Prod: Grafana replicas gossip alerting state (unified alerting HA) on 9094.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: UDP
+          port: 9094
+---
+# Sample apps (OTLP gRPC + HTTP) and Hermes Agent (OTLP HTTP + gRPC) -> Collector.
+# Collector -> Collector: a trace-ID load-balancing tier in front of a tail-sampling
+# tier (helm/otel-collector/tail-sampling-example.yaml) forwards OTLP between pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-from-senders
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: otel-collector
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tempo-apps
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hermes
+      ports:
+        - protocol: TCP
+          port: 4318
+        - protocol: TCP
+          port: 4317
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+---
+# Both profiles (selector app.kubernetes.io/instance=tempo):
+#   Collector -> OTLP 4317/4318 (lab: tempo-0; prod: tempo-distributor)
+#   Grafana   -> query API 3200 (lab: tempo-0; prod: tempo-query-frontend)
+#   Tempo     -> Tempo, all ports (memberlist 7946, gRPC 9095, HTTP 3200,
+#                memcached 11211, rollout-operator calls to live-stores)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tempo-ingress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: tempo
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - protocol: TCP
+          port: 3200
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+---
+# Prod only (tempo-distributed): kube-apiserver -> rollout-operator admission
+# webhooks (pod-eviction, no-downscale, prepare-downscale, zpdb-validation; all
+# failurePolicy Fail, so a blocked port would stop node drains and Tempo scaling).
+# Service 443 -> container 8443. Any source: see the admission webhook note at the
+# top. No-op in the lab (no rollout-operator pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tempo-rollout-operator-webhook
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: tempo
+      app.kubernetes.io/name: rollout-operator
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8443
+---
+# TEST ONLY Kafka (helm/tempo-distributed/kafka-test.yaml, no-op when absent):
+# Tempo (distributors, block-builders, live-stores) -> broker 9092; broker -> its
+# own KRaft controller 9093.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tempo-kafka-test-ingress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tempo-kafka
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+      ports:
+        - protocol: TCP
+          port: 9092
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo-kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9093
+---
+# Prometheus scrapes every pod in observability (ServiceMonitors/PodMonitors).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+---
+# ============================== tempo-apps ====================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: tempo-apps
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Traefik -> sample apps. Ports: nextjs 3000, python 8000, nodejs 3000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: apps-from-traefik
+  namespace: tempo-apps
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000   # port confirmed by apps/
+        - protocol: TCP
+          port: 8000   # port confirmed by apps/
+---
+# App -> app calls (the cross-service traces) and in-cluster load generation.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: tempo-apps
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: tempo-apps
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+---
+# ============================== monitoring ====================================
+# kube-prometheus-stack. Default-deny, then one policy per component.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Prometheus: Grafana queries and Tempo's metrics-generator remote write (both from
+# observability) on 9090, Hermes Agent remote write, plus anything inside
+# monitoring (self-scrape, config-reloader 8080).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+      ports:
+        - protocol: TCP
+          port: 9090
+    - from:
+        - podSelector: {}
+---
+# Alertmanager: alerts and scrapes from Prometheus (9093 web, 8080 config-reloader),
+# Grafana's Alertmanager datasource (9093), cluster gossip between replicas (9094).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - protocol: TCP
+          port: 9093
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: UDP
+          port: 9094
+---
+# Prometheus operator: admission webhook for PrometheusRules/AlertmanagerConfigs
+# (kube-apiserver, any source: see the note at the top) and Prometheus scrapes, both
+# on the HTTPS port 10250.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: operator-webhook-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kube-prometheus-stack-prometheus-operator
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 10250
+---
+# Exporters scraped by Prometheus only: kube-state-metrics (8080 metrics, 8081
+# self-metrics) and node-exporter (9100). node-exporter runs with hostNetwork, so
+# this rule has no effect on it today; it applies if hostNetwork is ever turned off.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: exporters-from-prometheus
+  namespace: monitoring
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [kube-state-metrics, prometheus-node-exporter]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 9100

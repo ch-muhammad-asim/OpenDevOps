@@ -1,0 +1,87 @@
+# Hermes Agent config.yaml (copied into HERMES_HOME=/opt/data/home at pod start).
+# Telemetry: only the gateway's built-in monitoring export: service-health metrics, spans and
+# diagnostic logs over OTLP/HTTP to the OpenTelemetry Collector. Content-free by design: no
+# prompts, messages, tool arguments or tool output are exported.
+monitoring:
+  # Fixed id -> stable service.instance.id label (Hermes exports a hash of it), and Hermes never
+  # needs to write config.yaml to mint one.
+  install_id: hermes-grafana-tempo
+  gateway_health_export:
+    enabled: true
+    metrics_enabled: true
+    diagnostic_events_enabled: true
+    warning_error_events_enabled: true
+    export_interval_seconds: 15        # metrics + health-snapshot spans
+    logs_export_interval_seconds: 5
+    resource_attributes:
+      service.name: hermes-gateway     # Hermes forces this value anyway
+      service.namespace: hermes
+      deployment.environment.name: demo
+  export:
+    otlp:
+      enabled: true
+      # /v1/traces is the base; Hermes derives /v1/metrics and /v1/logs from it.
+      endpoint: http://otel-collector.observability:4318/v1/traces
+      headers_env: {}                  # in-cluster, no auth headers
+
+# Config schema version of Hermes v0.23.0; without it Hermes treats the file as pre-v12 and warns.
+_config_version: 52
+
+# Model: any OpenAI-compatible endpoint through Hermes's "custom" provider. deploy.sh writes the provider's
+# model id, base URL and API key into Secret hermes-model-key (MODEL_PROVIDER=cloudflare | opencode); Hermes
+# expands ${env:...} at load time, so no account ID, URL or key is in this file or in Git.
+# Auxiliary tasks (titles, compression, approvals, ...) keep provider "auto", whose chain starts with this
+# main provider and model, so they use it too and never fall back to the Nous Portal.
+model:
+  provider: custom
+  default: ${env:HERMES_MODEL}
+  base_url: ${env:HERMES_MODEL_BASE_URL}
+  key_env: HERMES_MODEL_API_KEY
+  context_length: 128000             # the endpoints do not report it; both default models have 128k+
+
+# Guardrails for an agent that can now act: a human approves every flagged command (API-server runs are
+# never auto-approved), secrets are masked in output and logs, no URL fetches to private addresses, no
+# package installs, bounded runs, no connectors, MCP servers or update checks.
+approvals:
+  mode: manual
+  timeout: 120
+  cron_mode: deny
+  unattended_mode: deny
+  denial_breaker_threshold: 3
+command_allowlist: []
+security:
+  redact_secrets: true
+  allow_private_urls: false
+  allow_lazy_installs: false
+  protected_instruction_files: true
+agent:
+  max_turns: 30
+  run_budget_seconds: 900
+display:
+  show_reasoning: false
+tools:
+  connectors: {enabled: false}
+mcp_servers: {}
+# Read-only observability skill, mounted from a ConfigMap (deployment.yaml).
+skills:
+  external_dirs: ["/opt/skills"]
+cron: {allow_agent_scheduling: false}
+plugins: {auto_apply: false}
+updates: {check: false}
+
+# Web dashboard (container "dashboard"), published at the public URL through Traefik.
+# A non-loopback bind always requires a login provider; the password provider is configured through
+# the HERMES_DASHBOARD_BASIC_AUTH_* env vars from Secret hermes-dashboard-auth.
+# The public URL is set ONLY on the dashboard container (env HERMES_DASHBOARD_PUBLIC_URL in
+# deployment.yaml), not here: a non-loopback dashboard.public_url also gates the gateway's own
+# loopback listener, which has no login provider, and the gateway then exits.
+dashboard:
+  # Trust X-Forwarded-Proto/For only from in-cluster addresses (Traefik pods); the NetworkPolicy admits
+  # only the traefik namespace on the dashboard port anyway.
+  trusted_proxies: ["10.0.0.0/8"]
+
+# Nous's own aggregate usage metrics: off (the defaults, stated explicitly).
+telemetry:
+  shared_metrics:
+    enabled: false
+    send: false

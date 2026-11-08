@@ -1,0 +1,42 @@
+# Alerts for the Tempo rollout-operator (tempo-distributed, production profile only).
+# Its admission webhooks (pod-eviction, prepare-downscale, no-downscale, zpdb-validation) use
+# failurePolicy Fail for namespace observability, so while it is down every eviction, node drain
+# and live-store scale-down in that namespace is rejected. The chart runs it as a single replica
+# (fixed in the subchart), so these alerts are the safety net. Source: kube-state-metrics and the
+# kube-apiserver metrics scraped by kube-prometheus-stack.
+# Apply (after tempo-distributed): kubectl apply -f helm/tempo-distributed/prometheusrule-rollout-operator.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tempo-rollout-operator
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  groups:
+    - name: tempo-rollout-operator
+      rules:
+        - alert: TempoRolloutOperatorDown
+          expr: |
+            kube_deployment_status_replicas_available{namespace="observability", deployment="tempo-rollout-operator"} < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Tempo rollout-operator has no available replica
+            description: The rollout-operator in observability has been unavailable for 5 minutes; its fail-closed webhooks now reject evictions, node drains and live-store scale-downs in that namespace.
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/tempo-distributed/README.md#temporolloutoperatordown
+
+        - alert: TempoRolloutOperatorWebhookErrors
+          expr: |
+            sum by (name) (
+              rate(apiserver_admission_webhook_rejection_count{name=~".*-observability\\.grafana\\.com", error_type="calling_webhook_error"}[5m])
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+            namespace: observability
+          annotations:
+            summary: The kube-apiserver cannot call a Tempo rollout-operator webhook
+            description: 'Calls to webhook {{ $labels.name }} have failed for 10 minutes (operator pod down, NetworkPolicy on 8443 or certificate); requests it guards are rejected.'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/tempo-distributed/README.md#temporolloutoperatordown

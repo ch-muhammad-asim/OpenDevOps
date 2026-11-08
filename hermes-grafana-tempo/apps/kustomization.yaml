@@ -1,0 +1,10 @@
+# Production profile (default): all three sample apps with 2 replicas each, PDBs, topology spread,
+# and their PrometheusRule. Images are tempo-apps/<app>:<tag>; deploy-apps.sh rewrites them to
+# <registry>/<app>@sha256:<digest> at apply time. The lab profile is in lab/.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - python/k8s
+  - nodejs/k8s
+  - nextjs/k8s
+  - monitoring

@@ -1,0 +1,30 @@
+# Lab overlay for grafana-community/grafana 14.4.0: applied AFTER values.yaml when PROFILE=lab
+#   helm upgrade --install grafana grafana-community/grafana --version 14.4.0 -n observability \
+#     -f helm/grafana/values.yaml -f helm/grafana/values-lab.yaml
+# Target: 3 x e2-standard-2 in one zone, shared with the whole stack.
+# Only what differs from production: one replica on SQLite (emptyDir, no external database),
+# no HA gossip, no PDB, small requests, single-binary Tempo endpoint, the Debian-based image tag
+# the lab runs. Security settings, sidecars and data source UIDs stay as in production.
+
+replicas: 1
+envFromSecret: ""          # no grafana-db Secret: SQLite in an emptyDir (state lost on restart)
+headlessService: false
+podDisruptionBudget: null  # one replica: no PDB, node drains are not blocked
+
+image:
+  tag: "13.3.0"
+  sha: 488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+env:
+  TEMPO_QUERY_URL: http://tempo.observability:3200   # lab: Tempo single binary (helm/tempo/)
+
+grafana.ini:
+  unified_alerting:
+    ha_peers: ""             # empty = no alerting cluster (single replica); the rest is unused

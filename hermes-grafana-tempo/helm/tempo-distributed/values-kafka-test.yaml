@@ -1,0 +1,14 @@
+# TEST ONLY overlay on values.yaml: points Tempo at the single-broker Kafka from
+# kafka-test.yaml (plaintext, no SASL, topic auto-created). Production keeps the external
+# Kafka-compatible service, TLS and SASL from values.yaml.
+ingest:
+  kafka:
+    address: tempo-kafka.observability.svc:9092
+    topic: tempo-traces
+    auto_create_topic_enabled: true
+    auto_create_topic_default_partitions: 3   # = liveStore.replicas = blockBuilder.replicas
+    sasl:
+      mechanism: ""
+      existingSecret: ""
+    tls:
+      enabled: false

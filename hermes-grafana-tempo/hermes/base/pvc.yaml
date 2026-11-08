@@ -1,0 +1,15 @@
+# HERMES_HOME on a persistent disk: sessions, memory, state.db and logs survive restarts and node moves.
+# The lab overlay (lab/) replaces it with an emptyDir.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-home
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: hermes-gateway
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard-rwo    # GKE PD balanced, zonal; see the Production checklist for regional disks
+  resources:
+    requests:
+      storage: 10Gi

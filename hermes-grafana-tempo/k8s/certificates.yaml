@@ -1,0 +1,78 @@
+# Origin certificates, one per public host. Each lives in the namespace of its
+# IngressRoute, because tls.secretName must be in the same namespace
+# (providers.kubernetesCRD.allowCrossNamespace=false).
+# Publicly trusted (Let's Encrypt), so they also satisfy Cloudflare SSL mode
+# "Full (strict)".
+# To test issuance without touching Let's Encrypt production rate limits, set
+# issuerRef.name to letsencrypt-staging, apply, wait for Ready, then switch back
+# to letsencrypt-prod, re-apply and delete the <name>-tls Secret to force a
+# fresh production certificate.
+# No duration/renewBefore: Let's Encrypt sets the lifetime; cert-manager renews
+# at 2/3 of it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-tempo-tls
+  namespace: observability
+spec:
+  secretName: grafana-tempo-tls
+  dnsNames:
+    - grafana-tempo.saqlainmushtaq.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod   # letsencrypt-staging to test
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tempo-nextjs-tls
+  namespace: tempo-apps
+spec:
+  secretName: tempo-nextjs-tls
+  dnsNames:
+    - tempo-nextjs.saqlainmushtaq.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod   # letsencrypt-staging to test
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tempo-python-tls
+  namespace: tempo-apps
+spec:
+  secretName: tempo-python-tls
+  dnsNames:
+    - tempo-python.saqlainmushtaq.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod   # letsencrypt-staging to test
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tempo-nodejs-tls
+  namespace: tempo-apps
+spec:
+  secretName: tempo-nodejs-tls
+  dnsNames:
+    - tempo-nodejs.saqlainmushtaq.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod   # letsencrypt-staging to test
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always

@@ -1,0 +1,121 @@
+# Alerts for the three sample apps, from Tempo span metrics (traces_spanmetrics_*, label `service`)
+# and kube-state-metrics / cAdvisor. Picked up by kube-prometheus-stack (ruleSelectorNilUsesHelmValues: false).
+# SLO: 99% of server requests succeed (error budget 1%), alerted with multi-window burn rates.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tempo-apps
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/part-of: tempo-apps
+spec:
+  groups:
+    - name: tempo-apps.slo.recording
+      interval: 30s
+      rules:
+        - record: service:spanmetrics_server_error_ratio:rate5m
+          expr: |
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m]))
+            /
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER"}[5m]))
+        - record: service:spanmetrics_server_error_ratio:rate30m
+          expr: |
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[30m]))
+            /
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER"}[30m]))
+        - record: service:spanmetrics_server_error_ratio:rate1h
+          expr: |
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[1h]))
+            /
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER"}[1h]))
+        - record: service:spanmetrics_server_error_ratio:rate6h
+          expr: |
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[6h]))
+            /
+            sum by (service) (rate(traces_spanmetrics_calls_total{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER"}[6h]))
+        - record: service_span_name:spanmetrics_server_latency_seconds:p95_5m
+          expr: |
+            histogram_quantile(0.95, sum by (le, service, span_name) (rate(traces_spanmetrics_latency_bucket{service=~"nextjs-web|nodejs-orders|python-inventory", span_kind="SPAN_KIND_SERVER"}[5m])))
+    - name: tempo-apps.alerts
+      rules:
+        - alert: TempoAppsErrorBudgetFastBurn
+          # 14.4x burn = 2% of a 30-day budget in 1 h.
+          expr: |
+            service:spanmetrics_server_error_ratio:rate1h > (14.4 * 0.01)
+            and
+            service:spanmetrics_server_error_ratio:rate5m > (14.4 * 0.01)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.service }} is burning its 99% availability error budget fast"
+            description: "Server error ratio {{ $value | humanizePercentage }} over 1h (SLO 99%). Find failing traces: { resource.service.name = \"{{ $labels.service }}\" && status = error }"
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#errorbudgetburn
+        - alert: TempoAppsErrorBudgetSlowBurn
+          # 6x burn = 5% of a 30-day budget in 6 h.
+          expr: |
+            service:spanmetrics_server_error_ratio:rate6h > (6 * 0.01)
+            and
+            service:spanmetrics_server_error_ratio:rate30m > (6 * 0.01)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.service }} is burning its error budget"
+            description: "Server error ratio {{ $value | humanizePercentage }} over 6h (SLO 99%)."
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#errorbudgetburn
+        - alert: TempoAppsHighLatencyP95
+          expr: service_span_name:spanmetrics_server_latency_seconds:p95_5m > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.service }} {{ $labels.span_name }} p95 above 1 s"
+            description: "p95 {{ $value | humanizeDuration }}. Slow traces: { resource.service.name = \"{{ $labels.service }}\" && name = \"{{ $labels.span_name }}\" && span:duration > 1s }"
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#highlatencyp95
+        - alert: TempoAppsNoSpans
+          # Silence from an app usually means a broken exporter or Collector, not "no traffic".
+          expr: |
+            absent_over_time(traces_spanmetrics_calls_total{service="nextjs-web"}[15m])
+            or absent_over_time(traces_spanmetrics_calls_total{service="nodejs-orders"}[15m])
+            or absent_over_time(traces_spanmetrics_calls_total{service="python-inventory"}[15m])
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No spans from {{ $labels.service }} for 15 minutes"
+            description: "Check the app's OTLP exporter, the Collector and Tempo's metrics-generator."
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#nospans
+        - alert: TempoAppsPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="tempo-apps"}[30m]) > 2
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.pod }} restarted {{ $value | humanize }} times in 30 minutes"
+            description: "Check `kubectl -n tempo-apps describe pod {{ $labels.pod }}` for OOMKilled or failed liveness probes."
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#podrestarting
+        - alert: TempoAppsMemoryNearLimit
+          expr: |
+            max by (pod, container) (container_memory_working_set_bytes{namespace="tempo-apps", container!=""})
+            /
+            max by (pod, container) (kube_pod_container_resource_limits{namespace="tempo-apps", resource="memory"})
+            > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.pod }}/{{ $labels.container }} uses {{ $value | humanizePercentage }} of its memory limit"
+            description: "A steady climb is a leak (see nodejs-orders GET /orders); an OOMKill follows at 100%."
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#memorynearlimit
+        - alert: TempoAppsReplicasUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{namespace="tempo-apps"}
+            <
+            kube_deployment_spec_replicas{namespace="tempo-apps"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has fewer available replicas than desired"
+            description: "Check pending pods (topology spread / capacity) and readiness probes."
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/apps/monitoring/README.md#replicasunavailable

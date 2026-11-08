@@ -1,0 +1,237 @@
+# Helm values for traefik/traefik chart 42.3.1 (Traefik v3.7.17). PRODUCTION defaults.
+#   helm upgrade --install traefik traefik/traefik --version 42.3.1 \
+#     -n traefik -f traefik-values.yaml                              # PROFILE=prod
+#     -n traefik -f traefik-values.yaml -f traefik-values-lab.yaml   # PROFILE=lab
+# traefik-values-lab.yaml only shrinks HA and sizing; every security setting is here.
+# CRD provider only, no API/dashboard, JSON logs, headers dropped from the
+# access log, X-Forwarded-* trusted from Cloudflare only, unprivileged ports
+# 8000/8443. Routes, middlewares and the TLSOption live in ingressroutes.yaml.
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+  # Drop X_Forwarded_Proto-style alias headers on every entry point (header
+  # spoofing). Chart-wide default, Traefik v3.7.17+.
+  aliasHeadersStrategy: delete
+
+# Image pinned by tag AND digest (multi-arch OCI index from Docker Hub, v3.7.17).
+# Kubernetes pulls by the digest; the tag is informational and drives the chart's
+# version checks. Update both together.
+image:
+  registry: docker.io
+  repository: traefik
+  tag: v3.7.17@sha256:f4bb143d1135a579b630ed491e17ec50f6f7c9c6a30585ff3d385471d2a86f5a
+
+# ---- High availability -------------------------------------------------------
+# 3 replicas, one per node and spread across zones; a node drain or zone loss keeps
+# at least 2 serving. Rolling updates add a pod before removing one (chart default
+# maxUnavailable 0 / maxSurge 1).
+deployment:
+  replicas: 3
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+topologySpreadConstraints:
+  # Hard: never two Traefik pods on one node (externalTrafficPolicy=Local sends LB
+  # traffic only to nodes that run a pod, so a node spread is also LB spread).
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: '{{ template "traefik.name" . }}'
+        app.kubernetes.io/instance: '{{ .Release.Name }}-{{ include "traefik.namespace" . }}'
+    matchLabelKeys: [pod-template-hash]
+  # Soft: prefer different zones (a single-zone cluster still schedules).
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: '{{ template "traefik.name" . }}'
+        app.kubernetes.io/instance: '{{ .Release.Name }}-{{ include "traefik.namespace" . }}'
+    matchLabelKeys: [pod-template-hash]
+
+# Traefik API / dashboard disabled (no api@internal at all).
+api:
+  dashboard: false
+ingressRoute:
+  dashboard:
+    enabled: false
+  healthcheck:
+    enabled: false
+
+rbac:
+  # Roles in the watched namespaces instead of a ClusterRole over all Secrets.
+  namespaced: true
+
+providers:
+  kubernetesCRD:
+    enabled: true
+    allowCrossNamespace: false
+    allowExternalNameServices: false
+    # The cluster-wide "default" TLSOption may only come from this namespace.
+    defaultTLSResourcesNamespace: traefik
+    # Least privilege: watch only these namespaces (with rbac.namespaced, Traefik
+    # gets Roles there and cannot read Secrets anywhere else, e.g. monitoring).
+    # hermes: Hermes Agent route (hermes-gke host) on the same load balancer.
+    namespaces: [traefik, observability, tempo-apps, hermes]
+  # Only IngressRoute CRDs are used.
+  kubernetesIngress:
+    enabled: false
+
+log:
+  format: json
+  level: INFO
+
+# One JSON line per request; request headers dropped (no Authorization/cookies).
+accessLog:
+  enabled: true
+  format: json
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+
+# Cloudflare IP ranges (https://www.cloudflare.com/ips/, checked 2026-10-30).
+# Keep in sync with the cloudflare-only Middlewares in ingressroutes.yaml.
+ports:
+  traefik:
+    # Internal: /ping for kubelet probes only; never exposed.
+    expose:
+      default: false
+  web:
+    port: 8000
+    exposedPort: 80
+    expose:
+      default: true
+    # No entryPoint-wide redirect: port 80 is protocol-aware (IngressRoutes).
+    http:
+      redirections:
+        entryPoint: {}
+    # Graceful shutdown: keep accepting for 5s after SIGTERM while the LB health
+    # check notices the pod is going away, then drain in-flight requests.
+    transport:
+      lifeCycle:
+        requestAcceptGraceTimeout: 5s
+        graceTimeOut: 20s
+    forwardedHeaders:
+      trustedIPs: &cloudflare_ips
+        - 173.245.48.0/20
+        - 103.21.244.0/22
+        - 103.22.200.0/22
+        - 103.31.4.0/22
+        - 141.101.64.0/18
+        - 108.162.192.0/18
+        - 190.93.240.0/20
+        - 188.114.96.0/20
+        - 197.234.240.0/22
+        - 198.41.128.0/17
+        - 162.158.0.0/15
+        - 104.16.0.0/13
+        - 104.24.0.0/14
+        - 172.64.0.0/13
+        - 131.0.72.0/22
+        - 2400:cb00::/32
+        - 2606:4700::/32
+        - 2803:f800::/32
+        - 2405:b500::/32
+        - 2405:8100::/32
+        - 2a06:98c0::/29
+        - 2c0f:f248::/32
+      insecure: false
+  websecure:
+    port: 8443
+    exposedPort: 443
+    expose:
+      default: true
+    http:
+      tls:
+        enabled: true
+    transport:
+      lifeCycle:
+        requestAcceptGraceTimeout: 5s
+        graceTimeOut: 20s
+    forwardedHeaders:
+      trustedIPs: *cloudflare_ips
+      insecure: false
+  metrics:
+    expose:
+      default: false
+
+# GKE external passthrough Network LB. externalTrafficPolicy=Local keeps the
+# real client (Cloudflare edge) source IP, which the cloudflare-only
+# ipAllowList and forwardedHeaders.trustedIPs depend on. With "Cluster" the
+# source would be SNATed to a node IP and every request would get 403.
+service:
+  enabled: true
+  spec:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+    # L4 allow-list: GKE turns this into the load balancer's firewall rule, so only
+    # Cloudflare's published IPv4 ranges (https://www.cloudflare.com/ips-v4) can open a
+    # connection at all; the ipAllowList Middleware still filters at L7. The LB is IPv4-only,
+    # so the IPv6 ranges are not listed here. Keep in sync with trustedIPs above.
+    loadBalancerSourceRanges:
+      - 173.245.48.0/20
+      - 103.21.244.0/22
+      - 103.22.200.0/22
+      - 103.31.4.0/22
+      - 141.101.64.0/18
+      - 108.162.192.0/18
+      - 190.93.240.0/20
+      - 188.114.96.0/20
+      - 197.234.240.0/22
+      - 198.41.128.0/17
+      - 162.158.0.0/15
+      - 104.16.0.0/13
+      - 104.24.0.0/14
+      - 172.64.0.0/13
+      - 131.0.72.0/22
+
+# Hardening: non-root, read-only rootfs, cap_drop ALL, no privilege escalation.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Production sizing per replica (x3). Starting point for a few hundred requests/s per
+# pod; tune from traefik_* metrics and container CPU throttling.
+resources:
+  requests:
+    cpu: 200m
+    memory: 192Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Go runtime: the chart derives both settings from the limits above, so no env is set here.
+#   GOMAXPROCS = limits.cpu rounded up (prod 1, lab 1), via resourceFieldRef.
+#   GOMEMLIMIT = 90% of limits.memory (deployment.goMemLimitPercentage, default 0.9):
+#   prod 460MiB, lab 230MiB.
+
+# Prometheus metrics on the internal "metrics" entry point (9100, not exposed on the LB),
+# scraped by kube-prometheus-stack through this ServiceMonitor. NetworkPolicy
+# traefik-metrics-from-prometheus (networkpolicies.yaml) allows only Prometheus on 9100.
+metrics:
+  prometheus:
+    entryPoint: metrics
+    service:
+      enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      additionalLabels:
+        release: prometheus
+
+# Not persisted: no ACME in Traefik. Certificates are Traefik's default one
+# (TLS_MODE=cloudflare) or cert-manager Secrets (TLS_MODE=letsencrypt).
+persistence:
+  enabled: false

@@ -1,0 +1,223 @@
+# Chart:       open-telemetry/opentelemetry-collector
+# Version:     0.178.2   (repo: https://open-telemetry.github.io/opentelemetry-helm-charts)
+# App version: chart default 0.163.2; pinned here to otel/opentelemetry-collector-contrib 0.165.0
+# Profile:     PRODUCTION (values-lab.yaml is the overlay for the small lab cluster)
+# Install:
+#   helm upgrade --install otel-collector open-telemetry/opentelemetry-collector --version 0.178.2 \
+#     --namespace observability --create-namespace -f helm/otel-collector/values.yaml
+#   (lab: add -f helm/otel-collector/values-lab.yaml; scripts/deploy.sh does this with PROFILE=lab)
+#
+# Single OTLP entry point for the sample apps and Hermes Agent.
+#   traces  -> Tempo distributor (OTLP gRPC), bounded in-memory retry queue
+#   metrics -> Prometheus scrape endpoint on :8889 (pulled via the ServiceMonitor)
+#   logs    -> debug exporter (basic verbosity); no log backend in this stack
+# Component names use the current spelling (otlp_grpc, k8s_attributes) so the chart's
+# deprecated-name rewrite is a no-op.
+
+mode: deployment
+fullnameOverride: otel-collector   # Service "otel-collector" (shared names contract)
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: "0.165.0"
+  # Multi-arch index digest of the tag above; when set, the chart pulls by digest.
+  digest: "sha256:e40d61f10c9a617cca1ffd1be4d7e2b3a4b0f0001798ff07e58cabe82e618cea"
+  pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------- availability
+# The HPA owns the replica count (replicaCount is ignored while autoscaling is enabled).
+# The Collector is stateless here (in-memory queue), so any replica can take any request.
+replicaCount: 3
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300   # no flapping; every scale-down drains one queue
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Spread across zones (hard) and nodes (soft). matchLabelKeys keeps the old and new
+# ReplicaSets from being counted together during a rolling update.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: opentelemetry-collector
+        app.kubernetes.io/instance: otel-collector
+        component: standalone-collector
+    matchLabelKeys: [pod-template-hash]
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: opentelemetry-collector
+        app.kubernetes.io/instance: otel-collector
+        component: standalone-collector
+    matchLabelKeys: [pod-template-hash]
+
+rollout:
+  strategy: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Time for the in-memory sending queue to drain to Tempo on shutdown (rollout, scale-down, drain).
+terminationGracePeriodSeconds: 60
+
+# ---------------------------------------------------------------- resources
+# Starting point per replica; the HPA adds replicas on CPU. The chart sets GOMEMLIMIT
+# (useGOMEMLIMIT) to 80% of limits.memory, and memory_limiter works from the same limit.
+# No CPU limit on purpose: CFS throttling adds export latency and backs up the queue; the CPU
+# request reserves capacity and drives the HPA. Memory is the resource that is capped.
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 2Gi
+
+# Adds the k8s_attributes processor and the ClusterRole it needs (get/list/watch pods,
+# namespaces, replicasets) to every pipeline.
+presets:
+  kubernetesAttributes:
+    enabled: true
+
+# ---------------------------------------------------------------- security (PSS restricted)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# ---------------------------------------------------------------- collector config
+config:
+  extensions:
+    # Serves the chart's liveness/readiness probes on 13133 (chart default, never remove).
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+
+  receivers:
+    # Drop the chart's default extra receivers; OTLP only.
+    jaeger: null
+    zipkin: null
+    prometheus: null
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+  processors:
+    # First in every pipeline: refuses data (receivers return a retryable error) before the
+    # pod reaches its memory limit. 1s checks react to bursts faster than the 5s default.
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 20
+    # 2048 spans per export, hard cap 4096: keeps each gRPC push well under the 4 MiB default
+    # receive limit of Tempo's OTLP receiver while still amortising per-request overhead.
+    batch:
+      send_batch_size: 2048
+      send_batch_max_size: 4096
+      timeout: 1s
+    resource:
+      attributes:
+        - key: k8s.cluster.name
+          value: hermes-grafana-tempo
+          action: upsert
+
+  exporters:
+    debug:
+      verbosity: basic
+    otlp_grpc/tempo:
+      # Production Tempo (helm/tempo-distributed). The lab overlay points at tempo.observability:4317.
+      endpoint: tempo-distributor.observability:4317
+      tls:
+        insecure: true   # in-cluster traffic only; senders restricted by NetworkPolicies
+      retry_on_failure:
+        enabled: true
+        initial_interval: 5s
+        max_interval: 30s
+        max_elapsed_time: 300s   # drop a batch after 5 min of Tempo being unavailable
+      # Bounded in-memory queue sized in spans, so memory use is predictable:
+      # 250k spans ~ 250-500 MiB, inside the 2Gi limit next to memory_limiter's 80%.
+      # No persistent (file_storage) queue: on an emptyDir it is lost on every pod deletion
+      # (rollout, HPA scale-down, node drain), while the in-memory queue drains on graceful
+      # shutdown. See README "Sending queue".
+      sending_queue:
+        enabled: true
+        sizer: items
+        queue_size: 250000
+        num_consumers: 10
+    # Metrics leave by pull only: Prometheus scrapes :8889 via the ServiceMonitor
+    # (one copy of each series; no remote write from the collector).
+    prometheus:
+      endpoint: 0.0.0.0:8889
+      resource_to_telemetry_conversion:
+        enabled: true
+
+  service:
+    extensions: [health_check]
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource, batch]
+        exporters: [otlp_grpc/tempo]
+      metrics:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource, batch]
+        exporters: [prometheus]
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource, batch]
+        exporters: [debug]
+
+ports:
+  # Not used: chart defaults for Jaeger and Zipkin.
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+  # Collector self-metrics (service.telemetry pull reader on :8888).
+  metrics:
+    enabled: true
+  # Prometheus exporter: OTLP metrics from apps and Hermes, scraped by Prometheus.
+  prom-metrics:
+    enabled: true
+    containerPort: 8889
+    servicePort: 8889
+    protocol: TCP
+
+# Picked up by kube-prometheus-stack (selectors are open: *NilUsesHelmValues=false).
+serviceMonitor:
+  enabled: true
+  extraLabels:
+    release: prometheus
+  metricsEndpoints:
+    - port: metrics
+      interval: 30s
+    - port: prom-metrics
+      interval: 30s

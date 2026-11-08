@@ -1,0 +1,60 @@
+# Alerts on Hermes gateway health. Prometheus scrapes the metrics from the Collector; every expression
+# aggregates by service_instance_id so each gateway counts once (also while a replaced pod's series
+# are still fresh).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hermes-gateway
+  namespace: hermes
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: hermes-gateway
+      rules:
+        - alert: HermesGatewayDown
+          expr: max by (service_instance_id) (hermes_gateway_up) < 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/hermes/README.md#hermesgatewaydown
+            summary: Hermes gateway reports it is not up
+            description: hermes_gateway_up has been 0 for 2 minutes on instance {{ $labels.service_instance_id }}.
+        - alert: HermesTelemetryAbsent
+          # No Hermes metrics at all: the gateway, its OTLP export or the Collector is down.
+          expr: absent(hermes_gateway_up)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/hermes/README.md#hermestelemetryabsent
+            summary: No Hermes gateway telemetry
+            description: Prometheus has received no hermes_gateway_up samples for 5 minutes.
+        - alert: HermesPlatformDown
+          expr: max by (service_instance_id, hermes_platform) (hermes_platform_up) < 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/hermes/README.md#hermesplatformdown
+            summary: Hermes platform {{ $labels.hermes_platform }} is down
+            description: hermes_platform_up has been 0 for 5 minutes.
+        - alert: HermesGatewayRestartRequested
+          expr: max by (service_instance_id) (hermes_gateway_restart_requested) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/hermes/README.md#hermesgatewayrestartrequested
+            summary: Hermes gateway restart requested but not done
+            description: The gateway has had a pending restart request for 10 minutes.
+        - alert: HermesCronJobsOverdue
+          expr: max by (service_instance_id) (hermes_cron_jobs_overdue) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/hermes/README.md#hermescronjobsoverdue
+            summary: Hermes cron jobs are overdue
+            description: "{{ $value }} Hermes cron job(s) have been overdue for 15 minutes."

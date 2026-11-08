@@ -1,0 +1,18 @@
+# ClusterIP Service `python` (port 8000); nodejs-orders calls it as http://python:8000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: python
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/name: python
+    app.kubernetes.io/part-of: tempo-apps
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: python
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,7 @@
+node_modules
+.next
+k8s
+**/*.md
+Dockerfile
+.dockerignore
+npm-debug.log*

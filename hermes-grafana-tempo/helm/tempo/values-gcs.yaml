@@ -1,0 +1,31 @@
+# OPTIONAL overlay on values.yaml: trace blocks in a Google Cloud Storage bucket instead of the local PV.
+# Not used by the lab (the lab keeps blocks on the local PV); production uses helm/tempo-distributed.
+# Chart grafana-community/tempo 3.2.1, Tempo 3.1.1. Use it together with values.yaml:
+#   helm upgrade --install tempo grafana-community/tempo --version 3.2.1 \
+#     --namespace observability --create-namespace \
+#     -f helm/tempo/values.yaml -f helm/tempo/values-gcs.yaml \
+#     --set tempo.storage.trace.gcs.bucket_name="$TEMPO_BUCKET"
+#
+# Auth: GKE Workload Identity Federation, no key files, no Google service account, no annotation.
+# infra/create-tempo-bucket.sh (ACCESS_MODE=principal, the default) grants roles/storage.objectAdmin
+# on THIS bucket only to the principal of the Kubernetes ServiceAccount observability/tempo:
+#   principal://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<PROJECT_ID>.svc.id.goog/subject/ns/observability/sa/tempo
+# (ACCESS_MODE=gsa impersonates an existing Google service account instead; NOT recommended:
+# that account usually has project-wide access, far broader than one bucket.)
+# The WAL, live-store data and generator WAL stay on the PV from values.yaml.
+
+serviceAccount:
+  create: true
+  name: tempo   # fixed name; the Workload Identity binding refers to observability/tempo
+  # The GKE metadata server serves the token; the Kubernetes API token is still not mounted.
+  automountServiceAccountToken: false
+
+tempo:
+  storage:
+    trace:
+      backend: gcs
+      local: null      # drop the local block path from values.yaml
+      gcs:
+        bucket_name: ""  # required: set with --set tempo.storage.trace.gcs.bucket_name=<bucket>
+      wal:
+        path: /var/tempo/wal

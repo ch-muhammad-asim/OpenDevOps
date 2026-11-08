@@ -1,0 +1,339 @@
+# Chart:       prometheus-community/kube-prometheus-stack
+# Version:     93.1.0   (repo: https://prometheus-community.github.io/helm-charts)
+# App version: prometheus-operator v0.95.1
+# Profile:     PRODUCTION defaults (regional GKE, 3 zones). The lab adds values-lab.yaml on top.
+# Install (first, before Tempo and the Collector: it creates the ServiceMonitor CRD):
+#   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version 93.1.0 \
+#     --namespace monitoring --create-namespace -f helm/kube-prometheus-stack/values.yaml
+#   (lab: add -f helm/kube-prometheus-stack/values-lab.yaml; scripts/deploy.sh does this with PROFILE=lab)
+# Production needs Secret monitoring/alertmanager-receivers (keys slack-webhook-url,
+# pagerduty-routing-key) before install; see README "Alert routing".
+#
+# Prometheus (2 replicas) + Alertmanager (2 replicas) + operator + kube-state-metrics +
+# node-exporter. Grafana runs as its own release (helm/grafana/); this chart still ships its
+# dashboards as ConfigMaps for the Grafana dashboard sidecar.
+#
+# Images: every image is pinned by tag AND multi-arch index digest (resolved from the registry
+# API, listed in README "Pinned images"). The digest syntax differs per chart:
+#   kube-prometheus-stack `sha:` = hex only; kube-state-metrics `sha:` = "sha256:<hex>";
+#   node-exporter `digest:` = "sha256:<hex>".
+# Resources: requests and memory limits on every container. CPU limits are left unset on
+# purpose: CFS throttling of Prometheus/Alertmanager causes missed scrapes and evaluations.
+
+crds:
+  enabled: true   # Helm creates the CRDs on first install only; see README "Upgrades"
+  upgradeJob:
+    enabled: false   # CRDs are upgraded server-side by hand (README "Upgrades")
+
+# ---------- Grafana: separate release, keep the dashboard ConfigMaps ----------
+grafana:
+  enabled: false
+  forceDeployDashboards: true    # ConfigMaps labelled grafana_dashboard="1"
+  forceDeployDatasources: true
+  sidecar:
+    datasources:
+      # All data sources (Prometheus uid "prometheus" with exemplar links to Tempo, Tempo,
+      # Alertmanager) are provisioned by helm/grafana/values.yaml. With the default turned off
+      # here, this chart renders no datasource ConfigMap, so no uid is defined twice.
+      defaultDatasourceEnabled: false
+
+# ---------- GKE: control-plane components are managed and not scrapeable ----------
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+coreDns:
+  enabled: false   # GKE uses kube-dns
+
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+
+# ---------- Prometheus ----------
+prometheus:
+  # Both replicas sit behind one Service: keep a client on the same replica so dashboards do
+  # not flip between two slightly different TSDBs on every refresh.
+  service:
+    sessionAffinity: ClientIP
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    unhealthyPodEvictionPolicy: AlwaysAllow
+
+  prometheusSpec:
+    image:
+      registry: quay.io
+      repository: prometheus/prometheus
+      tag: v3.16.0-distroless
+      sha: 9764044e09eb2c9e1abdb12d0f0188d4efb7384b0262d3c080f0fc59045c89ba
+
+    # Two identical replicas (HA pair); each scrapes every target on its own. Remote-write
+    # senders must write to BOTH pods (per-pod DNS behind the "prometheus-operated" headless
+    # Service), not to the load-balanced Service; see README "Production checklist".
+    replicas: 2
+    podAntiAffinity: hard                         # never two replicas on one node
+    podAntiAffinityTopologyKey: kubernetes.io/hostname
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: prometheus
+            operator.prometheus.io/name: prometheus-kube-prometheus-prometheus
+
+    # Pick up ServiceMonitors, PodMonitors and rules from every namespace, whatever their labels.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    # Tempo metrics-generator (and optional senders) push here (/api/v1/write).
+    enableRemoteWriteReceiver: true
+    # Keep exemplars (trace IDs on span-metric histograms) for metrics-to-traces links.
+    enableFeatures:
+      - exemplar-storage
+
+    # 15 days; the size cap (85GiB on the 100Gi PVC) deletes the oldest blocks first so the disk
+    # never fills. retentionSize counts blocks and WAL; the rest is headroom for head-block
+    # compaction and checkpoints. Size the PVC from: samples/s x ~2 bytes x retention seconds x 1.2.
+    retention: 15d
+    retentionSize: 85GiB
+    walCompression: true
+
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+      limits:
+        memory: 8Gi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard-rwo
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 100Gi
+
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 2000
+      fsGroup: 2000
+      seccompProfile:
+        type: RuntimeDefault
+    # The operator sets allowPrivilegeEscalation=false, readOnlyRootFilesystem=true and drops ALL
+    # capabilities on the prometheus and config-reloader containers (PSS restricted).
+
+# ---------- Alertmanager: HA pair with a real route tree ----------
+alertmanager:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    unhealthyPodEvictionPolicy: AlwaysAllow
+
+  # Rendered by the chart into the Alertmanager config Secret. It holds NO credentials: the
+  # receivers read them from files mounted from Secret "alertmanager-receivers"
+  # (alertmanagerSpec.secrets below), created out of band (README "Alert routing").
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: default
+      group_by: [alertname, namespace, severity]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        # Heartbeat and inhibit-helper alerts never notify.
+        - receiver: "null"
+          matchers: ['alertname =~ "Watchdog|InfoInhibitor"']
+        - receiver: critical
+          matchers: ['severity = "critical"']
+          repeat_interval: 1h
+        - receiver: default
+          matchers: ['severity = "warning"']
+        - receiver: "null"
+          matchers: ['severity = "info"']
+    inhibit_rules:
+      # A critical alert mutes the matching warning/info for the same alert and namespace.
+      - source_matchers: ['severity = "critical"']
+        target_matchers: ['severity =~ "warning|info"']
+        equal: [namespace, alertname]
+      - source_matchers: ['severity = "warning"']
+        target_matchers: ['severity = "info"']
+        equal: [namespace, alertname]
+      # InfoInhibitor (kube-prometheus default rule) mutes info alerts while nothing worse fires.
+      - source_matchers: ['alertname = "InfoInhibitor"']
+        target_matchers: ['severity = "info"']
+        equal: [namespace]
+      - target_matchers: ['alertname = "InfoInhibitor"']
+    receivers:
+      - name: "null"
+      - name: default
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-receivers/slack-webhook-url
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }} {{ .Annotations.runbook_url }}{{ "\n" }}{{ end }}'
+      - name: critical
+        pagerduty_configs:
+          - routing_key_file: /etc/alertmanager/secrets/alertmanager-receivers/pagerduty-routing-key
+            send_resolved: true
+            description: '{{ .CommonLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-receivers/slack-webhook-url
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} (critical)'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }} {{ .Annotations.runbook_url }}{{ "\n" }}{{ end }}'
+    templates:
+      - /etc/alertmanager/config/*.tmpl
+
+  alertmanagerSpec:
+    image:
+      registry: quay.io
+      repository: prometheus/alertmanager
+      tag: v0.34.2
+      sha: 39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    replicas: 2                                   # gossip cluster on 9094; notifications deduplicated
+    retention: 120h                               # silences and notification log
+    # Alertmanager and its config-reloader never call the Kubernetes API (config and receiver
+    # Secrets arrive as mounted volumes), so no service account token in the pod.
+    automountServiceAccountToken: false
+    # Mounted read-only at /etc/alertmanager/secrets/alertmanager-receivers/<key>.
+    secrets:
+      - alertmanager-receivers
+    podAntiAffinity: hard
+    podAntiAffinityTopologyKey: kubernetes.io/hostname
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: alertmanager
+            alertmanager: prometheus-kube-prometheus-alertmanager
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard-rwo
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 2Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 2000
+      fsGroup: 2000
+      seccompProfile:
+        type: RuntimeDefault
+
+# ---------- Operator ----------
+# One replica: an operator outage only delays config changes; Prometheus and Alertmanager keep
+# running. No PDB on single-replica Deployments (it would block node drains).
+prometheusOperator:
+  image:
+    registry: quay.io
+    repository: prometheus-operator/prometheus-operator
+    tag: v0.95.1
+    sha: 9c2490af910d58ec2abd77642d340e30bd5e2de5c80fd19ab4b49e28dc7bbb83
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  # config-reloader: init container + sidecar in the Prometheus and Alertmanager pods.
+  prometheusConfigReloader:
+    image:
+      registry: quay.io
+      repository: prometheus-operator/prometheus-config-reloader
+      tag: v0.95.1
+      sha: 39bdbade0c64f7c38bb6d18d6f602b14ad489bc189b709dc9266b49e6647aac1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+
+  # Thanos sidecar image: not deployed, pinned so enabling it cannot pull a moving tag.
+  thanosImage:
+    registry: quay.io
+    repository: thanos/thanos
+    tag: v0.42.5
+    sha: 0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
+
+  admissionWebhooks:
+    # The separate webhook Deployment is off (chart default; the operator serves the webhook).
+    # Pinned in case it is turned on.
+    deployment:
+      image:
+        registry: quay.io
+        repository: prometheus-operator/admission-webhook
+        tag: v0.95.1
+        sha: 5a5b2a9302e2373fc5ff5979d4d773690e05ab072b1ad49eb985529042199f3f
+    # Helm hook Jobs that create and patch the webhook TLS certificate (install/upgrade only).
+    patch:
+      image:
+        registry: ghcr.io
+        repository: jkroepke/kube-webhook-certgen
+        tag: 1.11.1
+        sha: 8009b04f9873f7279b5adee37fdd03b6a9aa7b6751d4f69fde2683010e41cd1f
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+
+# ---------- Exporters ----------
+# kube-state-metrics stays at one replica: two unsharded replicas would export every series twice.
+kube-state-metrics:
+  image:
+    registry: registry.k8s.io
+    repository: kube-state-metrics/kube-state-metrics
+    tag: v2.20.0
+    sha: sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# DaemonSet. PSS exception: needs hostNetwork, hostPID and read-only hostPath mounts of /, /proc
+# and /sys, so namespace "monitoring" stays at PSS enforce=privileged (README "Security").
+# Still non-root (UID 65534), read-only root FS, no privilege escalation, ALL caps dropped.
+prometheus-node-exporter:
+  image:
+    registry: quay.io
+    repository: prometheus/node-exporter
+    tag: v1.12.1
+    distroless: true                     # rendered tag: v1.12.1-distroless
+    digest: sha256:8c9bac11973b94b59be88d6e11fee4429aa743c8846cdc75d65b18db33f6a106
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

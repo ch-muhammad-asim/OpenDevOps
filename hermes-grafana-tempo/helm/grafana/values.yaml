@@ -1,0 +1,249 @@
+# Chart:       grafana-community/grafana
+# Version:     14.4.0   (repo: https://grafana-community.github.io/helm-charts)
+# App version: Grafana 13.3.0
+# Profile:     PRODUCTION defaults. The lab adds values-lab.yaml on top.
+# Install (needs Secret "grafana-admin" with keys admin-user and admin-password, and in
+# production Secret "grafana-db" with the GF_DATABASE_* variables; neither is stored in this
+# repo, see README "Secrets"):
+#   helm upgrade --install grafana grafana-community/grafana --version 14.4.0 \
+#     --namespace observability --create-namespace -f helm/grafana/values.yaml
+#   (lab: add -f helm/grafana/values-lab.yaml; scripts/deploy.sh does this with PROFILE=lab)
+#
+# The only public UI. Data sources are provisioned below; dashboards come from ConfigMaps
+# labelled grafana_dashboard (kube-prometheus-stack and this project) via the sidecar.
+# Public HTTPS routing is defined outside this chart (k8s/).
+
+fullnameOverride: grafana   # Service "grafana" on port 80 (shared names contract)
+
+# ---------- HA: 2 replicas on a shared external database ----------
+# Two replicas need one shared SQL database (sessions, users, annotations, alert state);
+# SQLite in an emptyDir would give each pod its own state. The connection comes from Secret
+# "grafana-db" as GF_DATABASE_* environment variables (README "Secrets"). Unified-alerting
+# state is shared by gossip on 9094 through the headless Service "grafana-headless".
+replicas: 2
+envFromSecret: grafana-db
+headlessService: true
+
+podDisruptionBudget:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/instance: grafana
+    matchLabelKeys: [pod-template-hash]
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/instance: grafana
+    matchLabelKeys: [pod-template-hash]
+
+# ---------- Images: tag + multi-arch index digest (README "Pinned images") ----------
+image:
+  registry: docker.io
+  repository: grafana/grafana
+  tag: "13.3.0-distroless"   # chart default variant: no shell or package manager
+  sha: 540b8afb775bf34aefce417e4329039daa5d44b6f2fbda6881397b1b247ca7df
+
+sidecar:
+  image:
+    registry: quay.io
+    repository: kiwigrid/k8s-sidecar
+    tag: 2.14.3
+    sha: 52d311dcedd587421a236c4d6c621f05614c40a51386e955e0699dca97ec0880
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    searchNamespace: ALL
+    resource: configmap   # sidecar watches ConfigMaps only (chart ClusterRole still allows Secret read)
+    folderAnnotation: grafana_folder
+    provider:
+      foldersFromFilesStructure: true
+  datasources:
+    enabled: true
+    label: grafana_datasource
+    searchNamespace: ALL
+    resource: configmap
+
+# Init containers. Neither runs with these values (no PVC, no remote dashboards); pinned so
+# turning them on cannot pull a moving tag.
+initChownData:
+  image:
+    registry: docker.io
+    repository: library/busybox
+    tag: "1.38.0"
+    sha: a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
+downloadDashboardsImage:
+  registry: docker.io
+  repository: curlimages/curl
+  tag: 8.23.0
+  sha: 3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
+
+# Requests and memory limit; no CPU limit (throttling slows dashboards; requests reserve the CPU).
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+# Admin credentials come only from the existing Secret (or an ExternalSecret that writes it).
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+
+# No PVC: state lives in the external database; data sources and dashboards are provisioned
+# from Git; the admin user is re-created from the Secret on start.
+persistence:
+  enabled: false
+
+# PSS restricted: pod and container (chart default containerSecurityContext: no privilege
+# escalation, ALL capabilities dropped, read-only root FS, RuntimeDefault seccomp).
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 472
+  runAsGroup: 472
+  fsGroup: 472
+  seccompProfile:
+    type: RuntimeDefault
+
+# Tempo query endpoint, read by the Tempo data source below (Grafana expands ${VAR} in
+# provisioning files). Production: tempo-distributed query-frontend.
+env:
+  TEMPO_QUERY_URL: http://tempo-query-frontend.observability:3200
+
+grafana.ini:
+  server:
+    domain: grafana-tempo.saqlainmushtaq.com
+    root_url: https://grafana-tempo.saqlainmushtaq.com
+  security:
+    cookie_secure: true
+    cookie_samesite: lax
+    disable_gravatar: true
+    strict_transport_security: true
+    strict_transport_security_max_age_seconds: "31536000"  # quoted: avoids 3.1536e+07 in grafana.ini
+    x_content_type_options: true
+    x_xss_protection: true
+    content_security_policy: true     # Grafana's built-in CSP template
+    allow_embedding: false            # X-Frame-Options: deny
+  users:
+    allow_sign_up: false
+    allow_org_create: false
+  auth:
+    disable_login_form: false
+  auth.anonymous:
+    enabled: false
+  snapshots:
+    external_enabled: false           # no publishing snapshots to an external service
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+  log:
+    mode: console
+  # Grafana-managed alert state shared between replicas (official HA settings for Kubernetes).
+  unified_alerting:
+    enabled: true
+    ha_listen_address: "${POD_IP}:9094"
+    ha_advertise_address: "${POD_IP}:9094"
+    ha_peers: grafana-headless.observability.svc.cluster.local:9094
+    ha_peer_timeout: 15s
+    ha_reconnect_timeout: 2m
+
+# Provisioned data sources. "$$" escapes "$" from Grafana's env-var expansion in provisioning files;
+# the single "$" in ${TEMPO_QUERY_URL} is expanded on purpose.
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus-kube-prometheus-prometheus.monitoring:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          httpMethod: POST
+          timeInterval: 30s
+          exemplarTraceIdDestinations:
+            - name: trace_id          # exemplar label written by Tempo metrics-generator
+              datasourceUid: tempo
+              urlDisplayLabel: View trace
+
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        access: proxy
+        url: ${TEMPO_QUERY_URL}   # prod: tempo-query-frontend:3200, lab: tempo:3200 (env above)
+        editable: false
+        jsonData:
+          tracesToMetrics:
+            datasourceUid: prometheus
+            spanStartTimeShift: "-2m"
+            spanEndTimeShift: "2m"
+            tags:
+              - key: service.name
+                value: service
+            queries:
+              - name: Request rate
+                query: "sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))"
+              - name: Error rate
+                query: "sum(rate(traces_spanmetrics_calls_total{$$__tags,status_code=\"STATUS_CODE_ERROR\"}[5m]))"
+              - name: p95 latency
+                query: "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{$$__tags}[5m])))"
+          serviceMap:
+            datasourceUid: prometheus
+          nodeGraph:
+            enabled: true
+          search:
+            hide: false
+          traceQuery:
+            timeShiftEnabled: true
+            spanStartTimeShift: "-30m"
+            spanEndTimeShift: "30m"
+          spanBar:
+            type: Duration
+          streamingEnabled:
+            search: true      # needs stream_over_http_enabled in Tempo (set in helm/tempo/ and helm/tempo-distributed/)
+            metrics: true
+
+      - name: Alertmanager
+        type: alertmanager
+        uid: alertmanager
+        access: proxy
+        url: http://prometheus-kube-prometheus-alertmanager.monitoring:9093
+        editable: false
+        jsonData:
+          implementation: prometheus
+          handleGrafanaManagedAlerts: false
+
+# Picked up by kube-prometheus-stack (selectors are open: *NilUsesHelmValues=false).
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    release: prometheus
+
+testFramework:
+  enabled: false

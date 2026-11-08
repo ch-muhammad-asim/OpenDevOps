@@ -1,0 +1,343 @@
+# Chart:       grafana-community/tempo-distributed (microservices mode)
+# Version:     3.27.0  (repo: https://grafana-community.github.io/helm-charts)
+# App version: Tempo 3.1.1
+# Profile:     PRODUCTION (regional GKE cluster, at least 2 zones and 3 nodes per zone)
+#
+# Install (after kube-prometheus-stack, which provides the ServiceMonitor CRD):
+#   helm upgrade --install tempo grafana-community/tempo-distributed --version 3.27.0 \
+#     --namespace observability --create-namespace -f helm/tempo-distributed/values.yaml \
+#     --set storage.trace.gcs.bucket_name="$TEMPO_BUCKET" \
+#     --set ingest.kafka.address="$KAFKA_BOOTSTRAP"
+#
+# Tempo 3.x microservices mode REQUIRES an external Kafka-compatible queue
+# (distributor -> Kafka -> live-store / block-builder / metrics-generator).
+# The chart does not install Kafka. See README.md "Kafka".
+#
+# Endpoints (release "tempo", fullnameOverride "tempo"):
+#   OTLP ingest (Collector exporter): tempo-distributor.observability:4317 (gRPC) / :4318 (HTTP)
+#   Grafana Tempo data source URL:    http://tempo-query-frontend.observability:3200
+
+fullnameOverride: tempo
+
+reportingEnabled: false
+multitenancyEnabled: false
+# Grafana streams search and TraceQL metrics results over HTTP (port 3200).
+streamOverHTTPEnabled: true
+
+# ---------------------------------------------------------------- image + security
+tempo:
+  image:
+    repository: grafana/tempo
+    # Tag AND multi-arch index digest; the digest wins at pull time.
+    tag: "3.1.1@sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044"
+    pullPolicy: IfNotPresent
+  # Pod Security Standards "restricted". UID/GID 10001 is the user baked into the grafana/tempo
+  # image (image config "User": "10001:10001"); pod and container contexts both set it, because
+  # the chart's container default is 1000 and the container value wins over the pod value.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  # Also applied to the memcached and memcached-exporter containers (they run fine as 10001).
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+    seccompProfile:
+      type: RuntimeDefault
+
+# Workload Identity Federation for GKE, keyless and annotation-free: IAM on the bucket is
+# granted directly to the principal
+#   principal://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<PROJECT_ID>.svc.id.goog/subject/ns/observability/sa/tempo
+# so the KSA needs no iam.gke.io annotation and no Google service account exists.
+serviceAccount:
+  create: true
+  name: tempo
+  annotations: {}
+  # Tempo never calls the Kubernetes API; the GKE metadata server issues the Google token.
+  automountServiceAccountToken: false
+
+# ---------------------------------------------------------------- storage
+storage:
+  trace:
+    backend: gcs
+    gcs:
+      bucket_name: ""  # required: --set storage.trace.gcs.bucket_name=<bucket> (never in Git)
+    block:
+      version: null    # chart/Tempo default (vParquet5 on 3.x)
+    blocklist_poll: 5m
+
+# Global retention is enforced by the backend-scheduler (retention job) and executed by
+# the backend-workers. 336h = 14 days. Bucket lifecycle (README) is only a safety net.
+backendScheduler:
+  enabled: true  # singleton by design (official sizing: 1 replica)
+  config:
+    provider:
+      retention:
+        interval: 1h
+      compaction:
+        compaction:
+          block_retention: 336h
+          compacted_block_retention: 1h
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "1", memory: 2Gi}
+
+backendWorker:
+  replicas: 2
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "1", memory: 2Gi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+
+# ---------------------------------------------------------------- Kafka (external)
+ingest:
+  kafka:
+    address: ""          # required: --set ingest.kafka.address=<bootstrap-host>:<port>
+    topic: tempo-traces
+    # Production: pre-create the topic (RF 3, min.insync.replicas 2, retention 24h,
+    # max.message.bytes 16000000) and keep auto-creation off.
+    auto_create_topic_enabled: false
+    auto_create_topic_default_partitions: 3   # = active partitions = liveStore/blockBuilder replicas
+    sasl:
+      mechanism: SCRAM-SHA-512
+      # Secret observability/tempo-kafka with keys "username" and "password" (created
+      # out of band, never in Git). Injected as env vars, not written to tempo.yaml. Upstream
+      # chart behaviour: the env vars are expanded into the container args
+      # (-ingest.sasl-password=$(TEMPO_KAFKA_SASL_PASSWORD)), so the password is visible in the
+      # process command line (/proc/<pid>/cmdline) to anyone who can exec into the pod or read
+      # the node's process table. README "Security".
+      existingSecret: tempo-kafka
+    tls:
+      enabled: true
+      # caPath: /etc/tempo/kafka-ca/ca.crt   # only for a private CA (mount via extraVolumes)
+
+# ---------------------------------------------------------------- write path
+distributor:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 9
+    targetCPUUtilizationPercentage: 60
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "2", memory: 2Gi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+  topologySpreadConstraints: |
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          {{- include "tempo.selectorLabels" (dict "ctx" . "component" "distributor") | nindent 6 }}
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          {{- include "tempo.selectorLabels" (dict "ctx" . "component" "distributor") | nindent 6 }}
+
+# OTLP only; served by the distributor Service.
+traces:
+  otlp:
+    grpc:
+      enabled: true
+    http:
+      enabled: true
+
+# One live-store per Kafka partition PER ZONE; two zones keep recent-data queries
+# available when a zone or a pod is lost. Requires the rollout-operator.
+liveStore:
+  enabled: true
+  replicas: 3  # = Kafka active partitions (per zone)
+  zoneAwareReplication:
+    enabled: true
+    topologyKey: topology.kubernetes.io/zone
+    zones:
+      - name: zone-a
+        extraAffinity: {}
+      - name: zone-b
+        extraAffinity: {}
+  persistence:
+    enabled: true  # local blocks survive restarts; avoids a full Kafka replay
+    size: 20Gi
+    storageClass: null  # cluster default (standard-rwo on GKE)
+  resources:
+    requests: {cpu: "1", memory: 4Gi}
+    limits: {cpu: "2", memory: 6Gi}
+
+blockBuilder:
+  enabled: true
+  replicas: 3  # = Kafka active partitions (partitions_per_instance: 1)
+  resources:
+    requests: {cpu: 500m, memory: 4Gi}
+    limits: {cpu: "1", memory: 8Gi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+
+# ---------------------------------------------------------------- metrics-generator
+metricsGenerator:
+  enabled: true
+  replicas: 2
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "1", memory: 2Gi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+  config:
+    registry:
+      external_labels:
+        source: tempo
+    processor:
+      service_graphs:
+        dimensions: [service.namespace]
+        enable_client_server_prefix: true
+      span_metrics:
+        enable_target_info: true
+        dimensions: [service.namespace, service.version]
+        # Tempo's default buckets (2ms .. ~16s), same as the single-binary profile.
+        histogram_buckets: [0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512, 1.024, 2.048, 4.096, 8.192, 16.384]
+    storage:
+      path: /var/tempo/wal
+      remote_write_add_org_id_header: false
+      # Prod Prometheus runs 2 replicas: write to EACH pod (per-pod DNS via the operator's
+      # headless Service prometheus-operated), not the load-balanced Service, so both hold all series.
+      remote_write:
+        - url: http://prometheus-prometheus-kube-prometheus-prometheus-0.prometheus-operated.monitoring:9090/api/v1/write
+          send_exemplars: true
+        - url: http://prometheus-prometheus-kube-prometheus-prometheus-1.prometheus-operated.monitoring:9090/api/v1/write
+          send_exemplars: true
+
+# Per-tenant limits (Tempo 3.1 "overrides.defaults"; one tenant: single-tenant). Sized for the
+# ~10 MB/s design point in README "Sizing"; Tempo's built-in defaults are in brackets. Raise
+# them from the discard metrics (README "Limits"), not preemptively.
+overrides:
+  defaults:
+    ingestion:
+      # Distributor rate limit, shared by all healthy distributors (global) instead of per
+      # pod (local), so HPA scale-out does not multiply it. 15 MB/s = 1.5 x design point.
+      rate_strategy: global          # [local]
+      rate_limit_bytes: 15000000     # [30000000 per distributor]
+      burst_size_bytes: 20000000     # [30000000]; >= the largest single OTLP push
+      # Live traces held per live-store instance (one Kafka partition each); enforced by the
+      # live-stores after consuming from Kafka (LIVE_TRACES_EXCEEDED).
+      max_traces_per_user: 20000     # [10000]
+    global:
+      # Spans beyond this size are discarded (TRACE_TOO_LARGE); protects live-stores and queriers.
+      max_bytes_per_trace: 5000000   # [5000000] 5 MB, explicit
+    metrics_generator:
+      # Tempo 3.x: no local-blocks processor (removed); TraceQL metrics come from the
+      # live-stores (recent) and the backend (older than query_backend_after).
+      processors: [service-graphs, span-metrics]
+      trace_id_label_name: trace_id   # must match Grafana exemplarTraceIdDestinations
+      # Active series cap per generator instance [0 = unlimited]. 2 instances x 100k = at most
+      # 200k series remote-written to EACH Prometheus replica (~0.8 GiB of its 4 GiB request).
+      # Over the cap, new series are dropped (tempo_metrics_generator_registry_series_limited_total).
+      max_active_series: 100000
+    read:
+      max_bytes_per_tag_values_query: 5000000   # [1000000]; tag-value autocomplete in Grafana
+
+# ---------------------------------------------------------------- read path
+queryFrontend:
+  replicas: 2
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {cpu: "1", memory: 2Gi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+
+querier:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 9
+    targetCPUUtilizationPercentage: 60
+  resources:
+    requests: {cpu: 500m, memory: 2Gi}
+    limits: {cpu: "2", memory: 4Gi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+
+# Grafana and the Collector talk to the query-frontend and distributor Services directly
+# (both ClusterIP); no nginx gateway in the path.
+gateway:
+  enabled: false
+
+# ---------------------------------------------------------------- caches
+memcached:
+  enabled: true
+  replicas: 2
+  image:
+    repository: memcached
+    tag: "1.6.45-alpine@sha256:bfc2ee42c4edb65f436dafc6a61cbc6938c30118e11ddea2f968e1a2c90bb12a"
+  allocatedMemory: 1024
+  resources:
+    requests: {cpu: 250m, memory: 1280Mi}
+    limits: {cpu: 500m, memory: 1280Mi}
+  podDisruptionBudget:
+    enabled: true
+  maxUnavailable: 1
+
+memcachedExporter:
+  enabled: true
+  image:
+    repository: prom/memcached-exporter
+    tag: "v0.18.0@sha256:1458b31d4cae1a6618e85c8d31ecc49c4ebdcee3c8530be8d80d93e8792c4a58"
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+
+# ---------------------------------------------------------------- rollout-operator
+# Coordinates zone-by-zone live-store rollouts and enforces per-partition disruption limits.
+# Single replica: the subchart hard-codes replicas: 1 and has no PDB value. Its webhooks fail
+# closed, so prometheusrule-rollout-operator.yaml alerts when it is down (README "Rollout-operator").
+rollout_operator:
+  enabled: true
+  image:
+    repository: grafana/rollout-operator
+    tag: "v0.41.1@sha256:49e0d230669d261cec44e7b33188c72dde02fa29bfa9ec1e14274a9965bda740"
+  resources:
+    requests: {cpu: 100m, memory: 100Mi}
+    limits: {cpu: 200m, memory: 200Mi}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+    seccompProfile:
+      type: RuntimeDefault
+
+# ---------------------------------------------------------------- self-monitoring
+# One ServiceMonitor per component; picked up by kube-prometheus-stack.
+metaMonitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: prometheus

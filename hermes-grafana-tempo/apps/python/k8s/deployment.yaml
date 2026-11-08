@@ -1,0 +1,138 @@
+# python-inventory: FastAPI inventory API with planted bugs, traced with OpenTelemetry (zero-code).
+# Image tag tempo-apps/python:1.0.2 is rewritten to the registry path by apps/deploy-apps.sh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/name: python
+    app.kubernetes.io/part-of: tempo-apps
+spec:
+  replicas: 2                      # production default; the lab profile (apps/lab) sets 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0                # never drop below the desired count during a rollout
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: python
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: python
+        app.kubernetes.io/part-of: tempo-apps
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      # Spread replicas over nodes (hard) and zones (best effort), counting only this revision.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: python
+          matchLabelKeys: ["pod-template-hash"]
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: python
+          matchLabelKeys: ["pod-template-hash"]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: python
+          image: tempo-apps/python:1.0.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: DEPLOY_ENV               # -> deployment.environment.name; lab overlay sets "lab"
+              value: production
+            - name: K8S_NAMESPACE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STRESS_ENABLED           # stress endpoints for tests/; off by default
+              value: "false"
+            - name: STRESS_MAX_CPU_MS
+              value: "5000"
+            - name: STRESS_MAX_MB            # total MiB held at once, kept well under the memory limit
+              value: "128"
+            - name: STRESS_MAX_HOLD_S
+              value: "30"
+            - name: OTEL_SERVICE_NAME
+              value: python-inventory
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: deployment.environment.name=$(DEPLOY_ENV),service.namespace=tempo-apps,service.version=1.0.2,k8s.namespace.name=$(K8S_NAMESPACE_NAME),k8s.pod.name=$(K8S_POD_NAME)
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.observability:4318
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            - name: OTEL_TRACES_SAMPLER
+              value: parentbased_always_on
+            - name: OTEL_PYTHON_EXCLUDED_URLS
+              value: healthz
+            - name: INVENTORY_DB_PATH
+              value: /tmp/inventory.db
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5                 # let endpoints/Traefik stop routing before SIGTERM
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # /inventory/fib blocks the event loop for a few seconds (planted issue),
+          # so the probes allow a slow answer instead of restarting the pod.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi

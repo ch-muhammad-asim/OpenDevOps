@@ -1,0 +1,37 @@
+# Alerts for Grafana (release grafana, ns observability). Source: the Grafana ServiceMonitor
+# (job "grafana", helm/grafana/values.yaml serviceMonitor).
+# Apply: kubectl apply -f helm/kube-prometheus-stack/rules/
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  groups:
+    - name: grafana
+      rules:
+        - alert: GrafanaDown
+          expr: |
+            sum(up{job="grafana"}) == 0
+            or
+            absent(up{job="grafana"})
+          for: 5m
+          labels:
+            severity: critical
+            namespace: observability
+          annotations:
+            summary: Grafana is down or not scraped
+            description: No Grafana pod has answered scrapes for 5 minutes; the only UI of the stack is unavailable.
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#grafanadown
+
+        - alert: GrafanaReplicaDown
+          expr: up{job="grafana"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: A Grafana replica is down
+            description: 'Grafana pod {{ $labels.pod }} has not answered scrapes for 10 minutes; the other replica still serves (production runs 2).'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#grafanareplicadown

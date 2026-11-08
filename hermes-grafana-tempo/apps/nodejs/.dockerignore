@@ -1,0 +1,9 @@
+# Only package*.json, instrumentation.js and server.js are needed in the image.
+node_modules
+npm-debug.log*
+k8s
+*.md
+.git
+.gitignore
+Dockerfile
+.dockerignore

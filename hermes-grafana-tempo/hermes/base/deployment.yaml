@@ -1,0 +1,187 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes
+  namespace: hermes
+automountServiceAccountToken: false   # Hermes needs no Kubernetes API access
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-gateway
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: hermes-gateway
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # one gateway per HERMES_HOME
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes-gateway
+        app.kubernetes.io/part-of: hermes-grafana-tempo
+    spec:
+      serviceAccountName: hermes
+      automountServiceAccountToken: false
+      # The pod's pause process becomes PID 1 and reaps orphaned child processes (Hermes warns when
+      # it runs as PID 1 without an init). Both containers are the same user in the same trust zone.
+      shareProcessNamespace: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000     # the image's `hermes` user
+        runAsGroup: 10000
+        fsGroup: 10000
+        fsGroupChangePolicy: OnRootMismatch   # don't re-chown the whole disk on every start
+        seccompProfile:
+          type: RuntimeDefault
+      # Policy-standard spread across zones; with one replica it only matters if a second gateway (another
+      # profile) is ever added under the same label.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: hermes-gateway
+      terminationGracePeriodSeconds: 60       # let the gateway drain active runs on SIGTERM
+      initContainers:
+        # HERMES_HOME (/opt/data/home) must be writable and OWNED by the Hermes user: the dashboard chat
+        # refuses to attach to the gateway's control socket under a root-owned home ("unsafe_control_path"),
+        # and a volume's root directory is owned by root (fsGroup only sets the group). So HERMES_HOME is a
+        # subdirectory this non-root init container creates. The ConfigMap is copied in on every start, so it
+        # stays the source of truth for config.yaml.
+        - name: config
+          image: nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
+          command: ["sh", "-c", "mkdir -p /opt/data/home && chmod 700 /opt/data/home && cp /config/config.yaml /opt/data/home/config.yaml"]
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: data, mountPath: /opt/data}
+      containers:
+        - name: gateway
+          image: nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
+          # Run the gateway directly, without the image's s6 supervisor (which needs root to set up
+          # /run); Kubernetes restarts the container instead.
+          command: ["/opt/hermes/.venv/bin/hermes"]
+          args: ["gateway", "run", "--no-supervise"]
+          env:
+            - {name: HERMES_HOME, value: /opt/data/home}
+            - {name: HOME, value: /opt/data/home}
+            # The OpenAI-compatible API server is the gateway's one platform (so platform health is
+            # exported). It listens on localhost only: nothing outside the pod can reach it.
+            - {name: API_SERVER_HOST, value: 127.0.0.1}
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef: {name: hermes-api-server, key: API_SERVER_KEY}
+          # Model settings (HERMES_MODEL, HERMES_MODEL_BASE_URL, HERMES_MODEL_API_KEY; config.yaml model.*). Optional:
+          # the gateway still starts and exports telemetry without it; chat fails until deploy.sh creates it.
+          envFrom:
+            - secretRef: {name: hermes-model-key, optional: true}
+            - secretRef: {name: hermes-grafana-token, optional: true}   # GRAFANA_TOKEN (Viewer) for the skill
+          securityContext: *restricted
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {memory: 1Gi}
+          startupProbe: &probe
+            exec:
+              command:
+                - /opt/hermes/.venv/bin/python
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8642/health', timeout=3)"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18   # up to 3 minutes for first start
+          readinessProbe:
+            <<: *probe
+            periodSeconds: 15
+            failureThreshold: 2
+          livenessProbe:
+            <<: *probe
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - {name: data, mountPath: /opt/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: skill-observability, mountPath: /opt/skills/observability/grafana-tempo-observability, readOnly: true}
+        - name: dashboard
+          image: nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
+          # Hermes web dashboard (config, keys, sessions) on the same HERMES_HOME as the gateway, as in
+          # the upstream compose file. Published only through Traefik (ingress.yaml). Binding 0.0.0.0
+          # makes Hermes require a login; the password provider is set by the env vars below.
+          command: ["/opt/hermes/.venv/bin/hermes"]
+          args: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open", "--skip-build"]
+          ports:
+            - {name: http, containerPort: 9119, protocol: TCP}
+          env:
+            - {name: HERMES_HOME, value: /opt/data/home}
+            - {name: HOME, value: /opt/data/home}
+            # The only Host / WebSocket Origin the dashboard accepts. Dashboard container only (see
+            # config.yaml): in the shared config it would also gate the gateway, which then exits.
+            - {name: HERMES_DASHBOARD_PUBLIC_URL, value: "https://hermes-gke.saqlainmushtaq.com"}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef: {name: hermes-dashboard-auth, key: username}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH   # scrypt hash; no plaintext in the pod
+              valueFrom:
+                secretKeyRef: {name: hermes-dashboard-auth, key: password_hash}
+            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET          # signs sessions; keeps logins across restarts
+              valueFrom:
+                secretKeyRef: {name: hermes-dashboard-auth, key: session_secret}
+          # Model settings (HERMES_MODEL, HERMES_MODEL_BASE_URL, HERMES_MODEL_API_KEY; config.yaml model.*). Optional:
+          # the dashboard still starts and exports telemetry without it; chat fails until deploy.sh creates it.
+          envFrom:
+            - secretRef: {name: hermes-model-key, optional: true}
+            - secretRef: {name: hermes-grafana-token, optional: true}   # GRAFANA_TOKEN (Viewer) for the skill
+          securityContext: *restricted
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          startupProbe: &dashprobe
+            exec:
+              command:
+                - /opt/hermes/.venv/bin/python
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9119/api/status', timeout=3)"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          readinessProbe:
+            <<: *dashprobe
+            periodSeconds: 15
+            failureThreshold: 2
+          livenessProbe:
+            <<: *dashprobe
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - {name: data, mountPath: /opt/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: skill-observability, mountPath: /opt/skills/observability/grafana-tempo-observability, readOnly: true}
+      volumes:
+        - name: config
+          configMap:
+            name: hermes-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: hermes-home      # lab/ swaps this for an emptyDir
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: skill-observability
+          configMap:
+            name: hermes-skill-observability
+            items:
+              - {key: SKILL.md, path: SKILL.md}
+              - {key: obs.py, path: scripts/obs.py}

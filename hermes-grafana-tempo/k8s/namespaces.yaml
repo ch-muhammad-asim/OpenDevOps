@@ -1,0 +1,73 @@
+# Namespaces for hermes-grafana-tempo. Apply first.
+#
+# Pod Security Standards, enforced at admission (enforce + warn + audit):
+#   traefik                restricted  (chart values set non-root, seccomp, drop ALL)
+#   observability          restricted  (Grafana, Tempo, OTel Collector values in helm/
+#                                       are compliant; checked with a server-side dry
+#                                       run of the label against the running pods)
+#   tempo-apps             restricted  (app manifests in apps/ are compliant)
+#   hermes                 restricted  (same labels as hermes/base/namespace.yaml;
+#                                       declared here too so the edge can be applied
+#                                       before Hermes)
+#   monitoring             privileged  enforce; warn/audit baseline. node-exporter
+#                                       needs hostNetwork, hostPID, hostPort 9100 and
+#                                       hostPath mounts of /proc, /sys and /. Keep only
+#                                       kube-prometheus-stack in this namespace.
+# A pod that breaks "restricted" (e.g. a plain `kubectl run` debug pod without a
+# securityContext) is rejected in the restricted namespaces; use --overrides with
+# runAsNonRoot, seccompProfile RuntimeDefault, allowPrivilegeEscalation false and
+# capabilities drop ALL.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# Grafana, Tempo, OpenTelemetry Collector.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# Sample apps: nextjs, python, nodejs.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tempo-apps
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# Hermes Agent (hermes/). Same labels as hermes/base/namespace.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+# kube-prometheus-stack (Prometheus, Alertmanager, operator, kube-state-metrics,
+# node-exporter DaemonSet).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline

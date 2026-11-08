@@ -1,0 +1,11 @@
+# Hermes Agent runs fully non-root with all capabilities dropped, so the namespace enforces the
+# strictest Pod Security level.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

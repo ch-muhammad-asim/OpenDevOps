@@ -1,0 +1,51 @@
+# Resource guardrails for namespace tempo-apps (sample apps). Production values; the
+# lab runs the same objects (usage there is far below every cap).
+#
+# LimitRange: defaults for containers that set no request/limit (e.g. a debug pod),
+# so nothing runs BestEffort, plus a per-container ceiling so one pod cannot take a
+# whole node. Defaults apply ONLY to fields a container leaves empty.
+# Kubernetes rules to keep in mind: a container that sets only limits gets
+# requests=limits; one that sets only requests gets the default limit below, which
+# must then be >= its request or the pod is rejected.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: container-defaults
+  namespace: tempo-apps
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 256Mi
+      max:
+        cpu: "1"
+        memory: 1Gi
+---
+# ResourceQuota: namespace budget. Sized from the production app manifests (apps/):
+# 3 apps x 2 replicas, each 50m / 96-128Mi requested and 500m / 256-384Mi limit.
+# Peak during a rolling update (maxSurge 1 per app, 9 pods): about 450m / 1.1Gi
+# requested and 4.5 CPU / 2.7Gi limits. The caps below leave ~2x room for scaling
+# to 3-4 replicas per app. No PVCs (the apps keep no state: SQLite is in-process), and no
+# LoadBalancer/NodePort Services: the only way in is Traefik.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tempo-apps-budget
+  namespace: tempo-apps
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "8"
+    limits.memory: 8Gi
+    pods: "20"
+    services: "10"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+    persistentvolumeclaims: "0"
+    configmaps: "20"
+    secrets: "20"

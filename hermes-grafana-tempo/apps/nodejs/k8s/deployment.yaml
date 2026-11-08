@@ -1,0 +1,153 @@
+# nodejs-orders: Express 5 orders API, OpenTelemetry auto + manual tracing -> OTel Collector -> Tempo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/name: nodejs
+    app.kubernetes.io/part-of: tempo-apps
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "1.0.2"
+spec:
+  replicas: 2                      # production default; the lab profile (apps/lab) sets 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0                # never drop below the desired count during a rollout
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nodejs
+      app.kubernetes.io/part-of: tempo-apps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nodejs
+        app.kubernetes.io/part-of: tempo-apps
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "1.0.2"
+    spec:
+      automountServiceAccountToken: false   # the app never calls the Kubernetes API
+      terminationGracePeriodSeconds: 30
+      # Spread replicas over nodes (hard) and zones (best effort), counting only this revision.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: nodejs
+          matchLabelKeys: ["pod-template-hash"]
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: nodejs
+          matchLabelKeys: ["pod-template-hash"]
+      enableServiceLinks: false             # no *_SERVICE_HOST/PORT env vars injected
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nodejs
+          image: tempo-apps/nodejs:1.0.2   # deploy-apps.sh rewrites to <registry>/<app>@sha256:<digest>
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: DEPLOY_ENV               # -> deployment.environment.name; lab overlay sets "lab"
+              value: production
+            - name: PORT
+              value: "3000"
+            - name: INVENTORY_URL
+              value: http://python:8000
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: STRESS_ENABLED           # stress endpoints for tests/; off by default
+              value: "false"
+            - name: STRESS_MAX_CPU_MS
+              value: "5000"
+            - name: STRESS_MAX_MB            # total MiB held at once, kept well under the memory limit
+              value: "128"
+            - name: STRESS_MAX_HOLD_S
+              value: "30"
+            - name: OTEL_SERVICE_NAME
+              value: nodejs-orders
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: deployment.environment.name=$(DEPLOY_ENV),service.namespace=tempo-apps,service.version=1.0.2,k8s.namespace.name=$(K8S_NAMESPACE),k8s.pod.name=$(K8S_POD_NAME)
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.observability:4318
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            - name: OTEL_TRACES_SAMPLER
+              value: parentbased_always_on
+            - name: OTEL_NODE_ENABLED_INSTRUMENTATIONS
+              value: http,express,undici
+            - name: OTEL_NODE_RESOURCE_DETECTORS
+              value: env,host,os,serviceinstance
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5                 # let endpoints/Traefik stop routing before SIGTERM
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Tolerant on purpose: /orders/report blocks the event loop for seconds (planted
+          # CPU hog). That should mark the pod unready briefly, never restart it.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

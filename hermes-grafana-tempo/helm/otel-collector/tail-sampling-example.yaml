@@ -1,0 +1,44 @@
+# EXAMPLE overlay (not used by scripts/deploy.sh): tail sampling in the traces pipeline.
+#   Keep every trace with an error, every trace slower than 1s, and 10% of the rest.
+#
+# Use it as-is ONLY when exactly one Collector replica receives all spans of a trace:
+#   lab:  -f values.yaml -f values-lab.yaml -f tail-sampling-example.yaml
+# With more than one replica (production values.yaml: HPA 3-12) spans of one trace land on
+# different pods and each pod decides on a partial trace. Put a trace-ID-aware load-balancing
+# tier in front (loadbalancing exporter, routing_key traceID) and apply this overlay to the
+# second tier only. See README "Tail sampling".
+#
+# Side effect: Tempo's metrics-generator then sees only the sampled traces, so span metrics
+# and the service graph undercount. Generate RED metrics before sampling if they must be exact.
+
+config:
+  processors:
+    tail_sampling:
+      decision_wait: 10s              # wait for late spans before deciding on a trace
+      num_traces: 50000               # traces held in memory while waiting (size to traffic x decision_wait)
+      expected_new_traces_per_sec: 1000
+      decision_cache:
+        sampled_cache_size: 100000    # late spans of an already kept trace are still kept
+        non_sampled_cache_size: 100000
+      # A trace is kept if ANY policy says sample.
+      policies:
+        - name: keep-errors
+          type: status_code
+          status_code:
+            status_codes: [ERROR]
+        - name: keep-slow
+          type: latency
+          latency:
+            threshold_ms: 1000
+        - name: sample-rest
+          type: probabilistic
+          probabilistic:
+            sampling_percentage: 10
+
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        # memory_limiter first, tail_sampling before batch (it regroups spans by trace).
+        processors: [memory_limiter, k8s_attributes, resource, tail_sampling, batch]
+        exporters: [otlp_grpc/tempo]

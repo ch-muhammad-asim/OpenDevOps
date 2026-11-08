@@ -1,0 +1,4 @@
+# Only main.py and requirements.txt are needed in the build context.
+*
+!main.py
+!requirements.txt

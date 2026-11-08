@@ -1,0 +1,107 @@
+# Default deny for the hermes namespace, then allow only:
+#   ingress  traefik namespace -> dashboard :9119 (the public route)
+#   egress   DNS, and OTLP/HTTP to the Collector :4318
+# The gateway's API server listens on 127.0.0.1 and is never reachable from outside the pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: hermes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-gateway-egress
+  namespace: hermes
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-gateway
+  policyTypes: [Egress]
+  egress:
+    # DNS: kube-dns, plus the NodeLocal DNSCache pods that answer on GKE when that add-on is on.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - {key: k8s-app, operator: In, values: [kube-dns, node-local-dns]}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - {protocol: TCP, port: 4318}
+    # Read-only observability skill: Prometheus :9090, Tempo :3200 and Grafana :3000 (pod ports). The targets'
+    # namespaces admit this pod through networkpolicy-observability.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - {protocol: TCP, port: 9090}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+      ports:
+        - {protocol: TCP, port: 3200}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - {protocol: TCP, port: 3000}
+    # Model API (Cloudflare Workers AI, api.cloudflare.com:443). NetworkPolicy cannot match DNS names, so this allows HTTPS
+    # to public addresses only: private (RFC 1918), CGNAT, link-local (incl. the metadata server
+    # 169.254.169.254) and the GKE default Service range are excluded. Pod-to-pod traffic is not matched
+    # by ipBlock on Dataplane V2. For a single-host allow list use an egress proxy or FQDN policy.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 34.118.224.0/20   # GKE default Service (ClusterIP) range; change if your cluster uses another
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-dashboard-from-traefik
+  namespace: hermes
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - {protocol: TCP, port: 9119}

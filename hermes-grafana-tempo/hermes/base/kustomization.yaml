@@ -1,0 +1,38 @@
+# Production profile (default). Lab profile: hermes/lab/.
+# kubectl apply -k hermes/base/   (run hermes/deploy.sh, which also creates the three Secrets)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+  - networkpolicy-observability.yaml
+  - prometheusrule.yaml
+configMapGenerator:
+  # Hermes config.yaml; the name gets a content hash, so a config change rolls the pod.
+  - name: hermes-config
+    namespace: hermes
+    files:
+      - config.yaml
+  # Read-only observability skill (SKILL.md + scripts/obs.py), mounted at /opt/skills/... (deployment.yaml).
+  # Only these two files are shipped: any other .md in the skill directory would become skill content.
+  - name: hermes-skill-observability
+    namespace: hermes
+    files:
+      - SKILL.md=skills/grafana-tempo-observability/SKILL.md
+      - obs.py=skills/grafana-tempo-observability/scripts/obs.py
+  # Grafana dashboard, picked up by the Grafana sidecar (label grafana_dashboard, any namespace).
+  - name: hermes-gateway-dashboard
+    namespace: hermes
+    files:
+      - hermes-gateway-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: Hermes

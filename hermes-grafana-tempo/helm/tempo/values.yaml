@@ -1,0 +1,121 @@
+# Chart:       grafana-community/tempo (monolithic, single binary)
+# Version:     3.2.1   (repo: https://grafana-community.github.io/helm-charts)
+# App version: Tempo 3.1.1
+# Install:
+#   helm upgrade --install tempo grafana-community/tempo --version 3.2.1 \
+#     --namespace observability --create-namespace -f helm/tempo/values.yaml
+#
+# Profile:     LAB / small cluster (scripts/deploy.sh PROFILE=lab). Production uses
+#              helm/tempo-distributed. No values-lab.yaml: this file IS the lab profile.
+#
+# One replica, local backend on a 10Gi standard-rwo PV, 24h retention.
+# Receives OTLP only from the OpenTelemetry Collector (otel-collector.observability).
+# Optional: values-gcs.yaml moves trace blocks to a GCS bucket (not used in the lab).
+
+fullnameOverride: tempo   # Service name "tempo" (shared names contract)
+replicas: 1
+
+tempo:
+  repository: grafana/tempo
+  # Tag AND multi-arch index digest (chart appVersion 3.1.1); the digest wins at pull time.
+  tag: "3.1.1@sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044"
+  pullPolicy: IfNotPresent
+
+  # No CPU limit on purpose (CFS throttling slows ingest and compaction); memory is capped.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+
+  # Needed by Grafana's Tempo data source for streaming search/metrics over HTTP (port 3200).
+  streamOverHttpEnabled: true
+  multitenancyEnabled: false
+  reportingEnabled: false
+
+  retention: 24h          # block_retention for the backend scheduler and worker
+
+  # The chart's service template requires the default Jaeger receiver keys, so they stay
+  # (cluster-internal only, unused). Apps and Hermes send OTLP via the Collector.
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  # Metrics-generator: span metrics (RED) + service graph, remote-written to Prometheus.
+  # Tempo 3.x removed the "local-blocks" processor; TraceQL metrics are served by the
+  # live-store in single-binary mode, so only service-graphs and span-metrics are listed.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://prometheus-kube-prometheus-prometheus.monitoring:9090/api/v1/write"
+    processor:
+      service_graphs:
+        dimensions: [service.namespace]
+        enable_client_server_prefix: true
+      span_metrics:
+        enable_target_info: true
+        # Extra labels on traces_spanmetrics_* (each one multiplies series; keep to low-cardinality
+        # resource attributes). Intrinsic labels service, span_name, span_kind, status_code stay on.
+        # Latency buckets stay at the Tempo default (2ms .. ~16s, 14 exponential buckets).
+        dimensions:
+          - service.namespace
+          - service.version
+    registry:
+      external_labels:
+        source: tempo
+    storage:
+      path: /var/tempo/generator/wal   # on the PV, not the /tmp emptyDir
+
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+        # Exemplar label on span-metric histograms; must match the Grafana Prometheus data
+        # source exemplarTraceIdDestinations name (Tempo's default is "traceID").
+        trace_id_label_name: trace_id
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+# Pod-level: chart default already runs as UID/GID 10001, non-root.
+securityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  automountServiceAccountToken: false   # Tempo does not call the Kubernetes API
+
+persistence:
+  enabled: true
+  storageClassName: standard-rwo
+  accessModes: [ReadWriteOnce]
+  size: 10Gi
+
+# Picked up by kube-prometheus-stack (selectors are open: *NilUsesHelmValues=false).
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  additionalLabels:
+    release: prometheus
