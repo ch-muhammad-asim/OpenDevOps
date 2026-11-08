@@ -1,4 +1,4 @@
-# Lab object storage (SeaweedFS). Pod Security Standards "restricted", enforced at admission:
+# Optional fallback object storage (SeaweedFS, OBJECT_STORE=seaweedfs). Pod Security Standards "restricted", enforced at admission:
 # the server and the bootstrap Job run as UID/GID 1000 (the image's "seaweed" user), non-root,
 # seccomp RuntimeDefault, no privilege escalation, all capabilities dropped, read-only root FS.
 apiVersion: v1

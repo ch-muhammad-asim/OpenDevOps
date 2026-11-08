@@ -1,4 +1,4 @@
-# SeaweedFS (lab object store) alerts. job="seaweedfs" (ServiceMonitor seaweedfs).
+# SeaweedFS (optional fallback object store) alerts. job="seaweedfs" (ServiceMonitor seaweedfs).
 # SeaweedFS metric names are from SeaweedFS 4.52 (weed/stats/metrics.go):
 #   SeaweedFS_volumeServer_resource{name="/data",type="all|used|free|avail"}  bytes on the data dir
 #   SeaweedFS_s3_request_total{type,code,bucket}                               S3 requests by status
@@ -23,7 +23,7 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: SeaweedFS (lab object store) is down.
+            summary: SeaweedFS (fallback object store) is down.
             description: Prometheus cannot scrape SeaweedFS in object-storage. Tempo trace blocks and Thanos metric blocks cannot be written or read (check `kubectl -n object-storage get pods,pvc` and the pod logs).
             runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfsdown
         - alert: SeaweedFSVolumeNearlyFull

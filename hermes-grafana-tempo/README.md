@@ -95,13 +95,10 @@ flowchart TB
       operator -.->|configures| prom
       prom -->|firing alerts| am
     end
-    subgraph storage["namespace: object-storage"]
-      seaweed[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
-    end
-    tempo -->|Tempo blocks; 720h retention; tempo-traces| seaweed
-    sidecar -->|upload blocks; thanos-metrics| seaweed
-    store -->|read blocks; thanos-metrics| seaweed
-    compactor -->|compact / downsample / retain; thanos-metrics| seaweed
+    tempo -->|Tempo blocks; 720h retention; tempo-traces| gcs
+    sidecar -->|upload blocks; thanos-metrics| gcs
+    store -->|read blocks; thanos-metrics| gcs
+    compactor -->|compact / downsample / retain; thanos-metrics| gcs
     gw -->|Hermes trends skill / PromQL queries| querier
     tr -->|HTTP| nx & nd & py
     tr -->|HTTP :80| graf
@@ -112,6 +109,7 @@ flowchart TB
     tempo -->|metrics-generator remote write| prom
     graf -->|metrics datasource / PromQL queries| querier
   end
+  gcs[("GCS buckets: tempo-traces-&lt;suffix&gt; + thanos-metrics-&lt;suffix&gt; — 30-day storage, Workload Identity")]
   cf -->|HTTPS to origin / Traefik :443| tr
   classDef edgeStyle fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
   classDef telemetry fill:#f0fdf4,stroke:#16a34a,color:#14532d
@@ -119,7 +117,6 @@ flowchart TB
   classDef workload fill:#faf5ff,stroke:#9333ea,color:#581c87
   class cf,tr edgeStyle
   class col,tempo,graf,prom,am,sidecar,store,querier,compactor telemetry
-  class seaweed storageStyle
   class nx,nd,py,dash,gw workload
 ```
 
@@ -133,7 +130,8 @@ flowchart TB
 | `python` | Python app (`python-inventory`); planted N+1 SQL, 500, slow endpoint, CPU hog | [`apps/python/`](apps/python/README.md) |
 | Hermes `gateway` | Hermes Agent gateway; its native exporter sends content-free health metrics, spans and logs over OTLP; agent turns call the model provider | [`hermes/`](hermes/README.md) |
 | Hermes `dashboard` | Hermes web UI and chat on the same `HERMES_HOME`, behind Hermes's own login | [`hermes/`](hermes/README.md) |
-| Model provider | External LLM API the Hermes chat calls over HTTPS `:443`; key in a Kubernetes Secret (provider and model: [`hermes/`](hermes/README.md)) | [`hermes/`](hermes/README.md) |
+| OpenCode bridge | Deployment + Service `opencode-bridge:18282` in `hermes`: the OpenCode client behind an OpenAI-compatible endpoint, the default model provider for Hermes (free models); OpenCode's tools run in this pod | [`hermes/base/opencode-bridge.yaml`](hermes/base/opencode-bridge.yaml), [details](hermes/README.md#opencode-free-via-bridge-default) |
+| Model provider | External LLM API over HTTPS `:443`: OpenCode (via the bridge, default) or Cloudflare Workers AI (alternative) | [`hermes/`](hermes/README.md#-model-provider) |
 | OpenTelemetry Collector | The single OTLP entry point: traces → Tempo, metrics → Prometheus, logs → debug | [`helm/otel-collector/`](helm/otel-collector/README.md) |
 | Tempo | Trace store and TraceQL API; metrics-generator writes span metrics and the service graph | [`helm/tempo/`](helm/tempo/README.md), [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
 | Grafana | UI with Prometheus, Tempo and Alertmanager data sources and the official Tempo dashboards | [`helm/grafana/`](helm/grafana/README.md) |
@@ -223,9 +221,7 @@ flowchart TB
     lp[("PVC: 10Gi standard-rwo<br/>WAL + generator WAL")]
     lg["grafana"]
     lm["Prometheus<br/>1 replica"]
-    subgraph los["namespace: object-storage"]
-      ls[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
-    end
+    ls[("GCS buckets: tempo-traces-&lt;suffix&gt; + thanos-metrics-&lt;suffix&gt; — 30-day storage, Workload Identity (bucket-scoped IAM condition)")]
     subgraph lmon["namespace: monitoring"]
       lsidecar["Thanos sidecar"]
       lstore["Thanos store-gateway"]
@@ -333,7 +329,7 @@ Run from this folder (`hermes-grafana-tempo/`). Each step is idempotent.
 infra/create-cluster.sh                     # 1. GKE cluster (lab: zonal, 3 x e2-standard-2, Dataplane V2)
 PROFILE=lab scripts/deploy.sh               # 2. Prometheus, edge, Tempo, Collector, Grafana, dashboards, routes, DNS
 apps/build-push.sh && apps/deploy-apps.sh lab   # 3. build + push the sample apps, deploy them by digest (repo setup: apps/README.md)
-hermes/deploy.sh                            # 4. Hermes Agent gateway + dashboard; model key file: hermes/README.md
+hermes/deploy.sh                            # 4. Hermes gateway, dashboard, OpenCode bridge; providers: hermes/README.md
 scripts/load.sh public                      # 5. traffic that triggers every planted issue
 PROFILE=lab scripts/verify.sh && hermes/verify.sh   # 6. PASS/FAIL checks; exit code = failures
 ```
@@ -369,7 +365,8 @@ Chat turns go to an external model provider over HTTPS; the gateway's telemetry 
 
 | Provider | Status | Setup |
 |---|---|---|
-| Cloudflare Workers AI (default; `@cf/qwen/qwen3.8-27b`, tool calling, free daily quota) | ✅ live-tested 2026-11-08 | [`hermes/README.md`](hermes/README.md#-model-provider) |
+| OpenCode free models via the in-cluster bridge (default; `opencode/deepseek-v4.1-flash-free`, no OpenCode account key) | Deployed, `verify.sh` checks the bridge; chat **not proven yet**: OpenCode answered "Free usage limit reached" for every free model from this cluster (`hermes/chat-proof.sh` reruns it) | [`hermes/README.md`](hermes/README.md#opencode-free-via-bridge-default) |
+| Cloudflare Workers AI (alternative; `@cf/qwen/qwen3.8-27b`, tool calling, free daily quota) | ✅ chat live-tested 2026-11-08 | [`hermes/README.md`](hermes/README.md#-model-provider) |
 | OpenCode Zen / Go (`MODEL_PROVIDER=opencode`) | Supported alternative; Zen bills per token, Go is a subscription | [`hermes/README.md`](hermes/README.md#-model-provider) |
 
 ### 🧰 Observability skill
@@ -377,7 +374,7 @@ Chat turns go to an external model provider over HTTPS; the gateway's telemetry 
 A read-only Hermes skill ([`SKILL.md`](hermes/base/skills/grafana-tempo-observability/SKILL.md) + `scripts/obs.py`, Python standard library only) lets the chat
 diagnose this platform: query Tempo (TraceQL), metrics (PromQL through the Thanos querier) and Grafana, quote numbers and trace IDs, and
 explain the OpenTelemetry setup. Ask, for example, "diagnose the platform" or "which endpoint is slowest?". It is
-mounted read-only into the Hermes pod, and only the gateway pod may reach the Thanos querier `:10902`, Tempo `:3200`
+mounted read-only into the Hermes and OpenCode bridge pods, and only those pods may reach the Thanos querier `:10902`, Tempo `:3200`
 and Grafana `:3000` ([`networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml)); Grafana
 access uses the Viewer role. Prometheus `:9090` is deliberately not reachable from Hermes: it serves remote write,
 `/-/reload` and `/-/quit` without authentication. Details: [`hermes/README.md`](hermes/README.md).
@@ -419,8 +416,8 @@ access uses the Viewer role. Prometheus `:9090` is deliberately not reachable fr
 | Container privilege abuse | Non-root, read-only root FS, all capabilities dropped, seccomp; Pod Security `restricted` where possible (`monitoring` is `privileged` for node-exporter) | each folder |
 | Secrets in Git | Grafana admin, Cloudflare token, Hermes credentials only in Kubernetes Secrets (or synced from Secret Manager); never printed | [`scripts/`](scripts/README.md), [`hermes/`](hermes/README.md) |
 | Conversation content in telemetry | Hermes exports only content-free health signals; chat text never reaches metrics, traces or logs | [`hermes/`](hermes/README.md) |
-| Hermes reading the observability stack | Observability skill: query APIs only, Grafana Viewer role (writes → 403); NetworkPolicies admit only the Hermes gateway pod to the Thanos querier `:10902`, Tempo `:3200` and Grafana `:3000`; Prometheus `:9090` (unauthenticated remote write, `/-/reload`, `/-/quit`) is not reachable from Hermes | [`hermes/base/networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml) |
-| Prompts leaving the cluster | Hermes chat sends prompts to the model provider over HTTPS; Hermes egress is limited to DNS, the Collector `:4318`, Thanos querier `:10902`, Tempo `:3200`, Grafana `:3000` and public `:443` (private, metadata and Service ranges excluded); model key only in a Secret | [`hermes/`](hermes/README.md) |
+| Hermes reading the observability stack | Observability skill: query APIs only, Grafana Viewer role (writes → 403); NetworkPolicies admit only the Hermes gateway and OpenCode bridge pods to the Thanos querier `:10902`, Tempo `:3200` and Grafana `:3000`; OpenCode's tools run in the bridge pod, not in the Hermes pod; Prometheus `:9090` (unauthenticated remote write, `/-/reload`, `/-/quit`) is not reachable from Hermes | [`hermes/base/networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml) |
+| Prompts leaving the cluster | Chat prompts go to the model provider over HTTPS: by default from the OpenCode bridge pod. Hermes pod egress: DNS, Collector `:4318`, bridge `:18282`, Thanos querier `:10902`, Tempo `:3200`, Grafana `:3000`, public `:443` (Cloudflare alternative). Bridge pod egress: DNS, public `:443` and the same three read-only endpoints. Private, metadata and Service ranges are excluded; keys only in Secrets | [`hermes/`](hermes/README.md) |
 
 Not protected (by design): the sample apps have no login and include CPU- and memory-heavy endpoints; Cloudflare rate
 limits are not set.
@@ -445,7 +442,7 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 |---|---|---|
 | 2026-11-08 | `PROFILE=lab scripts/verify.sh` (releases, pods, health, test trace through Collector → Tempo → Grafana, scraping, NetworkPolicy, public HTTPS) | ✅ 0 failures, three consecutive runs |
 | 2026-11-08 | Sample apps live (`scripts/load.sh public`, TraceQL per issue, alert rules) | ✅ every planted issue found; 200/500/502/504 mix as designed; 12 rules loaded |
-| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus metrics and rules, Tempo, Grafana, public URL, Hermes login, model settings, observability skill: Thanos/Tempo/Grafana reads, Prometheus `:9090` blocked, Grafana write → 403, `diagnose`, `trends`) | ✅ 31/31; chats through the API server and the dashboard got model replies |
+| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus metrics and rules, Tempo, Grafana, public URL, Hermes login, model settings, OpenCode bridge Ready and `/v1/models`, observability skill: Thanos/Tempo/Grafana reads, Prometheus `:9090` blocked, Grafana write → 403, `diagnose`, `trends`) | ✅ 31/31 (no model call). Chat through the OpenCode bridge is not proven yet: every free model answered "Free usage limit reached" from this cluster; `hermes/chat-proof.sh` runs the two chat prompts when the limits reset. Earlier chats with Workers AI got model replies |
 | 2026-11-08 | Production profiles: `helm template`, `helm lint`, `kubeconform -strict` (Kubernetes 1.36) | ✅ render and validate; not run live |
 
 ## ✅ Production checklist

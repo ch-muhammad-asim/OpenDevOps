@@ -42,7 +42,7 @@ Grafana's Alertmanager data source has no backend health endpoint in Grafana 13:
 `verify.sh` therefore checks it through the data source proxy (`/api/datasources/proxy/uid/alertmanager/api/v2/status`,
 HTTP 200), not `/health`. When Thanos is installed it also checks `thanos-query /-/ready` and that thanos-query sees the
 sidecar and the store gateway; with namespace `object-storage` present it checks its pods are Ready.
-Lab result 2026-11-08: VERIFY_COUNT PASS, 0 failures (`PROFILE=lab`, `TLS_MODE=cloudflare`, `OBJECT_STORE=gcs`,
+Lab result 2026-11-08: 31 PASS, 0 failures (`PROFILE=lab`, `TLS_MODE=cloudflare`, `OBJECT_STORE=gcs`,
 cert-manager not installed).
 
 ## 🚦 load.sh

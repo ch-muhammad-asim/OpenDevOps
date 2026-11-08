@@ -1,4 +1,4 @@
-# SeaweedFS: in-cluster S3 object store for the LAB profile (OBJECT_STORE=seaweedfs).
+# SeaweedFS: optional in-cluster S3 object store (OBJECT_STORE=seaweedfs); not used by the lab or production (GCS).
 # Production uses GCS buckets instead (see README). Needs the Prometheus operator CRDs
 # (ServiceMonitor, PrometheusRule) and Secret object-storage/seaweedfs-s3-config (key s3.json,
 # created by scripts/deploy.sh, never in git; format in README "Credentials").

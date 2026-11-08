@@ -14,7 +14,7 @@ Only GCS storage/operations and persistent disks are billed.
 
 **Status (2026-11-08, Thanos v0.42.5, kube-prometheus-stack 93.1.0):** ✅ **lab live on GCS** with Workload Identity
 (bucket `thanos-metrics-<suffix>`, Secret `thanos-objstore` = `type: GCS` + bucket name, no key); sidecar, store gateway
-and compactor reach GCS on 443; `PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures. **Production** (HA
+and compactor reach GCS on 443; `PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures. **Production** (HA
 sizing) is rendered and validated only: `kubectl kustomize` of [`kustomization.yaml`](kustomization.yaml) and
 [`overlays/lab/`](overlays/lab/kustomization.yaml) + kubeconform strict (Kubernetes 1.36), `helm lint` / `helm template`
 of kube-prometheus-stack and Grafana, `promtool check rules`. Earlier lab runs on SeaweedFS S3 are recorded in

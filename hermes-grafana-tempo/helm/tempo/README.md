@@ -13,7 +13,7 @@ microservices chart in [`../tempo-distributed/`](../tempo-distributed/) (HA, GCS
 
 **Status:** ✅ lab live on GCS (2026-11-08): chart 3.2.1, Tempo 3.1.1, `block_retention: 720h`, blocks in bucket
 `tempo-traces-<suffix>` through Workload Identity (`ACCESS_MODE=conditional`), WAL on the 50Gi PVC;
-`PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures. Blocks in the earlier SeaweedFS bucket were not migrated.
+`PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures. Blocks in the earlier SeaweedFS bucket were not migrated.
 Renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kubernetes 1.36) with each overlay
 (2026-11-08).
 

@@ -10,7 +10,7 @@ running on the lab cluster (same values; it adds image digests, the route tree, 
 requests of 5m / 16Mi per pod and no service account token in the Alertmanager pod).
 Both profiles keep 2 days locally plus the Thanos sidecar (30 days via [`../thanos/`](../thanos/README.md)) uploading to
 a GCS bucket through Workload Identity. The lab is live on GCS (2026-11-08: bucket `thanos-metrics-<suffix>`;
-`PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures). The **production** profile (`values.yaml`
+`PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures). The **production** profile (`values.yaml`
 alone: 2 days locally plus the Thanos sidecar uploading to GCS) passes
 `helm lint`, `helm template`, kubeconform (Kubernetes 1.36, strict) and `promtool`; it has not been installed on a
 multi-zone cluster yet.

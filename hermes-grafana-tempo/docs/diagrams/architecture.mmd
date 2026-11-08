@@ -46,13 +46,10 @@ flowchart TB
       operator -.->|configures| prom
       prom -->|firing alerts| am
     end
-    subgraph storage["namespace: object-storage"]
-      seaweed[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
-    end
-    tempo -->|Tempo blocks; 720h retention; tempo-traces| seaweed
-    sidecar -->|upload blocks; thanos-metrics| seaweed
-    store -->|read blocks; thanos-metrics| seaweed
-    compactor -->|compact / downsample / retain; thanos-metrics| seaweed
+    tempo -->|Tempo blocks; 720h retention; tempo-traces| gcs
+    sidecar -->|upload blocks; thanos-metrics| gcs
+    store -->|read blocks; thanos-metrics| gcs
+    compactor -->|compact / downsample / retain; thanos-metrics| gcs
     gw -->|Hermes trends skill / PromQL queries| querier
     tr -->|HTTP| nx & nd & py
     tr -->|HTTP :80| graf
@@ -63,6 +60,7 @@ flowchart TB
     tempo -->|metrics-generator remote write| prom
     graf -->|metrics datasource / PromQL queries| querier
   end
+  gcs[("GCS buckets: tempo-traces-&lt;suffix&gt; + thanos-metrics-&lt;suffix&gt; — 30-day storage, Workload Identity")]
   cf -->|HTTPS to origin / Traefik :443| tr
   classDef edgeStyle fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
   classDef telemetry fill:#f0fdf4,stroke:#16a34a,color:#14532d
@@ -70,5 +68,4 @@ flowchart TB
   classDef workload fill:#faf5ff,stroke:#9333ea,color:#581c87
   class cf,tr edgeStyle
   class col,tempo,graf,prom,am,sidecar,store,querier,compactor telemetry
-  class seaweed storageStyle
   class nx,nd,py,dash,gw workload

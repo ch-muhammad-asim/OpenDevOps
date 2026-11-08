@@ -8,7 +8,7 @@ service's RED metrics, and to see the service graph.
 the release running on the lab cluster (same settings and requests; it adds image digests, stricter security headers,
 spread constraints and the Prometheus and Tempo URLs through environment variables). Both profiles point the
 Prometheus data source at the Thanos querier; the lab switch from Prometheus `:9090` to Thanos is live (2026-11-08:
-data source healthy; Thanos on GCS, `PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures), and the lab keeps its SQLite database on a
+data source healthy; Thanos on GCS, `PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures), and the lab keeps its SQLite database on a
 1Gi PVC. The **production** profile (`values.yaml`
 alone: 2 replicas on an external database) passes `helm lint`, `helm template` and kubeconform (Kubernetes 1.36,
 strict); it has not been installed yet.

@@ -58,7 +58,7 @@ for r in $CM_RELEASE traefik:traefik prometheus:monitoring tempo:observability \
 done
 
 # 3. Pods Ready (Completed job pods ignored)
-OS_NS=""; kubectl get ns object-storage >/dev/null 2>&1 && OS_NS="object-storage"   # lab SeaweedFS
+OS_NS=""; kubectl get ns object-storage >/dev/null 2>&1 && OS_NS="object-storage"   # optional SeaweedFS fallback (OBJECT_STORE=seaweedfs)
 for ns in $CM_NS $OS_NS traefik monitoring observability tempo-apps; do
   bad="$(kubectl -n "$ns" get pods --no-headers 2>/dev/null | awk '$3!="Completed"{split($2,a,"/"); if (a[1]!=a[2] || $3!="Running") print $1}')"
   if [ -z "$bad" ]; then pass "pods Ready in $ns"; else fail "pods not Ready in $ns: ${bad//$'\n'/ }"; fi

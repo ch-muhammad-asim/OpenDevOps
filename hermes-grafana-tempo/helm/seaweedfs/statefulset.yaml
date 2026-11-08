@@ -1,5 +1,5 @@
 # SeaweedFS 4.52 as ONE process: `weed server` runs master, volume server, filer and the S3
-# gateway together. Lab only: one replica, replication 000 (no copies), data on one zonal PV.
+# gateway together. Small single-node fallback: one replica, replication 000 (no copies), data on one zonal PV.
 #
 # Image: chrislusf/seaweedfs, tag + multi-arch index digest (amd64, arm64, arm, 386, ppc64le,
 # s390x); the digest wins at pull time. The image has no USER (starts as root) and its

@@ -12,9 +12,7 @@ flowchart TB
     lp[("PVC: 10Gi standard-rwo<br/>WAL + generator WAL")]
     lg["grafana"]
     lm["Prometheus<br/>1 replica"]
-    subgraph los["namespace: object-storage"]
-      ls[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
-    end
+    ls[("GCS buckets: tempo-traces-&lt;suffix&gt; + thanos-metrics-&lt;suffix&gt; — 30-day storage, Workload Identity (bucket-scoped IAM condition)")]
     subgraph lmon["namespace: monitoring"]
       lsidecar["Thanos sidecar"]
       lstore["Thanos store-gateway"]
