@@ -1,0 +1,93 @@
+name: platform example static checks
+
+on:
+  pull_request:
+    paths:
+      - 'hermes-grafana-tempo/**'
+      - 'herdr/hermes-herdr/**'
+      - 'CONTRIBUTING.md'
+      - '.github/workflows/platform-examples.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'hermes-grafana-tempo/**'
+      - 'herdr/hermes-herdr/**'
+      - 'CONTRIBUTING.md'
+      - '.github/workflows/platform-examples.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-examples-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: Python, JSON and shell syntax (offline)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check Python and JSON without executing project code
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast
+          import json
+          roots = [Path("hermes-grafana-tempo"), Path("herdr/hermes-herdr")]
+          files = 0
+          for root in roots:
+              for file in sorted(root.rglob("*.py")):
+                  ast.parse(file.read_text(encoding="utf-8-sig"), filename=str(file))
+                  print("Python syntax OK:", file)
+                  files += 1
+              for file in sorted(root.rglob("*.json")):
+                  json.loads(file.read_text(encoding="utf-8-sig"))
+                  print("JSON syntax OK:", file)
+                  files += 1
+          if not files:
+              raise SystemExit("No Python/JSON files found; check paths")
+          print(f"PASS: {files} Python and JSON files")
+          PY
+      - name: Check Bash scripts without executing them
+        run: |
+          set -euo pipefail
+          find hermes-grafana-tempo herdr/hermes-herdr -type f -name '*.sh' -print0 \
+            | xargs -0 -r -n 1 bash -n
+          echo "PASS: shell script syntax"
+      - name: Check Node.js source syntax without installing dependencies
+        run: |
+          set -euo pipefail
+          find hermes-grafana-tempo/apps/nodejs -type f -name '*.js' -print0 \
+            | xargs -0 -r -n 1 node --check
+          echo "PASS: Node.js JavaScript syntax"
+
+  kustomize:
+    name: Render Kubernetes manifests without a cluster
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.1
+      - name: Render production and lab overlays (no apply / no kubeconfig)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rendered"
+          overlays=(
+            hermes-grafana-tempo/apps
+            hermes-grafana-tempo/apps/lab
+            hermes-grafana-tempo/hermes/base
+            hermes-grafana-tempo/hermes/lab
+            hermes-grafana-tempo/helm/thanos
+            hermes-grafana-tempo/helm/thanos/overlays/lab
+            herdr/hermes-herdr/k8s
+          )
+          for i in "${!overlays[@]}"; do
+            dir="${overlays[i]}"
+            kubectl kustomize "$dir" > "$RUNNER_TEMP/rendered/$i.yaml"
+            test -s "$RUNNER_TEMP/rendered/$i.yaml"
+            echo "PASS: rendered $dir"
+          done
+          echo "PASS: ${#overlays[@]} Kustomize overlays"

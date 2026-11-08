@@ -24,6 +24,21 @@ A PR should include a short purpose, implementation summary, evidence of testing
 
 Be respectful, constructive, and inclusive. Give actionable technical feedback; don't share other people's sensitive information. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
+## Automated checks and test boundaries
+
+The repository uses **path-scoped CI** so a change to one project does not require credentials or running another project's live cloud environment.
+
+| Scope | Automated checks | Deliberately not performed in routine PR CI |
+|---|---|---|
+| Root OSS docs | Required files and relative link resolution | External link health / license ownership review |
+| `docker-agent/` | Image builds, smoke checks, Trivy configuration/secret checks | Live model calls and production cluster operations |
+| `sandbox/` | Lint, secret/config checks, OpenShell policy proof; scheduled image scanning | Live sandbox proofs requiring the server, paid LLM calls |
+| `hermes-grafana-tempo/` + `herdr/hermes-herdr/` | Python / JSON / Bash syntax, Node source syntax, selected Kubernetes Kustomize renders | GKE deploys, actual node readiness, paid models, runtime integration tests, Helm dependency downloads |
+
+Run `python3 .github/scripts/check_repo_health.py` for root documentation checks. Run project-specific validation from its README when changing infrastructure behavior.
+
+**Do not describe syntax checks or manifest renders as production security validation.** The CI jobs are intentionally offline with no cloud credentials, and real end-to-end validation remains a separate, explicitly approved operation.
+
 ## Areas where help is welcome
 
 - Reproducing documented labs and reporting discrepancies
