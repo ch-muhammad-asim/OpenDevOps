@@ -9,11 +9,30 @@ flowchart TB
     direction TB
     lc["otel-collector<br/>1 replica"]
     lt["tempo — single binary<br/>grafana-community/tempo<br/>1 replica; in-process span delivery; no Kafka<br/>Embedded metrics-generator"]
-    lp[("PVC: 10Gi standard-rwo<br/>Trace blocks + WAL + generator WAL<br/>24h trace retention")]
+    lp[("PVC: 10Gi standard-rwo<br/>WAL + generator WAL")]
     lg["grafana"]
     lm["Prometheus<br/>1 replica"]
+    subgraph los["namespace: object-storage"]
+      ls[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
+    end
+    subgraph lmon["namespace: monitoring"]
+      lsidecar["Thanos sidecar"]
+      lstore["Thanos store-gateway"]
+      lquerier["Thanos querier"]
+      lcompactor["Thanos compactor<br/>Downsampling + 30-day retention"]
+    end
+    lh["Hermes trends skill"]
+    lm -->|TSDB blocks| lsidecar
+    lsidecar -->|upload blocks; thanos-metrics| ls
+    lstore -->|read blocks; thanos-metrics| ls
+    lcompactor -->|compact / downsample / retain; thanos-metrics| ls
+    lquerier -->|recent metrics| lsidecar
+    lquerier -->|historical metrics| lstore
+    lg -->|metrics datasource / PromQL queries| lquerier
+    lh -->|PromQL queries| lquerier
+    lt -->|Tempo blocks; 720h retention; tempo-traces| ls
     lc -->|OTLP :4317| lt
-    lt -->|local backend| lp
+    lt -->|WAL + generator WAL| lp
     lg -->|query :3200| lt
     lt -->|span metrics / service graph remote write| lm
   end
@@ -32,9 +51,27 @@ flowchart TB
       wi["ServiceAccount: observability/tempo<br/>GKE Workload Identity Federation<br/>Keyless; IAM scoped to trace bucket"]
     end
     kafka[("External Kafka-compatible queue<br/>Topic: tempo-traces<br/>TLS + SCRAM; replication factor 3<br/>Required; not installed by Tempo chart")]
-    gcs[("Google Cloud Storage<br/>Trace blocks<br/>14-day Tempo retention")]
+    gcs[("Google Cloud Storage<br/>Trace blocks<br/>30-day Tempo retention (720h)")]
     pg["grafana"]
     pm["Prometheus<br/>2 replicas; remote write to each pod"]
+    gm[("Google Cloud Storage<br/>Metrics bucket: thanos-metrics<br/>30-day retention")]
+    subgraph pmon["namespace: monitoring"]
+      psidecar["Thanos sidecar"]
+      pstore["Thanos store-gateway"]
+      pquerier["Thanos querier"]
+      pcompactor["Thanos compactor<br/>Downsampling + 30-day retention"]
+      pwi["Thanos ServiceAccounts<br/>GKE Workload Identity Federation<br/>Keyless; IAM scoped to metrics bucket"]
+    end
+    ph["Hermes trends skill"]
+    pm -->|TSDB blocks| psidecar
+    psidecar -->|upload blocks| gm
+    pstore -->|read blocks| gm
+    pcompactor -->|compact / downsample / retain| gm
+    pwi -.->|authorizes GCS access for Thanos components| gm
+    pquerier -->|recent metrics| psidecar
+    pquerier -->|historical metrics| pstore
+    pg -->|metrics datasource / PromQL queries| pquerier
+    ph -->|PromQL queries| pquerier
     pc -->|OTLP :4317| d
     d -->|produce spans| kafka
     kafka -->|consume| live & bb & mg
@@ -51,6 +88,6 @@ flowchart TB
   classDef storage fill:#fff7ed,stroke:#ea580c,color:#7c2d12
   classDef tempo fill:#f0fdf4,stroke:#16a34a,color:#14532d
   classDef access fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
-  class lp,kafka,gcs storage
-  class lt,d,live,bb,mg,qf,q,bs,bw tempo
-  class wi,lc,pc,lg,pg,lm,pm access
+  class lp,ls,kafka,gcs,gm storage
+  class lt,d,live,bb,mg,qf,q,bs,bw,lsidecar,lstore,lquerier,lcompactor,psidecar,pstore,pquerier,pcompactor tempo
+  class wi,pwi,lc,pc,lg,pg,lm,pm,lh,ph access

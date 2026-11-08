@@ -9,8 +9,8 @@ pipeline; its chat sends prompts only to the configured model provider, never in
 official OpenTelemetry SDKs, with production-grade defaults and a small lab profile.
 
 **Status:** ✅ lab profile live on GKE 1.36 (3 × `e2-standard-2`), 2026-11-08: `scripts/verify.sh` 0 failures on three
-consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 19/19 (Hermes runs its
-production overlay). The production profile
+consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 29/29 (2026-11-08; Hermes runs
+its production overlay). The production profile
 (tempo-distributed with GCS and Kafka, HA Prometheus, Collector HPA) renders and passes `helm lint` and
 `kubeconform -strict`; it has **not** been run on a cluster. See [Tests](#-tests).
 
@@ -80,6 +80,13 @@ flowchart TB
     end
     subgraph mon["namespace: monitoring — kube-prometheus-stack / release: prometheus"]
       prom["Prometheus<br/>prometheus-kube-prometheus-prometheus"]
+      sidecar["Thanos sidecar"]
+      store["Thanos store-gateway"]
+      querier["Thanos querier"]
+      compactor["Thanos compactor<br/>Downsampling + 30-day retention"]
+      prom -->|TSDB blocks| sidecar
+      querier -->|recent metrics| sidecar
+      querier -->|historical metrics| store
       am["Alertmanager"]
       exporters["kube-state-metrics + node-exporter<br/>Kubernetes metrics"]
       operator["Prometheus Operator<br/>ServiceMonitor + PrometheusRule"]
@@ -87,6 +94,14 @@ flowchart TB
       operator -.->|configures| prom
       prom -->|firing alerts| am
     end
+    subgraph storage["namespace: object-storage"]
+      seaweed[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
+    end
+    tempo -->|Tempo blocks; 720h retention; tempo-traces| seaweed
+    sidecar -->|upload blocks; thanos-metrics| seaweed
+    store -->|read blocks; thanos-metrics| seaweed
+    compactor -->|compact / downsample / retain; thanos-metrics| seaweed
+    gw -->|Hermes trends skill / PromQL queries| querier
     tr -->|HTTP| nx & nd & py
     tr -->|HTTP :80| graf
     tr -->|HTTP :9119| dash
@@ -94,14 +109,16 @@ flowchart TB
     gw -->|OTLP/HTTP :4318| col
     col -->|metrics scraped on :8889| prom
     tempo -->|metrics-generator remote write| prom
-    graf -->|PromQL queries| prom
+    graf -->|metrics datasource / PromQL queries| querier
   end
   cf -->|HTTPS to origin / Traefik :443| tr
   classDef edgeStyle fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
   classDef telemetry fill:#f0fdf4,stroke:#16a34a,color:#14532d
+  classDef storageStyle fill:#fff7ed,stroke:#ea580c,color:#7c2d12
   classDef workload fill:#faf5ff,stroke:#9333ea,color:#581c87
   class cf,tr edgeStyle
-  class col,tempo,graf,prom,am telemetry
+  class col,tempo,graf,prom,am,sidecar,store,querier,compactor telemetry
+  class seaweed storageStyle
   class nx,nd,py,dash,gw workload
 ```
 
@@ -119,7 +136,9 @@ flowchart TB
 | OpenTelemetry Collector | The single OTLP entry point: traces → Tempo, metrics → Prometheus, logs → debug | [`helm/otel-collector/`](helm/otel-collector/README.md) |
 | Tempo | Trace store and TraceQL API; metrics-generator writes span metrics and the service graph | [`helm/tempo/`](helm/tempo/README.md), [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
 | Grafana | UI with Prometheus, Tempo and Alertmanager data sources and the official Tempo dashboards | [`helm/grafana/`](helm/grafana/README.md) |
-| Prometheus | Metrics store; scrapes the Collector and exporters, receives Tempo's remote write, evaluates rules | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
+| Prometheus | Metrics store; scrapes the Collector and exporters, receives Tempo's remote write, evaluates rules; keeps 2 days locally | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
+| Thanos | Sidecar uploads Prometheus blocks to object storage; store gateway, querier and compactor serve 30 days of metrics (downsampled, deduplicated) | [`helm/thanos/`](helm/thanos/README.md) |
+| SeaweedFS (lab only) | In-cluster S3 object store on one PVC with buckets `tempo-traces` and `thanos-metrics`; production uses GCS | [`helm/seaweedfs/`](helm/seaweedfs/README.md) |
 | Alertmanager | Groups and routes firing alerts (critical → paging, warning → channel) | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | Prometheus Operator | Turns ServiceMonitors and PrometheusRules into Prometheus config | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | kube-state-metrics, node-exporter | Kubernetes object and node metrics | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
@@ -200,11 +219,30 @@ flowchart TB
     direction TB
     lc["otel-collector<br/>1 replica"]
     lt["tempo — single binary<br/>grafana-community/tempo<br/>1 replica; in-process span delivery; no Kafka<br/>Embedded metrics-generator"]
-    lp[("PVC: 10Gi standard-rwo<br/>Trace blocks + WAL + generator WAL<br/>24h trace retention")]
+    lp[("PVC: 10Gi standard-rwo<br/>WAL + generator WAL")]
     lg["grafana"]
     lm["Prometheus<br/>1 replica"]
+    subgraph los["namespace: object-storage"]
+      ls[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
+    end
+    subgraph lmon["namespace: monitoring"]
+      lsidecar["Thanos sidecar"]
+      lstore["Thanos store-gateway"]
+      lquerier["Thanos querier"]
+      lcompactor["Thanos compactor<br/>Downsampling + 30-day retention"]
+    end
+    lh["Hermes trends skill"]
+    lm -->|TSDB blocks| lsidecar
+    lsidecar -->|upload blocks; thanos-metrics| ls
+    lstore -->|read blocks; thanos-metrics| ls
+    lcompactor -->|compact / downsample / retain; thanos-metrics| ls
+    lquerier -->|recent metrics| lsidecar
+    lquerier -->|historical metrics| lstore
+    lg -->|metrics datasource / PromQL queries| lquerier
+    lh -->|PromQL queries| lquerier
+    lt -->|Tempo blocks; 720h retention; tempo-traces| ls
     lc -->|OTLP :4317| lt
-    lt -->|local backend| lp
+    lt -->|WAL + generator WAL| lp
     lg -->|query :3200| lt
     lt -->|span metrics / service graph remote write| lm
   end
@@ -223,9 +261,27 @@ flowchart TB
       wi["ServiceAccount: observability/tempo<br/>GKE Workload Identity Federation<br/>Keyless; IAM scoped to trace bucket"]
     end
     kafka[("External Kafka-compatible queue<br/>Topic: tempo-traces<br/>TLS + SCRAM; replication factor 3<br/>Required; not installed by Tempo chart")]
-    gcs[("Google Cloud Storage<br/>Trace blocks<br/>14-day Tempo retention")]
+    gcs[("Google Cloud Storage<br/>Trace blocks<br/>30-day Tempo retention (720h)")]
     pg["grafana"]
     pm["Prometheus<br/>2 replicas; remote write to each pod"]
+    gm[("Google Cloud Storage<br/>Metrics bucket: thanos-metrics<br/>30-day retention")]
+    subgraph pmon["namespace: monitoring"]
+      psidecar["Thanos sidecar"]
+      pstore["Thanos store-gateway"]
+      pquerier["Thanos querier"]
+      pcompactor["Thanos compactor<br/>Downsampling + 30-day retention"]
+      pwi["Thanos ServiceAccounts<br/>GKE Workload Identity Federation<br/>Keyless; IAM scoped to metrics bucket"]
+    end
+    ph["Hermes trends skill"]
+    pm -->|TSDB blocks| psidecar
+    psidecar -->|upload blocks| gm
+    pstore -->|read blocks| gm
+    pcompactor -->|compact / downsample / retain| gm
+    pwi -.->|authorizes GCS access for Thanos components| gm
+    pquerier -->|recent metrics| psidecar
+    pquerier -->|historical metrics| pstore
+    pg -->|metrics datasource / PromQL queries| pquerier
+    ph -->|PromQL queries| pquerier
     pc -->|OTLP :4317| d
     d -->|produce spans| kafka
     kafka -->|consume| live & bb & mg
@@ -242,9 +298,9 @@ flowchart TB
   classDef storage fill:#fff7ed,stroke:#ea580c,color:#7c2d12
   classDef tempo fill:#f0fdf4,stroke:#16a34a,color:#14532d
   classDef access fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
-  class lp,kafka,gcs storage
-  class lt,d,live,bb,mg,qf,q,bs,bw tempo
-  class wi,lc,pc,lg,pg,lm,pm access
+  class lp,ls,kafka,gcs,gm storage
+  class lt,d,live,bb,mg,qf,q,bs,bw,lsidecar,lstore,lquerier,lcompactor,psidecar,pstore,pquerier,pcompactor tempo
+  class wi,pwi,lc,pc,lg,pg,lm,pm,lh,ph access
 ```
 
 Production-grade settings are the defaults (`PROFILE=prod`); the lab profile (`PROFILE=lab`) only shrinks sizes to
@@ -254,15 +310,18 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 |---|---|---|---|
 | Cluster | Zonal, 3 × `e2-standard-2` (6 vCPU / 24 GB) | Regional (≥ 2 zones), larger node pool | [`infra/`](infra/README.md) |
 | Tempo | Single binary `grafana-community/tempo` 3.2.1, embedded metrics-generator, no Kafka | `grafana-community/tempo-distributed` 3.27.0: distributor, zone-aware live-stores, block-builder, metrics-generator, queriers | [`helm/tempo/`](helm/tempo/README.md), [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
-| Trace storage | 10Gi PVC, 24h retention | GCS via keyless Workload Identity scoped to the bucket, 14-day retention | [`helm/`](helm/README.md), [`infra/`](infra/README.md) |
+| Object storage | SeaweedFS in-cluster S3 (one pod, 100Gi PVC), buckets `tempo-traces` and `thanos-metrics` | GCS buckets for traces and metrics, keyless GKE Workload Identity, IAM scoped to each bucket | [`helm/seaweedfs/`](helm/seaweedfs/README.md), [`helm/thanos/`](helm/thanos/README.md), [`infra/`](infra/README.md) |
+| Retention | 30 days: traces 720h (Tempo `block_retention`), metrics 30 days through Thanos (Prometheus keeps 2 days locally) | Same 30 days | [`helm/tempo/`](helm/tempo/README.md), [`helm/thanos/`](helm/thanos/README.md) |
 | Ingest queue | None (in-process) | External Kafka-compatible queue (TLS + SCRAM, RF 3), required by Tempo 3.x distributed mode | [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
 | OTel Collector | 1 replica, 100m / 256Mi | HPA 3–12, PDB, zone spread; `memory_limiter`, batching, retry + sending queue | [`helm/otel-collector/`](helm/otel-collector/README.md) |
-| Prometheus | 1 replica, 1d / 5GiB, 10Gi PVC | 2 replicas (HA pair), 15d / 90GiB, 100Gi PVC, PDB | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
+| Prometheus | 1 replica, 2 days local + Thanos sidecar | 2 replicas (HA pair, deduplicated by Thanos), 2 days local on a 100Gi PVC + Thanos sidecar, PDB | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
+| Thanos | Query, store gateway, compactor on SeaweedFS | Same components on GCS with Workload Identity | [`helm/thanos/`](helm/thanos/README.md) |
 | Alertmanager | 1 replica | 2 replicas, critical → paging, warning → channel (receivers from a Secret) | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | Grafana | 1 replica | 2 replicas with an external database (Secret `grafana-db`); no anonymous access | [`helm/grafana/`](helm/grafana/README.md) |
 | Sample apps | Same manifests as production | 2 replicas, PDB, spread, SLO alerts (the app code itself is a demo) | [`apps/`](apps/README.md) |
 | Hermes Agent | Lab overlay `hermes/lab/` (`emptyDir` home, 50m / 256Mi): validated, not the one running | **Runs live on the lab cluster:** `hermes/base/` (10Gi PVC home, 100m / 384Mi, PDB, runbooks) | [`hermes/lab/`](hermes/lab/README.md), [`hermes/base/`](hermes/base/README.md) |
 | Edge TLS | Cloudflare edge TLS on every host (proxied records, SSL mode Full); Traefik serves its default certificate to Cloudflare; no cert-manager (`TLS_MODE=cloudflare`) | Cloudflare **Full (strict)** with validated origin certificates (`TLS_MODE=letsencrypt` or a Cloudflare Origin CA certificate) | [`k8s/`](k8s/README.md), [`scripts/`](scripts/README.md) |
+| Costs | All software is free and open source (no licences); billed: the persistent disks (incl. SeaweedFS's PVC) and the GKE nodes and load balancer they run on | Same; plus GCS storage and operations for the trace and metrics buckets | [`helm/thanos/`](helm/thanos/README.md) |
 | Everywhere | Pinned chart versions. By digest: platform chart images, Hermes, the deployed sample-app images (`apps/deploy-apps.sh` resolves each tag to `@sha256`) and the Python base image; by tag only: the Node.js base image of the Next.js and Node.js apps. Requests/limits, Pod Security `restricted` where the workload allows, default-deny NetworkPolicies, PrometheusRules with runbooks | Same | each folder |
 
 ## 🚀 Quickstart
@@ -309,17 +368,18 @@ Chat turns go to an external model provider over HTTPS; the gateway's telemetry 
 
 | Provider | Status | Setup |
 |---|---|---|
-| Cloudflare Workers AI (`@cf/openai/gpt-oss-120b`, tool calling) | ✅ live-tested 2026-11-08 | [`hermes/README.md`](hermes/README.md#-chat) |
-| OpenCode (free models) | Being added as a no-cost alternative | [`hermes/README.md`](hermes/README.md) |
+| Cloudflare Workers AI (default; `@cf/qwen/qwen3.8-27b`, tool calling, free daily quota) | ✅ live-tested 2026-11-08 | [`hermes/README.md`](hermes/README.md#-model-provider) |
+| OpenCode Zen / Go (`MODEL_PROVIDER=opencode`) | Supported alternative; Zen bills per token, Go is a subscription | [`hermes/README.md`](hermes/README.md#-model-provider) |
 
 ### 🧰 Observability skill
 
 A read-only Hermes skill ([`SKILL.md`](hermes/base/skills/grafana-tempo-observability/SKILL.md) + `scripts/obs.py`, Python standard library only) lets the chat
-diagnose this platform: query Tempo (TraceQL), Prometheus (PromQL) and Grafana, quote numbers and trace IDs, and
+diagnose this platform: query Tempo (TraceQL), metrics (PromQL through the Thanos querier) and Grafana, quote numbers and trace IDs, and
 explain the OpenTelemetry setup. Ask, for example, "diagnose the platform" or "which endpoint is slowest?". It is
-mounted read-only into the Hermes pod, and only the gateway pod may reach Prometheus `:9090`, Tempo `:3200` and
-Grafana `:3000` ([`networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml)); Grafana access
-uses the Viewer role. Details: [`hermes/README.md`](hermes/README.md).
+mounted read-only into the Hermes pod, and only the gateway pod may reach the Thanos querier `:10902`, Tempo `:3200`
+and Grafana `:3000` ([`networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml)); Grafana
+access uses the Viewer role. Prometheus `:9090` is deliberately not reachable from Hermes: it serves remote write,
+`/-/reload` and `/-/quit` without authentication. Details: [`hermes/README.md`](hermes/README.md).
 
 ## 🧭 Documentation map
 
@@ -358,8 +418,8 @@ uses the Viewer role. Details: [`hermes/README.md`](hermes/README.md).
 | Container privilege abuse | Non-root, read-only root FS, all capabilities dropped, seccomp; Pod Security `restricted` where possible (`monitoring` is `privileged` for node-exporter) | each folder |
 | Secrets in Git | Grafana admin, Cloudflare token, Hermes credentials only in Kubernetes Secrets (or synced from Secret Manager); never printed | [`scripts/`](scripts/README.md), [`hermes/`](hermes/README.md) |
 | Conversation content in telemetry | Hermes exports only content-free health signals; chat text never reaches metrics, traces or logs | [`hermes/`](hermes/README.md) |
-| Hermes reading the observability stack | Observability skill: query APIs only, Grafana Viewer role; NetworkPolicies admit only the Hermes gateway pod to Prometheus `:9090`, Tempo `:3200`, Grafana `:3000` | [`hermes/base/networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml) |
-| Prompts leaving the cluster | Hermes chat sends prompts to the model provider over HTTPS; egress allows public `:443` only (private, metadata and Service ranges excluded); model key only in a Secret | [`hermes/`](hermes/README.md) |
+| Hermes reading the observability stack | Observability skill: query APIs only, Grafana Viewer role (writes → 403); NetworkPolicies admit only the Hermes gateway pod to the Thanos querier `:10902`, Tempo `:3200` and Grafana `:3000`; Prometheus `:9090` (unauthenticated remote write, `/-/reload`, `/-/quit`) is not reachable from Hermes | [`hermes/base/networkpolicy-observability.yaml`](hermes/base/networkpolicy-observability.yaml) |
+| Prompts leaving the cluster | Hermes chat sends prompts to the model provider over HTTPS; Hermes egress is limited to DNS, the Collector `:4318`, Thanos querier `:10902`, Tempo `:3200`, Grafana `:3000` and public `:443` (private, metadata and Service ranges excluded); model key only in a Secret | [`hermes/`](hermes/README.md) |
 
 Not protected (by design): the sample apps have no login and include CPU- and memory-heavy endpoints; Cloudflare rate
 limits are not set.
@@ -384,7 +444,7 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 |---|---|---|
 | 2026-11-08 | `PROFILE=lab scripts/verify.sh` (releases, pods, health, test trace through Collector → Tempo → Grafana, scraping, NetworkPolicy, public HTTPS) | ✅ 0 failures, three consecutive runs |
 | 2026-11-08 | Sample apps live (`scripts/load.sh public`, TraceQL per issue, alert rules) | ✅ every planted issue found; 200/500/502/504 mix as designed; 12 rules loaded |
-| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus, rules, Tempo, Grafana, public URL, Hermes login, model key) | ✅ 19/19; chats through the API server and the dashboard got model replies |
+| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus metrics and rules, Tempo, Grafana, public URL, Hermes login, model settings, observability skill: Thanos/Tempo/Grafana reads, Prometheus `:9090` blocked, Grafana write → 403, `diagnose`, `trends`) | ✅ 29/29; chats through the API server and the dashboard got model replies |
 | 2026-11-08 | Production profiles: `helm template`, `helm lint`, `kubeconform -strict` (Kubernetes 1.36) | ✅ render and validate; not run live |
 
 ## ✅ Production checklist
@@ -407,10 +467,12 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 | Item | Lab | Production |
 |---|---|---|
 | Compute | 3 × `e2-standard-2` | Sized from the production requests (see [`helm/`](helm/README.md#-sizing-requests)) |
-| Storage | Small PD volumes (Prometheus 10Gi, Tempo 10Gi, Hermes none) | Prometheus 2 × 100Gi, Tempo live-store PVCs, GCS bucket + operations |
+| Storage | Persistent disks: SeaweedFS 100Gi (traces + metrics, 30 days), Prometheus (2 days), Tempo WAL; Hermes 10Gi | Prometheus 2 × 100Gi, Tempo live-store PVCs, GCS buckets (storage + operations) |
 | Network | One load balancer; Cloudflare in front | Same, plus Kafka and cross-zone traffic |
 
-Costs were not measured; trim them with retention, sampling and the HPA limits.
+All components are open source (Tempo and Grafana AGPL-3.0; Prometheus, Thanos, SeaweedFS and the OTel Collector
+Apache-2.0), so there are no licence fees: only the cloud resources above are billed. Costs were not measured; trim
+them with retention, sampling and the HPA limits.
 
 ## 🧹 Teardown
 

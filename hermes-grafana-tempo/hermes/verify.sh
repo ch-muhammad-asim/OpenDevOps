@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify Hermes end to end: pod Ready -> Prometheus metrics + rules -> Tempo spans -> Grafana dashboard
 # and data sources -> public URL (Cloudflare-only route, no proxy login) and the Hermes login -> model settings
-# -> read-only observability skill (loaded, reads allowed, Grafana write refused).
+# -> read-only observability skill (loaded, reads via Thanos/Tempo/Grafana, Prometheus :9090 blocked, Grafana write refused).
 # Prints PASS/FAIL per check; exit code = number of failures. Prometheus, Tempo and Grafana are reached
 # with kubectl port-forward on free local ports (the API server's service proxy is blocked by the
 # default-deny ingress NetworkPolicies). Credentials are read from Secrets into variables and passed to
@@ -122,9 +122,15 @@ if [[ "$gb" == ok ]]; then pass "dashboard chat can attach to the gateway (HERME
 # 8. Read-only observability skill: loaded, reads work through the NetworkPolicies, writes are refused
 OBS=/opt/skills/observability/grafana-tempo-observability/scripts/obs.py
 gx() { kubectl -n hermes exec deploy/hermes-gateway -c gateway -- "$@" 2>/dev/null; }
-if gx env COLUMNS=200 hermes skills list | grep -q 'grafana-tempo-observability'; then pass "skill grafana-tempo-observability loaded"; else fail "skill grafana-tempo-observability not listed by 'hermes skills list'"; fi
+sk="$(gx env COLUMNS=200 hermes skills list)"
+if grep -q 'grafana-tempo-observability' <<<"$sk"; then pass "skill grafana-tempo-observability loaded"; else fail "skill grafana-tempo-observability not listed by 'hermes skills list'"; fi
 v="$(gx python3 "$OBS" prom 'max(hermes_gateway_up)' | json 'd["result"][0]["value"] if d.get("result") else d.get("error", "none")' 2>/dev/null)"
-if [[ "$v" == 1 ]]; then pass "skill -> Prometheus :9090 (max(hermes_gateway_up) = 1)"; else fail "skill -> Prometheus: $v"; fi
+if [[ "$v" == 1 ]]; then pass "skill -> Thanos querier :10902 (max(hermes_gateway_up) = 1)"; else fail "skill -> Thanos querier: $v"; fi
+v="$(gx python3 -c 'import socket
+s = socket.socket(); s.settimeout(5)
+try: s.connect(("prometheus-kube-prometheus-prometheus.monitoring", 9090)); print("open")
+except Exception as e: print("blocked")')"
+if [[ "$v" == blocked ]]; then pass "Hermes pod cannot reach Prometheus :9090 (remote-write/reload/quit not exposed to it)"; else fail "Hermes pod reaches Prometheus :9090 ($v)"; fi
 v="$(gx python3 "$OBS" traceql '{ resource.service.name = "hermes-gateway" }' --since 30m --limit 3 | json 'd.get("error") or d["count"]' 2>/dev/null)"
 if [[ "$v" =~ ^[1-9] ]]; then pass "skill -> Tempo :3200 ($v traces)"; else fail "skill -> Tempo: $v"; fi
 v="$(gx python3 "$OBS" dashboards hermes | json 'd.get("error") if isinstance(d, dict) else len(d)' 2>/dev/null)"
@@ -137,6 +143,9 @@ except urllib.error.HTTPError as e: print(e.code)')"
 if [[ "$v" == 403 ]]; then pass "Grafana write with the skill's token -> 403 (Viewer, read-only)"; else fail "Grafana write with the skill's token -> $v (want 403)"; fi
 v="$(gx python3 "$OBS" diagnose --summary | head -n1)"
 if [[ "$v" == diagnose:* ]]; then pass "skill diagnose runs: ${v#diagnose: }"; else fail "skill diagnose: ${v:0:120}"; fi
+
+v="$(gx python3 "$OBS" trends | json '" | ".join([d.get("comparison", ""), "history " + str(d.get("history_available_h")) + " h", str(len(d.get("trends", []))) + " trends", str(d.get("took_s")) + " s"])' 2>/dev/null)"
+if [[ "$v" == *window* ]]; then pass "skill trends runs: $v"; else fail "skill trends: ${v:0:120}"; fi
 
 if [[ "${VERIFY_CHAT:-0}" == 1 ]]; then
   pod="$(kubectl -n hermes get pod -l app.kubernetes.io/name=hermes-gateway -o jsonpath='{.items[0].metadata.name}')"

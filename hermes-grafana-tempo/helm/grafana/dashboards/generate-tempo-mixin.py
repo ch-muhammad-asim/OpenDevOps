@@ -87,6 +87,9 @@ def monolithic(text):
     text = re.sub(rf'container=~?({Q})([^"\\]*)\1', container, text)
     text = re.sub(rf'(statefulset|deployment)=~?({Q})([^"\\]*)\2', workload, text)
     text = re.sub(rf'pod=~?({Q})([^"\\]*)\1', pod, text)
+    # cluster/namespace variables default to "All" (allValue ".*"): exact-match selectors
+    # (cluster="$cluster") would then match nothing, so make them regex matchers.
+    text = re.sub(rf'\b(cluster|namespace)=({Q})(\$\{{?(?:cluster|namespace)\}}?)\2', r'\1=~\2\3\2', text)
     return text
 
 

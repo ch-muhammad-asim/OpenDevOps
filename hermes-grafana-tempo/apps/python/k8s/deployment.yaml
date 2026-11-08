@@ -1,5 +1,5 @@
 # python-inventory: FastAPI inventory API with planted bugs, traced with OpenTelemetry (zero-code).
-# Image tag tempo-apps/python:1.0.2 is rewritten to the registry path by apps/deploy-apps.sh.
+# Image tag tempo-apps/python:1.0.3 is rewritten to the registry path by apps/deploy-apps.sh.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: python
-          image: tempo-apps/python:1.0.2
+          image: tempo-apps/python:1.0.3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -79,7 +79,7 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: python-inventory
             - name: OTEL_RESOURCE_ATTRIBUTES
-              value: deployment.environment.name=$(DEPLOY_ENV),service.namespace=tempo-apps,service.version=1.0.2,k8s.namespace.name=$(K8S_NAMESPACE_NAME),k8s.pod.name=$(K8S_POD_NAME)
+              value: deployment.environment.name=$(DEPLOY_ENV),service.namespace=tempo-apps,service.version=1.0.3,k8s.namespace.name=$(K8S_NAMESPACE_NAME),k8s.pod.name=$(K8S_POD_NAME)
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-collector.observability:4318
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
@@ -122,8 +122,8 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
+            timeoutSeconds: 10
+            failureThreshold: 6           # ~2 min unresponsive before a restart: overload is readiness' job
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

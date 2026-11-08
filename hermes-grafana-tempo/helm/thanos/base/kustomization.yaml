@@ -1,0 +1,18 @@
+# Thanos query, store gateway and compactor for 30-day metrics: the production manifests (GCS).
+# Applied through ../kustomization.yaml (production) or ../overlays/lab (SeaweedFS S3).
+# The sidecar runs inside the Prometheus pods (helm/kube-prometheus-stack/values.yaml).
+# Needs: namespace monitoring, the Prometheus operator CRDs, Secret monitoring/thanos-objstore
+# (key objstore.yml, see README "Install") and the Workload Identity grant on the bucket.
+#   kubectl apply -k helm/thanos              (production)
+#   kubectl apply -k helm/thanos/overlays/lab (lab)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - serviceaccounts.yaml
+  - query.yaml
+  - store.yaml
+  - compact.yaml
+  - servicemonitors.yaml
+  - prometheusrule.yaml
+  - networkpolicies.yaml

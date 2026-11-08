@@ -8,7 +8,7 @@ ClusterIP Service `python` on port 8000. **Status:** ✅ renders with `kubectl k
 
 | File | What it defines (one line) |
 |---|---|
-| [`deployment.yaml`](deployment.yaml) | 2 replicas (lab: 1), node/zone topology spread, surge-only rollout, preStop drain, image `tempo-apps/python:1.0.2`, OTel env, probes, resources, restricted security context |
+| [`deployment.yaml`](deployment.yaml) | 2 replicas (lab: 1), node/zone topology spread, surge-only rollout, preStop drain, image `tempo-apps/python:1.0.3`, OTel env, probes, resources, restricted security context |
 | [`service.yaml`](service.yaml) | ClusterIP `python`, port 8000 -> container port `http` (8000) |
 | [`pdb.yaml`](pdb.yaml) | PodDisruptionBudget `maxUnavailable: 1`: drains/upgrades keep a pod serving, never block with 1 replica |
 | [`kustomization.yaml`](kustomization.yaml) | Lists the three files; included by [`apps/kustomization.yaml`](../../kustomization.yaml) |
@@ -18,11 +18,11 @@ ClusterIP Service `python` on port 8000. **Status:** ✅ renders with `kubectl k
 | Setting | Value | Why |
 |---|---|---|
 | Labels | `app.kubernetes.io/name=python`, `app.kubernetes.io/part-of=tempo-apps` | Selectors, NetworkPolicies, `kubectl get -l` |
-| Image | `tempo-apps/python:1.0.2` | [`apps/deploy-apps.sh`](../../deploy-apps.sh) replaces it with `<registry>/python@sha256:<digest>` |
+| Image | `tempo-apps/python:1.0.3` | [`apps/deploy-apps.sh`](../../deploy-apps.sh) replaces it with `<registry>/python@sha256:<digest>` |
 | OTLP endpoint | `http://otel-collector.observability:4318`, `http/protobuf` | The single Collector entry point |
 | Resource attributes | `deployment.environment.name=lab`, `service.namespace=tempo-apps`, `k8s.namespace.name`, `k8s.pod.name` | Namespace and pod name come from the downward API (`$(VAR)` expansion) |
 | Resources | Requests 50m / 96Mi, limits 500m / 256Mi | Fits small nodes; CPU limit makes the CPU-hog bug easy to see |
-| Probes | Readiness and liveness `GET /healthz`, timeouts 3 s / 5 s | `/healthz` is not traced; the timeouts tolerate the planted event-loop block |
+| Probes | Readiness and liveness `GET /healthz`, timeouts 3 s / 10 s; liveness restarts after 6 x 20 s | `/healthz` is not traced; the timeouts tolerate the planted event-loop block |
 | Security context | `runAsNonRoot`, uid/gid 10001, `allowPrivilegeEscalation: false`, drop `ALL`, `seccompProfile: RuntimeDefault`, `readOnlyRootFilesystem: true` | Meets Pod Security "restricted" (namespace warns/audits at restricted) |
 | Writable path | emptyDir on `/tmp` (32Mi) | SQLite database file |
 | Service account token | `automountServiceAccountToken: false` | The app never calls the Kubernetes API |
@@ -41,7 +41,7 @@ curl -s http://127.0.0.1:8000/healthz                          # expect: {"statu
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ImagePullBackOff` on `tempo-apps/python:1.0.2` | Applied with plain `kubectl apply -k`, registry not set | Use `apps/deploy-apps.sh` |
+| `ImagePullBackOff` on `tempo-apps/python:1.0.3` | Applied with plain `kubectl apply -k`, registry not set | Use `apps/deploy-apps.sh` |
 | PodSecurity warning on apply | A security context field was removed | Restore the fields in [`deployment.yaml`](deployment.yaml) |
 | No traces from the pod | Collector unreachable | Check the `otel-collector-from-senders` NetworkPolicy and the Collector Service in `observability` |
 

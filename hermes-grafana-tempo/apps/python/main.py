@@ -60,7 +60,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="python-inventory", version="1.0.2", lifespan=lifespan)
+app = FastAPI(title="python-inventory", version="1.0.3", lifespan=lifespan)
 
 
 SVC = 'resource.service.name = "python-inventory"'

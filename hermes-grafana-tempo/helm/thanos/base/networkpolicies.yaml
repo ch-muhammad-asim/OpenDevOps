@@ -1,0 +1,109 @@
+# Ingress allows for Thanos in namespace monitoring, which has default-deny ingress
+# (k8s/networkpolicies.yaml). Ports are pod (container) ports. Egress is not restricted in
+# monitoring: the sidecar, store gateway and compactor reach GCS (443) and the GKE metadata
+# server (Workload Identity) directly.
+# Pod labels: thanos-query|thanos-store|thanos-compact = app.kubernetes.io/name;
+# Prometheus (with the sidecar) = app.kubernetes.io/name=prometheus;
+# Grafana = app.kubernetes.io/instance=grafana in observability.
+
+# Grafana (PromQL data source) -> thanos-query HTTP 10902; Prometheus scrapes it on 10902.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thanos-query-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-query
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - protocol: TCP
+          port: 10902
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 10902
+---
+# thanos-query -> store gateway StoreAPI gRPC 10901; Prometheus scrapes it on 10902.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thanos-store-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-store
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+      ports:
+        - protocol: TCP
+          port: 10901
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 10902
+---
+# Compactor: Prometheus scrape only (10902). Nothing else talks to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thanos-compact-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-compact
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 10902
+---
+# thanos-query -> Thanos sidecar StoreAPI gRPC 10901 in the Prometheus pods; Prometheus scrapes
+# the sidecar on 10902. (prometheus-ingress in k8s/networkpolicies.yaml also admits every pod in
+# monitoring; this policy keeps the Thanos flow explicit if that rule is ever narrowed.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thanos-sidecar-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+      ports:
+        - protocol: TCP
+          port: 10901
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 10902

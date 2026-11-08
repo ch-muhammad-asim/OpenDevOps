@@ -1,0 +1,166 @@
+# Thanos query: PromQL API for Grafana (uid "prometheus") on 10902. Fans out over gRPC to the
+# sidecars of both Prometheus replicas (last ~2 days, not yet uploaded) and to the store
+# gateways (everything in GCS), then deduplicates the HA pair on prometheus_replica.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: thanos-query-endpoints
+  labels:
+    app.kubernetes.io/name: thanos-query
+    app.kubernetes.io/part-of: thanos
+data:
+  # DNS SRV discovery on the headless Services (port name "grpc"), re-resolved every 30s.
+  # The sidecar Service is rendered by kube-prometheus-stack (prometheus.thanosService).
+  endpoints.yaml: |
+    endpoints:
+      - address: dnssrv+_grpc._tcp.prometheus-kube-prometheus-thanos-discovery.monitoring.svc.cluster.local
+      - address: dnssrv+_grpc._tcp.thanos-store.monitoring.svc.cluster.local
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-query
+  labels:
+    app.kubernetes.io/name: thanos-query
+    app.kubernetes.io/component: query
+    app.kubernetes.io/part-of: thanos
+    app.kubernetes.io/version: v0.42.5
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-query
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thanos-query
+        app.kubernetes.io/component: query
+        app.kubernetes.io/part-of: thanos
+        app.kubernetes.io/version: v0.42.5
+    spec:
+      serviceAccountName: thanos-query
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120   # let running queries (timeout 2m) finish
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+          matchLabelKeys: [pod-template-hash]
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+          matchLabelKeys: [pod-template-hash]
+      containers:
+        - name: thanos-query
+          image: quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
+          args:
+            - query
+            - --log.level=info
+            - --log.format=logfmt
+            - --http-address=0.0.0.0:10902
+            - --grpc-address=0.0.0.0:10901
+            - --endpoint.sd-config-file=/etc/thanos/endpoints/endpoints.yaml
+            - --endpoint.sd-config-reload-interval=5m
+            - --store.sd-dns-interval=30s
+            # Prometheus operator external label: prometheus_replica=prometheus-<name>-<N>.
+            - --query.replica-label=prometheus_replica
+            # Long ranges read 5m/1h downsampled blocks automatically (max_source_resolution = step/5).
+            - --query.auto-downsampling
+            - --query.timeout=2m
+            - --query.max-concurrent=20
+            # A slow or missing store returns a partial result with a warning instead of an error.
+            - --query.partial-response
+          ports:
+            - name: http
+              containerPort: 10902
+              protocol: TCP
+            - name: grpc
+              containerPort: 10901
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: endpoints
+              mountPath: /etc/thanos/endpoints
+              readOnly: true
+      volumes:
+        - name: endpoints
+          configMap:
+            name: thanos-query-endpoints
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-query
+  labels:
+    app.kubernetes.io/name: thanos-query
+    app.kubernetes.io/component: query
+    app.kubernetes.io/part-of: thanos
+spec:
+  type: ClusterIP
+  # One Grafana pod keeps reading the same querier (consistent partial-response behaviour).
+  sessionAffinity: ClientIP
+  selector:
+    app.kubernetes.io/name: thanos-query
+  ports:
+    - name: http
+      port: 10902
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 10901
+      targetPort: grpc
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: thanos-query
+  labels:
+    app.kubernetes.io/name: thanos-query
+    app.kubernetes.io/part-of: thanos
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-query

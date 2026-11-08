@@ -1,0 +1,120 @@
+# NetworkPolicies (enforced by GKE Dataplane V2): INGRESS for namespace object-storage.
+# Default deny, then explicit allows. Egress stays open (DNS, image pulls), like k8s/.
+# Kubelet probes come from the node and are always allowed.
+#
+# Pod labels used (checked against the running pods / manifests):
+#   seaweedfs          app.kubernetes.io/name=seaweedfs            (this directory)
+#   bootstrap Job      app.kubernetes.io/name=seaweedfs-bootstrap  (this directory)
+#   prometheus         app.kubernetes.io/name=prometheus           (ns monitoring; the Thanos
+#                      sidecar runs in this pod and uploads blocks)
+#   thanos-*           app.kubernetes.io/name=thanos-store|thanos-compact|thanos-query
+#                      (ns monitoring, helm/thanos)
+#   tempo              app.kubernetes.io/instance=tempo            (ns observability; lab
+#                      single binary and every tempo-distributed component)
+# NetworkPolicy ports are POD (container) ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: object-storage
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# S3 API (8333): only the object-store clients. Each one still needs its own S3 identity,
+# limited to its bucket (s3.json).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seaweedfs-s3-from-clients
+  namespace: object-storage
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # Thanos sidecar (inside the Prometheus pod), store gateway, compactor, query
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [prometheus, thanos-store, thanos-compact, thanos-query]
+        # Tempo (trace blocks)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+        # Bootstrap Job readiness check (GET /healthz, no credentials)
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: seaweedfs-bootstrap
+      ports:
+        - protocol: TCP
+          port: 8333
+---
+# Prometheus scrapes SeaweedFS metrics (9327, ServiceMonitor seaweedfs).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seaweedfs-metrics-from-prometheus
+  namespace: object-storage
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9327
+---
+# Internal ports (master 9333/19333, volume 8080/18080, filer 8888/18888):
+#   - from the SeaweedFS pod itself: its components dial each other via the pod's own DNS
+#     name (-ip), i.e. the pod IP, not loopback;
+#   - from the bootstrap Job: `weed shell` asks the master, then calls the filer over gRPC.
+# Not reachable from any other namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seaweedfs-internal
+  namespace: object-storage
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: seaweedfs
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: seaweedfs-bootstrap
+      ports:
+        - protocol: TCP
+          port: 9333
+        - protocol: TCP
+          port: 19333
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 18080
+        - protocol: TCP
+          port: 8888
+        - protocol: TCP
+          port: 18888

@@ -2,12 +2,13 @@
 #   helm upgrade --install grafana grafana-community/grafana --version 14.4.0 -n observability \
 #     -f helm/grafana/values.yaml -f helm/grafana/values-lab.yaml
 # Target: 3 x e2-standard-2 in one zone, shared with the whole stack.
-# Only what differs from production: one replica on SQLite (emptyDir, no external database),
-# no HA gossip, no PDB, small requests, single-binary Tempo endpoint, the Debian-based image tag
-# the lab runs. Security settings, sidecars and data source UIDs stay as in production.
+# Only what differs from production: one replica on SQLite (1Gi PVC, no external database),
+# no HA gossip, no PDB, small requests, the single-binary Tempo endpoint, the Debian-based image tag
+# the lab runs. Security settings, sidecars, data source UIDs and the Prometheus data source URL
+# (Thanos query, as in production) stay as in production.
 
 replicas: 1
-envFromSecret: ""          # no grafana-db Secret: SQLite in an emptyDir (state lost on restart)
+envFromSecret: ""          # no grafana-db Secret: SQLite on the 1Gi PVC below (survives restarts)
 headlessService: false
 podDisruptionBudget: null  # one replica: no PDB, node drains are not blocked
 
@@ -23,8 +24,26 @@ resources:
     memory: 512Mi
 
 env:
+  # Same as production: Thanos query (30 days from SeaweedFS S3 via thanos-store + the last 2 days from
+  # the Prometheus sidecar; helm/thanos/overlays/lab). Restated so the lab never falls back to :9090.
+  PROMETHEUS_QUERY_URL: http://thanos-query.monitoring:10902
   TEMPO_QUERY_URL: http://tempo.observability:3200   # lab: Tempo single binary (helm/tempo/)
 
 grafana.ini:
   unified_alerting:
     ha_peers: ""             # empty = no alerting cluster (single replica); the rest is unused
+
+# Lab has no external database: keep Grafana's SQLite (service accounts and their tokens,
+# UI-made dashboards, annotations) on a small PVC so it survives restarts.
+# RWO disk + one replica: Recreate, so the old pod releases the disk before the new one starts.
+# No root chown init container (PSS restricted): fsGroup 472 makes the volume writable.
+persistence:
+  enabled: true
+  type: pvc
+  storageClassName: standard-rwo
+  accessModes: [ReadWriteOnce]
+  size: 1Gi
+deploymentStrategy:
+  type: Recreate
+initChownData:
+  enabled: false

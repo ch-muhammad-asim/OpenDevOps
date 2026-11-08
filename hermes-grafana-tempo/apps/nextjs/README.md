@@ -19,7 +19,7 @@ a cluster in this test.
 | Kubernetes Service | `nextjs` (namespace `tempo-apps`, port 3000) |
 | Public host | `tempo-nextjs.<domain>` (Traefik IngressRoute in [`k8s/ingressroutes.yaml`](../../k8s/ingressroutes.yaml)) |
 | Calls | `nodejs-orders` (`ORDERS_URL`, `http://nodejs:3000`) |
-| Image | `tempo-apps/nextjs:1.0.2` (registry prefix set at deploy time) |
+| Image | `tempo-apps/nextjs:1.0.3` (registry prefix set at deploy time) |
 
 ## 🧩 Files
 
@@ -28,7 +28,7 @@ a cluster in this test.
 | [`instrumentation.ts`](instrumentation.ts) | Next.js hook: loads the OTel setup in the Node.js runtime only | - |
 | [`instrumentation.node.ts`](instrumentation.node.ts) | `registerOTel()`: exporter, sampler, fetch propagation | Keeps `/healthz` out of traces; propagates `traceparent` only to `ORDERS_URL` |
 | [`orders.ts`](orders.ts) | Tiny `fetch` client for `nodejs-orders` | No secrets |
-| [`app/`](app/README.md) | Page and route handlers, the four planted issues | Input is not validated on purpose (planted issue) |
+| [`app/`](app/README.md) | Page and route handlers, the three planted issues | Input is not validated on purpose (planted issue) |
 | [`next.config.ts`](next.config.ts) | `output: 'standalone'`, no `X-Powered-By` header | Small runtime image without dev dependencies |
 | [`package.json`](package.json), [`package-lock.json`](package-lock.json) | Exact dependency pins and the lockfile used by `npm ci` | Reproducible installs; `npm audit --omit=dev`: 0 known vulnerabilities |
 | [`tsconfig.json`](tsconfig.json) | TypeScript strict mode | - |
@@ -74,7 +74,7 @@ spans per request.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector.observability:4318` (cluster), `http://otel-collector:4318` (Compose) | Collector OTLP/HTTP; `/v1/traces` is appended |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | OTLP over HTTP with protobuf |
 | `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Keep every trace; follow the caller's sampling decision |
-| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=lab,service.namespace=tempo-apps,service.version=1.0.2,k8s.pod.name=...` | Pod name comes from the Kubernetes downward API |
+| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=lab,service.namespace=tempo-apps,service.version=1.0.3,k8s.pod.name=...` | Pod name comes from the Kubernetes downward API |
 | `ORDERS_URL` | `http://nodejs:3000` | Base URL of nodejs-orders; also the only URL that gets `traceparent` |
 | `PORT`, `HOSTNAME` | `3000`, `0.0.0.0` | Listen address of the standalone server (Kubernetes sets `HOSTNAME` to the pod name, so the Deployment overrides it) |
 | `NEXT_TELEMETRY_DISABLED` | `1` | No Next.js usage telemetry |

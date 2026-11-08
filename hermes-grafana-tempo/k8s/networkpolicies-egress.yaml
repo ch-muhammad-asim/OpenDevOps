@@ -136,6 +136,17 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+    # Prod: the Prometheus data source points at the Thanos querier (helm/thanos).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+      ports:
+        - protocol: TCP
+          port: 10902
     - to:
         - namespaceSelector:
             matchLabels:
@@ -233,6 +244,17 @@ spec:
       app.kubernetes.io/instance: tempo
   policyTypes: [Egress]
   egress:
+    # Lab object store: SeaweedFS S3 (helm/seaweedfs), OBJECT_STORE=seaweedfs.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: object-storage
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: seaweedfs
+      ports:
+        - protocol: TCP
+          port: 8333
     # Between Tempo components (memberlist 7946, gRPC 9095, memcached) and itself.
     - to:
         - podSelector:

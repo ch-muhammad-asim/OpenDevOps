@@ -42,17 +42,9 @@ spec:
               app.kubernetes.io/name: opentelemetry-collector
       ports:
         - {protocol: TCP, port: 4318}
-    # Read-only observability skill: Prometheus :9090, Tempo :3200 and Grafana :3000 (pod ports). The targets'
-    # namespaces admit this pod through networkpolicy-observability.yaml.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - {protocol: TCP, port: 9090}
+    # Read-only observability skill: Thanos querier :10902, Tempo :3200, Grafana :3000 (pod ports). The targets'
+    # namespaces admit this pod through networkpolicy-observability.yaml. Deliberately NOT Prometheus :9090: it
+    # serves remote-write, /-/reload and /-/quit without auth; the Thanos querier serves only the read API.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -62,6 +54,16 @@ spec:
               app.kubernetes.io/instance: tempo
       ports:
         - {protocol: TCP, port: 3200}
+    # Thanos querier: all PromQL, alerts, rules and targets of the skill (30 days; lab and production).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+      ports:
+        - {protocol: TCP, port: 10902}
     - to:
         - namespaceSelector:
             matchLabels:

@@ -1,0 +1,29 @@
+# Lab: compactor with small requests. Retention and downsampling flags are unchanged (30d raw/5m/1h).
+# Scratch PVC 20Gi: the largest job is a 14-day block of the single lab Prometheus (~6-9 GB at the
+# measured 3,429 samples/s), and the compactor needs about 2x that (sources + output) on disk.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: thanos-compact
+spec:
+  template:
+    spec:
+      containers:
+        - name: thanos-compact
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: thanos-compact
+      spec:
+        storageClassName: standard-rwo
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi

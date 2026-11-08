@@ -6,7 +6,10 @@ service's RED metrics, and to see the service graph.
 
 **Status (2026-11-08, chart 14.4.0, Grafana 13.3.0):** the **lab** profile (`values.yaml` + `values-lab.yaml`) matches
 the release running on the lab cluster (same settings and requests; it adds image digests, stricter security headers,
-spread constraints and the Tempo URL through an environment variable). The **production** profile (`values.yaml`
+spread constraints and the Prometheus and Tempo URLs through environment variables). Both profiles point the
+Prometheus data source at the Thanos querier; the lab switch from Prometheus `:9090` to Thanos is live (2026-11-08:
+data source healthy, `PROFILE=lab scripts/verify.sh` 32 PASS, 0 failures), and the lab keeps its SQLite database on a
+1Gi PVC. The **production** profile (`values.yaml`
 alone: 2 replicas on an external database) passes `helm lint`, `helm template` and kubeconform (Kubernetes 1.36,
 strict); it has not been installed yet.
 
@@ -17,7 +20,7 @@ strict); it has not been installed yet.
 | Deployment `grafana` | UI on Service `grafana:80` (2 replicas in production) | [`values.yaml`](values.yaml) | Non-root UID 472, read-only root FS, ALL capabilities dropped |
 | Service `grafana-headless:9094` (production) | Gossip between replicas for Grafana-managed alert state | `headlessService`, `grafana.ini unified_alerting` | Cluster-internal only |
 | External database (production) | Shared users, sessions, annotations, alert state | Secret `grafana-db` → `envFromSecret` | Credentials only in the Secret |
-| Data source Prometheus (uid `prometheus`) | Metrics; exemplars with label `trace_id` link to uid `tempo` | `datasources` | Read-only, `editable: false` |
+| Data source Prometheus (uid `prometheus`) | Metrics; exemplars with label `trace_id` link to uid `tempo` | `datasources`, URL from `env.PROMETHEUS_QUERY_URL` | Read-only, `editable: false` |
 | Data source Tempo (uid `tempo`) | TraceQL search, traces-to-metrics, service map, node graph, streaming | `datasources`, URL from `env.TEMPO_QUERY_URL` | Read-only, `editable: false` |
 | Data source Alertmanager (uid `alertmanager`) | Alert and silence view for the kube-prometheus-stack Alertmanager (`implementation: prometheus`) | `datasources` | Read-only, `editable: false` |
 | Dashboard sidecar | Loads ConfigMaps labelled `grafana_dashboard` from all namespaces | `sidecar.dashboards` | Watches ConfigMaps only |
@@ -32,8 +35,10 @@ strict); it has not been installed yet.
 | Setting | Production (`values.yaml`) | Lab (`+ values-lab.yaml`) |
 |---|---|---|
 | Replicas / PDB | 2, one per node (`DoNotSchedule`), spread over zones / `minAvailable: 1` | 1 / none |
-| Database | External PostgreSQL/MySQL from Secret `grafana-db` | SQLite in an emptyDir (state lost on restart) |
+| Database | External PostgreSQL/MySQL from Secret `grafana-db` | SQLite on a 1Gi PVC `standard-rwo` (service accounts, tokens, UI dashboards and annotations survive restarts) |
+| Deployment strategy | Rolling update (chart default) | `Recreate` (RWO disk, one replica: the old pod releases it first); no root `init-chown-data` container (fsGroup 472) |
 | Alerting HA | Gossip on 9094 via `grafana-headless` | Off (`ha_peers: ""`) |
+| Prometheus data source URL (`PROMETHEUS_QUERY_URL`) | `http://thanos-query.monitoring:10902` (Thanos: 30 days from GCS, HA pair deduplicated) | Same URL (Thanos: 30 days from in-cluster SeaweedFS S3, one Prometheus) |
 | Tempo data source URL (`TEMPO_QUERY_URL`) | `http://tempo-query-frontend.observability:3200` (tempo-distributed) | `http://tempo.observability:3200` (single binary) |
 | Grafana image | `grafana/grafana:13.3.0-distroless` + digest | `grafana/grafana:13.3.0` + digest (the image the lab runs) |
 | Grafana requests / memory limit | 250m, 512Mi / 1Gi | 100m, 256Mi / 512Mi |
@@ -52,7 +57,7 @@ Multi-arch index digests read from each registry's v2 API on 2026-11-08; the lab
 | `docker.io/grafana/grafana` | `13.3.0-distroless` | `sha256:540b8afb775bf34aefce417e4329039daa5d44b6f2fbda6881397b1b247ca7df` | Grafana (production) |
 | `docker.io/grafana/grafana` | `13.3.0` | `sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205` | Grafana (lab) |
 | `quay.io/kiwigrid/k8s-sidecar` | `2.14.3` | `sha256:52d311dcedd587421a236c4d6c621f05614c40a51386e955e0699dca97ec0880` | Dashboard + data source sidecars |
-| `docker.io/library/busybox` | `1.38.0` | `sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` | `init-chown-data` (only with a PVC; not deployed) |
+| `docker.io/library/busybox` | `1.38.0` | `sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` | `init-chown-data` (not deployed: production has no PVC, the lab disables it) |
 | `docker.io/curlimages/curl` | `8.23.0` | `sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93` | `download-dashboards` (only with remote dashboards; not deployed) |
 
 The chart's `sha:` fields take the hex only (the chart adds `@sha256:`).
@@ -71,14 +76,15 @@ The chart's `sha:` fields take the hex only (the chart adds `@sha256:`).
 | `grafana.ini` `snapshots.external_enabled` | `false` | No publishing to an external snapshot service |
 | `grafana.ini` `server.root_url` | `https://grafana-tempo.saqlainmushtaq.com` | Correct redirects and links behind the proxy |
 | `grafana.ini` `unified_alerting.ha_*` | `${POD_IP}:9094`, peers `grafana-headless...:9094` | Official Kubernetes HA settings |
-| `env.TEMPO_QUERY_URL` | per profile | Grafana expands `${TEMPO_QUERY_URL}` in the provisioned Tempo data source |
-| `persistence.enabled` | `false` | State is in the database (production) or disposable (lab) |
+| `env.PROMETHEUS_QUERY_URL` | per profile (table above) | Grafana expands `${PROMETHEUS_QUERY_URL}` in the provisioned Prometheus data source |
+| `env.TEMPO_QUERY_URL` | per profile (table above) | Grafana expands `${TEMPO_QUERY_URL}` in the provisioned Tempo data source |
+| `persistence.enabled` | `false` (production); lab `true`, 1Gi | State is in the database (production) or in SQLite on a small PVC (lab) |
 | Tempo `tracesToMetrics` | `service.name` → `service`; rate, error rate, p95 from `traces_spanmetrics_*` | Span → RED metrics of its service |
 | Tempo `streamingEnabled` | search + metrics | Needs `stream_over_http_enabled` in Tempo (set in both Tempo profiles) |
 | CPU limit | not set (requests + memory limit) | CPU throttling slows dashboards; the chart sets `GOMEMLIMIT` from the memory limit |
 
 **`$$` in queries:** Grafana expands `$VAR` in provisioning files, so `$__tags` is written as `$$__tags`; the single
-`$` in `${TEMPO_QUERY_URL}` is expanded on purpose.
+`$` in `${PROMETHEUS_QUERY_URL}` and `${TEMPO_QUERY_URL}` is expanded on purpose.
 
 ## 📊 Official Tempo dashboards
 
@@ -178,11 +184,12 @@ Traefik's default certificate and no cert-manager, `letsencrypt` is optional) an
 | Check | Command | Expected |
 |---|---|---|
 | Ready | `kubectl -n observability get pods -l app.kubernetes.io/name=grafana` | `3/3 Running` per pod (Grafana + 2 sidecars); 2 pods on different nodes in production |
+| PVC (lab) | `kubectl -n observability get pvc grafana` | `Bound`, `1Gi` |
 | PDB (production) | `kubectl -n observability get pdb grafana` | `MIN AVAILABLE 1`, `ALLOWED DISRUPTIONS 1` |
 | Health | `kubectl -n observability port-forward svc/grafana 3000:80` then `curl -s localhost:3000/api/health` | `"database": "ok"` |
 | Anonymous blocked | `curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/datasources` | `401` |
 | Security headers | `curl -sI localhost:3000/login \| grep -iE 'content-security-policy\|x-content-type-options\|x-frame-options'` | All three present |
-| Tempo URL per profile | Connections → Data sources → Tempo | `tempo-query-frontend...:3200` (production) or `tempo...:3200` (lab) |
+| Data source URLs per profile | Connections → Data sources → Prometheus / Tempo | Both profiles `thanos-query...:10902`; Tempo production `tempo-query-frontend...:3200`, lab `tempo...:3200` |
 | Data sources | Prometheus / Tempo → **Save & test** | Both succeed |
 | Alertmanager data source | `curl -s -u "$GF_USER:$GF_PASS" localhost:3000/api/datasources/proxy/uid/alertmanager/api/v2/status` (credentials read from Secret `grafana-admin` into variables) | HTTP 200 with the Alertmanager status JSON |
 | Dashboards | Dashboards list | kube-prometheus-stack dashboards present; folder "Tempo" has 8 dashboards |
@@ -228,7 +235,7 @@ Run on 2026-11-08 with chart 14.4.0, helm v3.17.3, kubeconform v0.8.0.
 | Lint, lab | `helm lint <chart> -f helm/grafana/values.yaml -f helm/grafana/values-lab.yaml` | 0 failed |
 | Schema, production | `helm template ... \| kubeconform -strict -kubernetes-version 1.36.0` + CRDs-catalog | 10 valid, 0 invalid |
 | Schema, lab | same with `values-lab.yaml` | 8 valid, 0 invalid |
-| Lab = live | `helm get values grafana -n observability` vs the lab profile; pod requests | Same requests; diff = digests, security headers, spread, Tempo URL via env |
+| Lab = live | `helm get values grafana -n observability` vs the lab profile; pod requests | Same requests; diff = digests, security headers, spread, Prometheus and Tempo URLs via env |
 | Restricted context | Rendered containers checked for non-root, seccomp, no escalation, drop ALL, requests, memory limit, digest | All pass |
 
 `<chart>` is `helm pull grafana-community/grafana --version 14.4.0 --untar`.
@@ -243,6 +250,7 @@ Run on 2026-11-08 with chart 14.4.0, helm v3.17.3, kubeconform v0.8.0.
 | Duplicate Grafana-managed alert notifications | Gossip on 9094 blocked | Allow 9094 TCP/UDP between Grafana pods; check `grafana-headless` endpoints |
 | Second replica `Pending` | Only one schedulable node (hard spread per node) | Add a node or use the lab overlay |
 | Tempo data source error `lookup tempo-query-frontend` | Production profile against single-binary Tempo | Use the lab overlay, or deploy `helm/tempo-distributed/` |
+| Prometheus data source error `lookup thanos-query` | Thanos not installed (both profiles need it) | Deploy [`../thanos/`](../thanos/README.md) (lab: `kubectl apply -k helm/thanos/overlays/lab`) |
 | Redirect loop or wrong links | `root_url` mismatch | Must match the public host exactly |
 | No "View trace" button on exemplars | Exemplar label mismatch | Tempo `trace_id_label_name` must be `trace_id` |
 | Service map empty | No `traces_service_graph_*` series | Check Tempo metrics-generator and remote write |

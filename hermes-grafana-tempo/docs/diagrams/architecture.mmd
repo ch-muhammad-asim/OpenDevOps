@@ -32,6 +32,13 @@ flowchart TB
     end
     subgraph mon["namespace: monitoring — kube-prometheus-stack / release: prometheus"]
       prom["Prometheus<br/>prometheus-kube-prometheus-prometheus"]
+      sidecar["Thanos sidecar"]
+      store["Thanos store-gateway"]
+      querier["Thanos querier"]
+      compactor["Thanos compactor<br/>Downsampling + 30-day retention"]
+      prom -->|TSDB blocks| sidecar
+      querier -->|recent metrics| sidecar
+      querier -->|historical metrics| store
       am["Alertmanager"]
       exporters["kube-state-metrics + node-exporter<br/>Kubernetes metrics"]
       operator["Prometheus Operator<br/>ServiceMonitor + PrometheusRule"]
@@ -39,6 +46,14 @@ flowchart TB
       operator -.->|configures| prom
       prom -->|firing alerts| am
     end
+    subgraph storage["namespace: object-storage"]
+      seaweed[("SeaweedFS + PVC<br/>Buckets: tempo-traces + thanos-metrics<br/>30-day storage")]
+    end
+    tempo -->|Tempo blocks; 720h retention; tempo-traces| seaweed
+    sidecar -->|upload blocks; thanos-metrics| seaweed
+    store -->|read blocks; thanos-metrics| seaweed
+    compactor -->|compact / downsample / retain; thanos-metrics| seaweed
+    gw -->|Hermes trends skill / PromQL queries| querier
     tr -->|HTTP| nx & nd & py
     tr -->|HTTP :80| graf
     tr -->|HTTP :9119| dash
@@ -46,12 +61,14 @@ flowchart TB
     gw -->|OTLP/HTTP :4318| col
     col -->|metrics scraped on :8889| prom
     tempo -->|metrics-generator remote write| prom
-    graf -->|PromQL queries| prom
+    graf -->|metrics datasource / PromQL queries| querier
   end
   cf -->|HTTPS to origin / Traefik :443| tr
   classDef edgeStyle fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
   classDef telemetry fill:#f0fdf4,stroke:#16a34a,color:#14532d
+  classDef storageStyle fill:#fff7ed,stroke:#ea580c,color:#7c2d12
   classDef workload fill:#faf5ff,stroke:#9333ea,color:#581c87
   class cf,tr edgeStyle
-  class col,tempo,graf,prom,am telemetry
+  class col,tempo,graf,prom,am,sidecar,store,querier,compactor telemetry
+  class seaweed storageStyle
   class nx,nd,py,dash,gw workload

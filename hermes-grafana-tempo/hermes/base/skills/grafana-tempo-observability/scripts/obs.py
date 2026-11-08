@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Read-only Prometheus, Tempo and Grafana queries for the grafana-tempo-observability skill (Python stdlib only).
+"""Read-only Prometheus (via the Thanos querier), Tempo and Grafana queries for the grafana-tempo-observability skill
+(Python stdlib only).
 
-Read-only by construction: HTTP GET to the Prometheus and Tempo query APIs and the Grafana search/dashboard APIs; the
+Read-only by construction: HTTP GET to the Thanos querier (Prometheus HTTP API) and Tempo query APIs and the Grafana search/dashboard APIs; the
 one POST is Grafana's /api/ds/query (a datasource query, allowed for the Viewer role). Output is compact JSON with
 bounded time ranges and result limits; whole traces are summarised, never dumped.
 
   obs.py diagnose [--window 15m] [--since 60m]   ranked suggested issues with evidence, root cause, file, fix, links
+  obs.py trends [--range 30d]            ranked 30-day trends: RED change (WoW/DoD, or last hour vs the hour before when
+                                         history is short), error-budget burn, top regressions, TraceQL metrics, capacity
   obs.py hermes                          Hermes gateway health + firing alerts
   obs.py alerts | targets
   obs.py prom '<PromQL>' [--range 15m] [--step 60s]
@@ -31,7 +34,23 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-PROM = os.environ.get("OBS_PROMETHEUS_URL", "http://prometheus-kube-prometheus-prometheus.monitoring:9090")
+# All PromQL, alerts, rules and targets go to the Thanos querier (30-day metrics, free OSS). It serves the same
+# Prometheus HTTP API read paths but has no write, reload or quit endpoints, and the NetworkPolicy allows the Hermes
+# pod to reach only Thanos, not Prometheus :9090. OBS_METRICS_URL overrides it (e.g. a plain Prometheus elsewhere).
+PROM = os.environ.get("OBS_METRICS_URL", "http://thanos-query.monitoring:10902")
+METRICS = PROM
+
+
+def pick_metrics():
+    """Return (url, note) after a trivial query, so `trends` can say when the metrics endpoint is down."""
+    try:
+        with urllib.request.urlopen(PROM + "/api/v1/query?query=1", timeout=5) as r:
+            if json.load(r).get("status") == "success":
+                return PROM, ""
+    except Exception as e:
+        return PROM, f"{PROM} not reachable: {type(e).__name__}"
+    return PROM, f"{PROM} answered without success"
+SLO = float(os.environ.get("OBS_SLO", "0.99"))   # availability SLO of the apps (apps/monitoring/prometheusrule.yaml)
 TEMPO = os.environ.get("OBS_TEMPO_URL", "http://tempo.observability:3200")
 GRAFANA = os.environ.get("OBS_GRAFANA_URL", "http://grafana.observability")
 GRAFANA_PUBLIC = os.environ.get("OBS_GRAFANA_PUBLIC_URL", "https://grafana-tempo.saqlainmushtaq.com").rstrip("/")
@@ -404,6 +423,174 @@ def tags(tag=None):
     return d if "error" in d else {s["name"]: s.get("tags", [])[:60] for s in d.get("scopes", [])}
 
 
+# --------------------------------------------------------------------------------------------------- trends
+def mq(q, base=None):
+    """Instant query on the long-range metrics endpoint -> {label-tuple: value}."""
+    d = get(base or METRICS, "/api/v1/query", {"query": q})
+    if "error" in d:
+        return {"__error__": d["error"]}
+    return {tuple(sorted(r["metric"].items())): num(r["value"][1], 6) for r in d.get("data", {}).get("result", [])}
+
+
+def pct(cur, prev):
+    if cur is None or prev in (None, 0):
+        return None
+    return round((cur - prev) / prev * 100, 1)
+
+
+def trends(rng="30d"):
+    """Ranked trends over up to `rng` of history. Bounded: ~20 instant/range queries, compact output."""
+    t0 = time.time()
+    found = []
+    endpoint, ep_note = pick_metrics()
+    lowest = mq("min(prometheus_tsdb_lowest_timestamp_seconds)")
+    if "__error__" in lowest or not lowest:
+        return {"error": f"metrics endpoint {METRICS} unavailable: {lowest.get('__error__', 'no data')}",
+                "hint": "retry in a minute (Prometheus may be restarting) or check OBS_METRICS_URL"}
+    hist_s = time.time() - (list(lowest.values())[0] or time.time()) if lowest and "__error__" not in lowest else 0
+    span = min(dur(rng), int(hist_s))
+    # Comparison window: week-over-week, day-over-day, or (short history) the last W vs the W before.
+    if hist_s >= 14 * 86400:
+        W, mode = "7d", "week-over-week"
+    elif hist_s >= 2 * 86400:
+        W, mode = "1d", "day-over-day"
+    else:
+        w = max(300, int(hist_s / 2 // 300 * 300))
+        W, mode = (f"{w // 3600}h" if w % 3600 == 0 else f"{w // 60}m"), "short history: last window vs the one before"
+    step = "6h" if span >= 7 * 86400 else ("1h" if span >= 86400 else "5m")
+    lr = f"{max(1, span // 3600)}h" if span >= 3600 else "1h"
+
+    def add(sev, kind, subject, metric, cur, prev, explain, promql, extra=None):
+        found.append({"severity": sev, "kind": kind, "subject": subject, "metric": metric, "current": cur,
+                      "previous": prev, "change_pct": pct(cur, prev), "explanation": explain,
+                      **(extra or {}), "link": link("prometheus", promql, lr if span >= 3600 else "1h")})
+
+    sel = 'span_kind="SPAN_KIND_SERVER"'
+    # 1. RED per service: current window vs the previous one
+    calls = f"sum by (service) (increase(traces_spanmetrics_calls_total{{{sel}}}[{W}]))"
+    errs = f'sum by (service) (increase(traces_spanmetrics_calls_total{{{sel}, status_code="STATUS_CODE_ERROR"}}[{W}]))'
+    p95 = f"histogram_quantile(0.95, sum by (service, le) (increase(traces_spanmetrics_latency_bucket{{{sel}}}[{W}])))"
+    c, cp = mq(calls), mq(calls.replace(f"[{W}])", f"[{W}] offset {W})"))
+    e, ep = mq(errs), mq(errs.replace(f"[{W}])", f"[{W}] offset {W})"))
+    l, lp = mq(p95), mq(p95.replace(f"[{W}])", f"[{W}] offset {W})"))
+    red_rows = []
+    for k in sorted(set(c) - {"__error__"}):
+        svc = dict(k).get("service")
+        cur_rate = round((c[k] or 0) / dur(W), 4)
+        prev_rate = round((cp.get(k) or 0) / dur(W), 4) if cp.get(k) is not None else None
+        er = round((e.get(k) or 0) / c[k], 4) if c[k] else 0
+        erp = round((ep.get(k) or 0) / cp[k], 4) if cp.get(k) else None
+        row = {"service": svc, "req_per_s": cur_rate, "req_change_pct": pct(cur_rate, prev_rate), "error_ratio": er,
+               "error_ratio_prev": erp, "p95_s": l.get(k), "p95_prev_s": lp.get(k), "p95_change_pct": pct(l.get(k), lp.get(k))}
+        red_rows.append(row)
+        if erp is not None and er > max(2 * erp, erp + 0.01):
+            add("high", "errors", svc, "error ratio", er, erp, f"Server error ratio rose {mode}", f'sum(rate(traces_spanmetrics_calls_total{{service="{svc}", {sel}, status_code="STATUS_CODE_ERROR"}}[{step}])) / sum(rate(traces_spanmetrics_calls_total{{service="{svc}", {sel}}}[{step}]))')
+        if row["p95_change_pct"] is not None and row["p95_change_pct"] >= 50 and (l.get(k) or 0) >= 0.2:
+            add("high" if row["p95_change_pct"] >= 100 else "medium", "latency", svc, "p95 latency (s)", l.get(k), lp.get(k),
+                f"Service p95 latency grew {mode}", f'histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{{service="{svc}", {sel}}}[{step}])))')
+        if row["req_change_pct"] is not None and abs(row["req_change_pct"]) >= 50:
+            add("info", "traffic", svc, "requests/s", cur_rate, prev_rate, f"Traffic changed {mode} (context for the other trends)",
+                f'sum(rate(traces_spanmetrics_calls_total{{service="{svc}", {sel}}}[{step}]))')
+    # 2. Error budget (SLO from OBS_SLO, default 99%): burn rates and share of the 30-day budget used so far
+    budget = 1 - SLO
+    win = f"{max(1, span // 3600)}h" if span >= 3600 else "1h"
+    for k, v in mq(f"sum by (service) (increase(traces_spanmetrics_calls_total{{{sel}, status_code=\"STATUS_CODE_ERROR\"}}[{win}])) "
+                   f"/ sum by (service) (increase(traces_spanmetrics_calls_total{{{sel}}}[{win}]))").items():
+        if k == "__error__" or v is None:
+            continue
+        svc = dict(k).get("service")
+        used = round(v * (span / (30 * 86400)) / budget * 100, 1)   # % of the 30-day budget consumed in the observed span
+        burn = round(v / budget, 2)
+        if burn >= 1:
+            add("high" if burn >= 6 else "medium", "error-budget", svc, f"burn rate over {win}", burn, None,
+                f"Burning the {SLO:.0%} error budget {burn}x faster than sustainable; {used}% of the 30-day budget used in {win}",
+                f'sum(rate(traces_spanmetrics_calls_total{{service="{svc}", {sel}, status_code="STATUS_CODE_ERROR"}}[{step}])) / sum(rate(traces_spanmetrics_calls_total{{service="{svc}", {sel}}}[{step}]))',
+                {"budget_used_pct": used, "slo": SLO})
+    # 3. Top regressions per route (span name): p95 now vs the previous window
+    r95 = f"histogram_quantile(0.95, sum by (service, span_name, le) (increase(traces_spanmetrics_latency_bucket{{{sel}}}[{W}])))"
+    cur, prev = mq(r95), mq(r95.replace(f"[{W}])", f"[{W}] offset {W})"))
+    regs = []
+    for k, v in cur.items():
+        if k == "__error__" or v is None or prev.get(k) in (None, 0):
+            continue
+        ch = pct(v, prev[k])
+        if ch is not None and ch >= 50 and v >= 0.2:
+            regs.append((ch, dict(k), v, prev[k]))
+    for ch, lab, v, pv in sorted(regs, key=lambda x: -x[0])[:5]:
+        add("high" if ch >= 100 else "medium", "regression", f'{lab.get("service")} {lab.get("span_name")}', "p95 latency (s)", v, pv,
+            f"Route p95 regressed {mode}",
+            f'histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{{service="{lab.get("service")}", span_name="{lab.get("span_name")}"}}[{step}])))')
+    # 4. TraceQL metrics from Tempo over the same span (where the backend supports them)
+    tq = {}
+    end = int(time.time())
+    for app in APPS:
+        q = f'{{ resource.service.name = "{app}" && kind = server }} | quantile_over_time(span:duration, .95)'
+        d = get(TEMPO, "/api/metrics/query_range", {"q": q, "start": end - max(span, 3600), "end": end, "step": dur(step)})
+        if "error" in d:
+            tq[app] = {"error": d["error"][:120]}
+            continue
+        vals = [smp.get("value") for sr in d.get("series", []) for smp in sr.get("samples", []) if smp.get("value") is not None]
+        if vals:
+            third = max(1, len(vals) // 3)
+            first, last = sum(vals[:third]) / third, sum(vals[-third:]) / third
+            tq[app] = {"p95_s_first_third": round(first, 3), "p95_s_last_third": round(last, 3), "p95_s_max": round(max(vals), 3),
+                       "points": len(vals), "trend_pct": pct(last, first), "query": q}
+            if (pct(last, first) or 0) >= 100 and last >= 0.2:
+                found.append({"severity": "medium", "kind": "traceql-latency", "subject": app, "metric": "p95 span duration (TraceQL)",
+                              "current": round(last, 3), "previous": round(first, 3), "change_pct": pct(last, first),
+                              "explanation": "Tempo TraceQL metrics: p95 of server spans rose across the range", "link": link("tempo", q, lr)})
+    # 5. Capacity: CPU, memory, restarts per workload namespace
+    ns = 'namespace=~"tempo-apps|hermes|observability|monitoring"'
+    cpu = f"sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{{{ns}, container!=\"\"}}[{W}]))"
+    mem = f"max by (namespace, pod) (max_over_time(container_memory_working_set_bytes{{{ns}, container!=\"\"}}[{W}]))"
+    rst = f"sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total{{{ns}}}[{win}])) > 0"
+    cap = {"cpu_cores_top": [], "memory_mib_top": [], "restarts": []}
+    for name, q, qprev, unit in (("cpu", cpu, cpu.replace(f"[{W}])", f"[{W}] offset {W})"), 1),
+                                 ("memory", mem, mem.replace(f"[{W}]))", f"[{W}] offset {W}))"), 1048576)):
+        cur, prev = mq(q), mq(qprev)
+        rows = sorted(((dict(k), v / unit, (prev.get(k) or 0) / unit if prev.get(k) is not None else None)
+                       for k, v in cur.items() if k != "__error__" and v is not None), key=lambda x: -x[1])
+        cap["cpu_cores_top" if name == "cpu" else "memory_mib_top"] = [
+            {"pod": f'{lab.get("namespace")}/{lab.get("pod")}', "current": round(v, 3), "previous": None if pv is None else round(pv, 3),
+             "change_pct": pct(v, pv)} for lab, v, pv in rows[:5]]
+        for lab, v, pv in rows[:10]:
+            ch = pct(v, pv)
+            big = v >= (0.1 if name == "cpu" else 64)
+            if ch is not None and ch >= (50 if name == "cpu" else 25) and big:
+                metric = "CPU cores" if name == "cpu" else "memory working set (MiB)"
+                pq = (f'sum(rate(container_cpu_usage_seconds_total{{namespace="{lab.get("namespace")}", pod="{lab.get("pod")}", container!=""}}[{step}]))'
+                      if name == "cpu" else f'max(container_memory_working_set_bytes{{namespace="{lab.get("namespace")}", pod="{lab.get("pod")}", container!=""}})')
+                add("medium", "capacity", f'{lab.get("namespace")}/{lab.get("pod")}', metric, round(v, 3), round(pv, 3),
+                    f"{metric} grew {mode}" + (" (a steady rise in memory points to a leak)" if name == "memory" else ""), pq)
+    for k, v in mq(rst).items():
+        if k == "__error__":
+            continue
+        lab = dict(k)
+        v = round(v or 0)
+        if not v:
+            continue
+        cap["restarts"].append({"pod": f'{lab.get("namespace")}/{lab.get("pod")}', "restarts": v})
+        add("medium" if v < 3 else "high", "restarts", f'{lab.get("namespace")}/{lab.get("pod")}', f"container restarts in {win}", v, None,
+            "Containers restarted (crashes, OOM kills or probes failing)",
+            f'sum(increase(kube_pod_container_status_restarts_total{{namespace="{lab.get("namespace")}", pod="{lab.get("pod")}"}}[1h]))')
+    # Context: a latency/regression trend on a service whose traffic jumped is likely load-driven, not a code change.
+    load = {r["service"]: r["req_change_pct"] for r in red_rows if (r["req_change_pct"] or 0) >= 200}
+    for f in found:
+        svc = f["subject"].split(" ")[0]
+        if f["kind"] in ("latency", "regression", "traceql-latency") and svc in load:
+            f["explanation"] += f"; traffic on {svc} rose {load[svc]:.0f}% in the same window, so check saturation (CPU, event loop, DB) before blaming a code change"
+    order = {"high": 0, "medium": 1, "info": 2}
+    found.sort(key=lambda f: (order.get(f["severity"], 9), -(abs(f["change_pct"] or 0)), f["subject"]))
+    for i, f in enumerate(found, 1):
+        f["rank"] = i
+    return {"requested_range": rng, "history_available_h": round(hist_s / 3600, 1), "analysed_span_h": round(span / 3600, 1),
+            "comparison": f"{mode} (window {W})", "step": step, "metrics_endpoint": endpoint, "endpoint_note": ep_note, "slo": SLO,
+            "note": ("Less history than requested: comparisons use the windows above. With 30-day retention the same command "
+                     "compares week-over-week.") if hist_s < dur(rng) else "",
+            "took_s": round(time.time() - t0, 1), "trends": found[:25], "red": red_rows, "traceql_p95": tq, "capacity": cap,
+            "dashboards": {"all": f"{GRAFANA_PUBLIC}/dashboards", "hermes": f"{GRAFANA_PUBLIC}/d/hermes-gateway"}}
+
+
 # ------------------------------------------------------------------------------------------------- diagnose
 def diagnose(window="15m", since="60m"):
     """Ranked suggested issues across the platform. Bounded: ~25 small queries, compact output."""
@@ -492,6 +679,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("diagnose"); a.add_argument("--window", default="15m"); a.add_argument("--since", default="60m")
     a.add_argument("--summary", action="store_true", help="one line per issue (for logs/cron)")
+    a = sub.add_parser("trends"); a.add_argument("--range", default="30d")
     sub.add_parser("hermes"); sub.add_parser("alerts"); sub.add_parser("targets")
     a = sub.add_parser("prom"); a.add_argument("query"); a.add_argument("--range"); a.add_argument("--step", default="60s")
     a = sub.add_parser("red"); a.add_argument("service"); a.add_argument("--window", default="15m")
@@ -515,7 +703,7 @@ def main():
             print(f"#{f['rank']} [{f['severity']}] {f['service']}: {f['title']} trace={f['evidence'].get('example_trace', '-')}")
         return
     r = {
-        "diagnose": lambda: diagnose(x.window, x.since), "hermes": hermes, "alerts": alerts, "targets": targets,
+        "diagnose": lambda: diagnose(x.window, x.since), "trends": lambda: trends(x.range), "hermes": hermes, "alerts": alerts, "targets": targets,
         "prom": lambda: prom_query(x.query, x.range, x.step), "red": lambda: red(x.service, x.window),
         "graph": lambda: graph(x.window), "traceql": lambda: traceql(x.query, x.since, x.limit),
         "slowest": lambda: slowest(x.service, x.since, x.limit), "errors": lambda: errors(x.service, x.since, x.limit),

@@ -17,7 +17,7 @@ the cluster (cAdvisor) and was not run locally.
 | Kubernetes Service | `nodejs` (namespace `tempo-apps`, port 3000) |
 | Called by | `nextjs-web` (`http://nodejs:3000`) |
 | Calls | `python-inventory` (`INVENTORY_URL`, default `http://python:8000`) |
-| Image | `tempo-apps/nodejs:1.0.2` (registry prefix set at deploy time) |
+| Image | `tempo-apps/nodejs:1.0.3` (registry prefix set at deploy time) |
 
 ## 🧩 Files
 
@@ -60,7 +60,7 @@ trace therefore runs `nextjs-web -> nodejs-orders -> python-inventory`.
 | `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Keep every trace; follow the caller's sampling decision |
 | `OTEL_NODE_ENABLED_INSTRUMENTATIONS` | `http,express,undici` | Load only the three instrumentations this app needs |
 | `OTEL_NODE_RESOURCE_DETECTORS` | `env,host,os,serviceinstance` | Skip the cloud detectors: no metadata-server calls, no cloud account IDs in public traces |
-| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=lab,service.namespace=tempo-apps,service.version=1.0.2,k8s.namespace.name=...,k8s.pod.name=...` | Pod name and namespace come from the Kubernetes downward API |
+| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=lab,service.namespace=tempo-apps,service.version=1.0.3,k8s.namespace.name=...,k8s.pod.name=...` | Pod name and namespace come from the Kubernetes downward API |
 | `INVENTORY_URL` | `http://python:8000` | Base URL of python-inventory |
 | `PORT` | `3000` | Listen port |
 | `REPORT_ROUNDS` | `10` (default) | Work done by the CPU hog (10 x 100,000 PBKDF2 iterations) |
@@ -172,7 +172,7 @@ and the planted issues themselves. Do not expose this app beyond a lab.
 | `GET /orders/:id` returns 502 `fetch failed` | python not reachable (`INVENTORY_URL` or DNS) | `kubectl -n tempo-apps get svc python`; check `INVENTORY_URL` |
 | nodejs and python appear as separate traces | `traceparent` not propagated | Keep `undici` in `OTEL_NODE_ENABLED_INSTRUMENTATIONS`; use `fetch`, not a raw socket client |
 | Pod memory grows and stays high | Planted memory leak (`GET /orders`) | Expected; `kubectl -n tempo-apps rollout restart deploy/nodejs` resets it |
-| Pod briefly not ready during load | Planted CPU hog blocks the event loop, so readiness times out | Expected; liveness is tolerant (6 x 10 s) so the pod is not restarted |
+| Pod briefly not ready during load | Planted CPU hog blocks the event loop, so readiness times out | Expected; liveness is tolerant (6 x 20 s, 10 s timeout) so the pod is not restarted |
 | `CreateContainerConfigError: ... non-root` | Image without a numeric `USER` | Use this Dockerfile (`USER 10001:10001`) |
 
 ## 🏭 Production checklist

@@ -5,9 +5,9 @@ Mermaid sources for the diagrams in the [top-level README](../../README.md). The
 
 | File | Shows (one line) | Embedded in |
 |---|---|---|
-| [`architecture.mmd`](architecture.mmd) | Namespaces and workloads on the GKE lab cluster: edge, sample apps, Hermes, observability, monitoring | [README](../../README.md), section Architecture |
+| [`architecture.mmd`](architecture.mmd) | Namespaces and workloads on the GKE lab cluster: edge, sample apps, Hermes, observability, monitoring with Thanos, SeaweedFS object storage | [README](../../README.md), section Architecture |
 | [`telemetry-flow.mmd`](telemetry-flow.mmd) | How traces, metrics, logs, queries and alerts move from the apps and Hermes to Grafana | [Telemetry flow](../../README.md#-telemetry-flow) |
-| [`lab-vs-production.mmd`](lab-vs-production.mmd) | Tempo's two profiles: single binary on a PVC (lab) vs tempo-distributed with Kafka and GCS (production) | [README](../../README.md), section Lab vs production |
+| [`lab-vs-production.mmd`](lab-vs-production.mmd) | The two profiles: single-binary Tempo and Thanos on SeaweedFS (lab) vs tempo-distributed with Kafka, and Thanos, on GCS with Workload Identity (production); 30-day retention in both | [README](../../README.md), section Lab vs production |
 
 Edit a diagram here, then copy it unchanged into the README's matching code block so both stay identical. Preview
 locally with the [Mermaid Live Editor](https://mermaid.live/) or any Markdown viewer with Mermaid support.

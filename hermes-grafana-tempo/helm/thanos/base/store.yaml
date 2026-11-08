@@ -1,0 +1,169 @@
+# Thanos store gateway: serves every block in the GCS bucket to thanos-query over gRPC 10901.
+# Two identical replicas (HA); the querier fans out to both and drops identical chunks. The
+# PVC caches index-headers so a restart does not re-read every index from GCS.
+# GCS access: Workload Identity for KSA monitoring/thanos-store (no keys, objstore.yml has the
+# bucket name only).
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-store
+  labels:
+    app.kubernetes.io/name: thanos-store
+    app.kubernetes.io/component: store-gateway
+    app.kubernetes.io/part-of: thanos
+spec:
+  clusterIP: None            # headless: thanos-query discovers each pod via DNS SRV _grpc._tcp
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: thanos-store
+  ports:
+    - name: grpc
+      port: 10901
+      targetPort: grpc
+      protocol: TCP
+    - name: http
+      port: 10902
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: thanos-store
+  labels:
+    app.kubernetes.io/name: thanos-store
+    app.kubernetes.io/component: store-gateway
+    app.kubernetes.io/part-of: thanos
+    app.kubernetes.io/version: v0.42.5
+spec:
+  replicas: 2
+  serviceName: thanos-store
+  podManagementPolicy: Parallel
+  revisionHistoryLimit: 5
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-store
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Delete
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thanos-store
+        app.kubernetes.io/component: store-gateway
+        app.kubernetes.io/part-of: thanos
+        app.kubernetes.io/version: v0.42.5
+    spec:
+      serviceAccountName: thanos-store
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-store
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-store
+      containers:
+        - name: thanos-store
+          image: quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
+          args:
+            - store
+            - --log.level=info
+            - --log.format=logfmt
+            - --http-address=0.0.0.0:10902
+            - --grpc-address=0.0.0.0:10901
+            - --data-dir=/data
+            - --objstore.config-file=/etc/thanos/objstore/objstore.yml
+            # In-memory caches, both below the 4Gi memory limit with headroom for the Go runtime.
+            - --index-cache-size=512MB
+            - --chunk-pool-size=1GB
+            - --sync-block-duration=15m
+            # Keep serving blocks the compactor marked for deletion for 24h (its --delete-delay is
+            # 48h), so a query never hits a block that has just disappeared.
+            - --ignore-deletion-marks-delay=24h
+          ports:
+            - name: http
+              containerPort: 10902
+              protocol: TCP
+            - name: grpc
+              containerPort: 10901
+              protocol: TCP
+          # Ready only after the initial bucket sync and index-header download.
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 30
+            failureThreshold: 8
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: objstore
+              mountPath: /etc/thanos/objstore
+              readOnly: true
+      volumes:
+        - name: objstore
+          secret:
+            secretName: thanos-objstore
+            items:
+              - key: objstore.yml
+                path: objstore.yml
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: thanos-store
+      spec:
+        storageClassName: standard-rwo
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: thanos-store
+  labels:
+    app.kubernetes.io/name: thanos-store
+    app.kubernetes.io/part-of: thanos
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-store

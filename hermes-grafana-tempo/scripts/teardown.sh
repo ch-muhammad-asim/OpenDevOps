@@ -15,7 +15,7 @@ for r in grafana:observability otel-collector:observability tempo:observability 
   helm uninstall "${r%%:*}" -n "${r##*:}" --wait 2>/dev/null || true
 done
 # hermes: Hermes Agent (hermes/), deployed into this platform.
-kubectl delete namespace hermes tempo-apps observability monitoring traefik cert-manager --ignore-not-found --wait=true
+kubectl delete namespace hermes tempo-apps observability monitoring object-storage traefik cert-manager --ignore-not-found --wait=true
 kubectl delete clusterissuer letsencrypt-staging letsencrypt-prod --ignore-not-found 2>/dev/null || true
 # Cluster-scoped leftovers (CRDs are kept by Helm on uninstall). Safe to re-run: no match is not an error.
 { kubectl get crd -o name | grep -E 'monitoring.coreos.com|cert-manager.io|traefik.io|traefik.containo.us' || true; } \

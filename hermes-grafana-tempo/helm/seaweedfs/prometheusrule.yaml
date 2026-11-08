@@ -1,0 +1,82 @@
+# SeaweedFS (lab object store) alerts. job="seaweedfs" (ServiceMonitor seaweedfs).
+# SeaweedFS metric names are from SeaweedFS 4.52 (weed/stats/metrics.go):
+#   SeaweedFS_volumeServer_resource{name="/data",type="all|used|free|avail"}  bytes on the data dir
+#   SeaweedFS_s3_request_total{type,code,bucket}                               S3 requests by status
+# The PV alerts use kubelet_volume_stats_* (kube-prometheus-stack), which work even when
+# SeaweedFS itself is down. Severity routing follows helm/kube-prometheus-stack/values.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: seaweedfs
+  namespace: object-storage
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/part-of: object-storage
+spec:
+  groups:
+    - name: seaweedfs
+      rules:
+        - alert: SeaweedFSDown
+          expr: |
+            up{job="seaweedfs"} == 0 or absent(up{job="seaweedfs"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: SeaweedFS (lab object store) is down.
+            description: Prometheus cannot scrape SeaweedFS in object-storage. Tempo trace blocks and Thanos metric blocks cannot be written or read (check `kubectl -n object-storage get pods,pvc` and the pod logs).
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfsdown
+        - alert: SeaweedFSVolumeNearlyFull
+          expr: |
+            kubelet_volume_stats_available_bytes{namespace="object-storage",persistentvolumeclaim="data-seaweedfs-0"}
+              / kubelet_volume_stats_capacity_bytes{namespace="object-storage",persistentvolumeclaim="data-seaweedfs-0"} < 0.15
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: SeaweedFS data PV is over 85% full.
+            description: PVC {{ $labels.persistentvolumeclaim }} has {{ $value | humanizePercentage }} free. Grow the PVC online or lower Tempo/Thanos retention (README "Capacity").
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfsvolumenearlyfull
+        - alert: SeaweedFSVolumeAlmostFull
+          expr: |
+            kubelet_volume_stats_available_bytes{namespace="object-storage",persistentvolumeclaim="data-seaweedfs-0"}
+              / kubelet_volume_stats_capacity_bytes{namespace="object-storage",persistentvolumeclaim="data-seaweedfs-0"} < 0.08
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: SeaweedFS data PV is over 92% full; writes stop at 95%.
+            description: PVC {{ $labels.persistentvolumeclaim }} has {{ $value | humanizePercentage }} free. Below 5% free (-volume.minFreeSpace=5) all volumes turn read-only and Tempo/Thanos uploads fail.
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfsvolumealmostfull
+        - alert: SeaweedFSDiskLowFreeSpace
+          expr: |
+            max by (name) (SeaweedFS_volumeServer_resource{job="seaweedfs",type="avail"})
+              / max by (name) (SeaweedFS_volumeServer_resource{job="seaweedfs",type="all"}) < 0.08
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: SeaweedFS reports less than 8% free space on {{ $labels.name }}.
+            description: SeaweedFS's own disk view ({{ $value | humanizePercentage }} available). Volumes turn read-only below 5%.
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfsdisklowfreespace
+        - alert: SeaweedFSS3ServerErrors
+          expr: |
+            sum(rate(SeaweedFS_s3_request_total{job="seaweedfs",code=~"5.."}[5m]))
+              / sum(rate(SeaweedFS_s3_request_total{job="seaweedfs"}[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than 5% of SeaweedFS S3 requests fail with 5xx.
+            description: '{{ $value | humanizePercentage }} of S3 requests return 5xx. Check the SeaweedFS logs and free space (read-only volumes).'
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfss3servererrors
+        - alert: SeaweedFSS3AccessDenied
+          expr: |
+            sum by (bucket) (rate(SeaweedFS_s3_request_total{job="seaweedfs",code="403"}[5m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: SeaweedFS S3 rejects requests for bucket "{{ $labels.bucket }}" with 403.
+            description: A client uses wrong or out-of-date keys, or touches a bucket its identity does not own. Compare Secret object-storage/seaweedfs-s3-config with observability/tempo-s3 and monitoring/thanos-objstore, then restart seaweedfs-0 (s3.json is read at start).
+            runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/seaweedfs/README.md#seaweedfss3accessdenied

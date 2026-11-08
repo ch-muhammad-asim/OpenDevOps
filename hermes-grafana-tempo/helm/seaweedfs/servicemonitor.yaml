@@ -1,0 +1,19 @@
+# Prometheus scrapes SeaweedFS on 9327 (/metrics: master, volume server, filer and S3 gateway
+# in one endpoint). job label = Service name "seaweedfs".
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: seaweedfs
+  namespace: object-storage
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/part-of: object-storage
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

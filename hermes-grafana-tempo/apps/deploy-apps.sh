@@ -17,7 +17,7 @@ command -v gcloud >/dev/null || { echo "gcloud CLI not found" >&2; exit 1; }
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 REGION="${REGION:-us-central1}"
 AR_REPO="${AR_REPO:-tempo-apps}"
-TAG="${TAG:-1.0.2}"
+TAG="${TAG:-1.0.3}"
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}"
 APPS=(python nodejs nextjs)
 

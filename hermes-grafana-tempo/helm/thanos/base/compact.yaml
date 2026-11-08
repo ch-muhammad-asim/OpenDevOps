@@ -1,0 +1,139 @@
+# Thanos compactor: the ONLY component that rewrites or deletes blocks in the bucket.
+# It merges the sidecars' 2h blocks into larger ones, downsamples to 5m and 1h, and applies
+# retention. It must be a singleton per bucket (two compactors corrupt the bucket), so this is
+# a StatefulSet with exactly one replica and no PDB (a PDB would block node drains).
+# GCS access: Workload Identity for KSA monitoring/thanos-compact.
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-compact
+  labels:
+    app.kubernetes.io/name: thanos-compact
+    app.kubernetes.io/component: compactor
+    app.kubernetes.io/part-of: thanos
+spec:
+  clusterIP: None            # metrics and the bucket UI only; nothing queries the compactor
+  selector:
+    app.kubernetes.io/name: thanos-compact
+  ports:
+    - name: http
+      port: 10902
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: thanos-compact
+  labels:
+    app.kubernetes.io/name: thanos-compact
+    app.kubernetes.io/component: compactor
+    app.kubernetes.io/part-of: thanos
+    app.kubernetes.io/version: v0.42.5
+spec:
+  replicas: 1                # singleton: never scale up
+  serviceName: thanos-compact
+  podManagementPolicy: OrderedReady   # at most one pod per ordinal, even during updates
+  revisionHistoryLimit: 5
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-compact
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thanos-compact
+        app.kubernetes.io/component: compactor
+        app.kubernetes.io/part-of: thanos
+        app.kubernetes.io/version: v0.42.5
+    spec:
+      serviceAccountName: thanos-compact
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: thanos-compact
+          image: quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
+          args:
+            - compact
+            - --log.level=info
+            - --log.format=logfmt
+            - --http-address=0.0.0.0:10902
+            - --data-dir=/data
+            - --objstore.config-file=/etc/thanos/objstore/objstore.yml
+            # Run forever, one compaction/downsampling/retention pass every 5m.
+            - --wait
+            - --wait-interval=5m
+            # 30 days at every resolution (the requirement). Downsampling is on (the default):
+            # 5m blocks from raw blocks spanning 40h+, 1h blocks from 5m blocks spanning 10d+;
+            # with auto-downsampling in the querier, 30-day panels read the cheaper blocks.
+            - --retention.resolution-raw=30d
+            - --retention.resolution-5m=30d
+            - --retention.resolution-1h=30d
+            # Blocks marked for deletion are removed after 48h (store gateways ignore them after 24h).
+            - --delete-delay=48h
+            - --compact.concurrency=1
+            - --downsample.concurrency=1
+          ports:
+            - name: http
+              containerPort: 10902
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: objstore
+              mountPath: /etc/thanos/objstore
+              readOnly: true
+      volumes:
+        - name: objstore
+          secret:
+            secretName: thanos-objstore
+            items:
+              - key: objstore.yml
+                path: objstore.yml
+  # Scratch space: the largest job (a 14-day block of one Prometheus replica, ~6-9 GB at the
+  # measured ingest, README "Sizing") is downloaded and rewritten here.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: thanos-compact
+      spec:
+        storageClassName: standard-rwo
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 50Gi

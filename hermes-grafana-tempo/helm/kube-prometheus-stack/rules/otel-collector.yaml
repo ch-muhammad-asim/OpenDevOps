@@ -2,6 +2,9 @@
 # Source: the Collector's internal telemetry on :8888 (ServiceMonitor endpoint "metrics", job
 # "otel-collector"). The Collector exposes counters WITHOUT the "_total" suffix (internal
 # telemetry default without_type_suffix: true), e.g. otelcol_receiver_refused_spans.
+# Each signal (spans, metric_points, log_records) is aggregated on its own and tagged with a
+# "signal" label: rate() drops __name__, so one regex selector over the three metrics would yield
+# duplicate label sets ("vector cannot contain metrics with the same labelset").
 # Picked up from any namespace (ruleSelectorNilUsesHelmValues: false).
 # Apply: kubectl apply -f helm/kube-prometheus-stack/rules/
 apiVersion: monitoring.coreos.com/v1
@@ -31,34 +34,73 @@ spec:
 
         - alert: OtelCollectorReceiverRefusing
           expr: |
-            sum by (namespace, pod, receiver, transport) (
-              rate({__name__=~"otelcol_receiver_refused_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            (
+            label_replace(
+              sum by (namespace, pod, receiver, transport) (rate(otelcol_receiver_refused_spans{job="otel-collector"}[5m])),
+              "signal", "spans", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, receiver, transport) (rate(otelcol_receiver_refused_metric_points{job="otel-collector"}[5m])),
+              "signal", "metric_points", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, receiver, transport) (rate(otelcol_receiver_refused_log_records{job="otel-collector"}[5m])),
+              "signal", "log_records", "", ""
+            )
             ) > 0
           for: 10m
           labels:
             severity: warning
           annotations:
             summary: Collector receiver is refusing telemetry
-            description: 'Receiver {{ $labels.receiver }} on {{ $labels.pod }} refuses {{ $value | humanize }} items/s (usually memory_limiter back-pressure or a full exporter queue). Senders retry, then drop.'
+            description: 'Receiver {{ $labels.receiver }} on {{ $labels.pod }} refuses {{ $labels.signal }}: {{ $value | humanize }} items/s (usually memory_limiter back-pressure or a full exporter queue). Senders retry, then drop.'
             runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorreceiverrefusing
 
         - alert: OtelCollectorReceiverFailed
           expr: |
-            sum by (namespace, pod, receiver, transport) (
-              rate({__name__=~"otelcol_receiver_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            (
+            label_replace(
+              sum by (namespace, pod, receiver, transport) (rate(otelcol_receiver_failed_spans{job="otel-collector"}[5m])),
+              "signal", "spans", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, receiver, transport) (rate(otelcol_receiver_failed_metric_points{job="otel-collector"}[5m])),
+              "signal", "metric_points", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, receiver, transport) (rate(otelcol_receiver_failed_log_records{job="otel-collector"}[5m])),
+              "signal", "log_records", "", ""
+            )
             ) > 0
           for: 10m
           labels:
             severity: warning
           annotations:
             summary: Collector receiver fails to process telemetry
-            description: 'Receiver {{ $labels.receiver }} on {{ $labels.pod }} fails {{ $value | humanize }} items/s because of internal errors (bad payloads, decoding errors).'
+            description: 'Receiver {{ $labels.receiver }} on {{ $labels.pod }} fails {{ $labels.signal }}: {{ $value | humanize }} items/s because of internal errors (bad payloads, decoding errors).'
             runbook_url: https://github.com/ch-muhammad-asim/OpenDevOps/blob/main/hermes-grafana-tempo/helm/kube-prometheus-stack/README.md#otelcollectorreceiverfailed
 
         - alert: OtelCollectorMemoryLimiterRefusing
           expr: |
-            sum by (namespace, pod) (
-              rate({__name__=~"otelcol_processor_memory_limiter_refused_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            (
+            label_replace(
+              sum by (namespace, pod) (rate(otelcol_processor_memory_limiter_refused_spans{job="otel-collector"}[5m])),
+              "signal", "spans", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod) (rate(otelcol_processor_memory_limiter_refused_metric_points{job="otel-collector"}[5m])),
+              "signal", "metric_points", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod) (rate(otelcol_processor_memory_limiter_refused_log_records{job="otel-collector"}[5m])),
+              "signal", "log_records", "", ""
+            )
             ) > 0
           for: 5m
           labels:
@@ -70,18 +112,27 @@ spec:
 
         - alert: OtelCollectorExporterSendFailing
           expr: |
-            sum by (namespace, pod, exporter) (
-              rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
-            )
-            /
             (
-              sum by (namespace, pod, exporter) (
-                rate({__name__=~"otelcol_exporter_sent_(spans|metric_points|log_records)", job="otel-collector"}[5m])
-              )
-              +
-              sum by (namespace, pod, exporter) (
-                rate({__name__=~"otelcol_exporter_send_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
-              )
+            label_replace(
+              sum by (namespace, pod, exporter) (rate(otelcol_exporter_send_failed_spans{job="otel-collector"}[5m]))
+              /
+              (sum by (namespace, pod, exporter) (rate(otelcol_exporter_sent_spans{job="otel-collector"}[5m])) + sum by (namespace, pod, exporter) (rate(otelcol_exporter_send_failed_spans{job="otel-collector"}[5m]))),
+              "signal", "spans", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, exporter) (rate(otelcol_exporter_send_failed_metric_points{job="otel-collector"}[5m]))
+              /
+              (sum by (namespace, pod, exporter) (rate(otelcol_exporter_sent_metric_points{job="otel-collector"}[5m])) + sum by (namespace, pod, exporter) (rate(otelcol_exporter_send_failed_metric_points{job="otel-collector"}[5m]))),
+              "signal", "metric_points", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, exporter) (rate(otelcol_exporter_send_failed_log_records{job="otel-collector"}[5m]))
+              /
+              (sum by (namespace, pod, exporter) (rate(otelcol_exporter_sent_log_records{job="otel-collector"}[5m])) + sum by (namespace, pod, exporter) (rate(otelcol_exporter_send_failed_log_records{job="otel-collector"}[5m]))),
+              "signal", "log_records", "", ""
+            )
             ) > 0.01
           for: 10m
           labels:
@@ -93,8 +144,21 @@ spec:
 
         - alert: OtelCollectorExporterEnqueueFailed
           expr: |
-            sum by (namespace, pod, exporter) (
-              rate({__name__=~"otelcol_exporter_enqueue_failed_(spans|metric_points|log_records)", job="otel-collector"}[5m])
+            (
+            label_replace(
+              sum by (namespace, pod, exporter) (rate(otelcol_exporter_enqueue_failed_spans{job="otel-collector"}[5m])),
+              "signal", "spans", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, exporter) (rate(otelcol_exporter_enqueue_failed_metric_points{job="otel-collector"}[5m])),
+              "signal", "metric_points", "", ""
+            )
+             or
+            label_replace(
+              sum by (namespace, pod, exporter) (rate(otelcol_exporter_enqueue_failed_log_records{job="otel-collector"}[5m])),
+              "signal", "log_records", "", ""
+            )
             ) > 0
           for: 5m
           labels:

@@ -8,14 +8,19 @@ so a latency spike links to the trace behind it, and routes alerts by severity.
 **Status (2026-11-08, chart 93.1.0):** the **lab** profile (`values.yaml` + `values-lab.yaml`) matches the release
 running on the lab cluster (same values; it adds image digests, the route tree, anti-affinity, config-reloader
 requests of 5m / 16Mi per pod and no service account token in the Alertmanager pod).
-The **production** profile (`values.yaml` alone) passes `helm lint`, `helm template`, kubeconform (Kubernetes 1.36,
-strict) and `promtool`; it has not been installed on a multi-zone cluster yet.
+Both profiles keep 2 days locally plus the Thanos sidecar (30 days via [`../thanos/`](../thanos/README.md)); the lab
+uploads to in-cluster SeaweedFS S3, production to GCS. The lab switch to the sidecar (`2d` / `8GiB`) is live
+(2026-11-08: sidecar uploads ok 2, failed 0; `PROFILE=lab scripts/verify.sh` 32 PASS, 0 failures). The **production** profile (`values.yaml`
+alone: 2 days locally plus the Thanos sidecar uploading to GCS) passes
+`helm lint`, `helm template`, kubeconform (Kubernetes 1.36, strict) and `promtool`; it has not been installed on a
+multi-zone cluster yet.
 
 ## 🧩 Components
 
 | Name | What it does (one line) | Where defined | Security role |
 |---|---|---|---|
 | Prometheus `prometheus-kube-prometheus-prometheus:9090` | Scrapes monitors in all namespaces, accepts remote write, keeps exemplars | [`values.yaml`](values.yaml) `prometheus` | Internal only; non-root UID 1000, read-only root FS |
+| Thanos sidecar (both profiles) | Uploads each 2h block to the bucket (prod GCS `thanos-metrics-<project>`, lab SeaweedFS `thanos-metrics`); serves recent data to `thanos-query` | `prometheusSpec.thanos`, `thanosService`, `thanosServiceMonitor` ([`../thanos/`](../thanos/README.md)) | Prod: KSA `prometheus-kube-prometheus-prometheus` with `roles/storage.objectUser` via Workload Identity, no keys; lab: S3 key of the `thanos` identity in Secret `thanos-objstore` |
 | Alertmanager `prometheus-kube-prometheus-alertmanager:9093` | Groups, inhibits and routes alerts by severity to Slack / PagerDuty | `alertmanager` | Credentials only as files from Secret `alertmanager-receivers` |
 | Prometheus operator | Turns ServiceMonitor/PodMonitor/PrometheusRule objects into config; serves the admission webhook | `prometheusOperator` | Cluster-scoped RBAC from the chart |
 | config-reloader | Reloads Prometheus/Alertmanager when their config changes | `prometheusOperator.prometheusConfigReloader` | Sidecar, same restricted context |
@@ -36,7 +41,10 @@ Other alert rules in this repo, picked up the same way: Tempo mixin
 | Setting | Production (`values.yaml`) | Lab (`+ values-lab.yaml`) |
 |---|---|---|
 | Prometheus replicas / PDB | 2, hard anti-affinity per node, spread over zones / `minAvailable: 1` | 1 / none |
-| Prometheus retention / size cap / PVC | `15d` / `85GiB` / 100Gi `standard-rwo` | `1d` / `5GiB` / 10Gi `standard-rwo` |
+| Prometheus retention / size cap / PVC | `2d` / `85GiB` / 100Gi `standard-rwo` (30 days in GCS via Thanos) | `2d` / `8GiB` / 40Gi `standard-rwo` (30 days in SeaweedFS S3 via Thanos; the PVC was 40Gi before and cannot shrink) |
+| Thanos sidecar / local compaction | Sidecar on (50m, 256Mi / 1Gi), `disableCompaction: true` | Sidecar on (10m, 64Mi / 256Mi), `disableCompaction: true` |
+| Thanos object store (Secret `thanos-objstore`, key `objstore.yml`) | `type: GCS`, bucket name only (Workload Identity) | `type: S3`, bucket `thanos-metrics`, `seaweedfs.object-storage:8333`, access key (written by `scripts/deploy.sh`) |
+| Grafana / Hermes query endpoint | `http://thanos-query.monitoring:10902` | Same |
 | Prometheus requests / memory limit | 1 CPU, 4Gi / 8Gi | 300m, 1Gi / 1536Mi |
 | Alertmanager replicas / PDB / PVC | 2 (gossip cluster) / `minAvailable: 1` / 2Gi | 1 / none / none (emptyDir) |
 | Alertmanager receivers | `default` (Slack), `critical` (PagerDuty + Slack), `null` | Same names, no integrations, no Secret |
@@ -49,8 +57,29 @@ Other alert rules in this repo, picked up the same way: Tempo mixin
 | Images | Tag + digest | Same |
 | Selectors, remote-write receiver, exemplars, security contexts, route tree | As below | Same |
 
-**Total requests** (3 nodes): production 2.35 vCPU / 8.72 GiB + 204Gi of PVCs; lab 0.41 vCPU / 1.28 GiB + 10Gi PVC
-(the running lab release plus 10m / 32Mi for the two config-reloader sidecars).
+**Total requests** (3 nodes): production 2.35 vCPU / 8.72 GiB + 204Gi of PVCs, plus 2 × 50m / 256Mi for the Thanos
+sidecars (Thanos query, store and compactor: [`../thanos/`](../thanos/README.md)); lab 0.42 vCPU / 1.34 GiB + 40Gi PVC
+(the running lab release plus 10m / 32Mi for the two config-reloader sidecars and 10m / 64Mi for the Thanos sidecar).
+
+## 🗓️ Retention
+
+| Profile | Local TSDB | Long-term | Tested? |
+|---|---|---|---|
+| Lab | `retention: 2d`, `retentionSize: 8GiB` on a 40Gi PVC | Thanos: raw, 5m and 1h kept 30 days in SeaweedFS S3 (in-cluster) | ✅ Live (2026-11-08) |
+| Production | `retention: 2d`, `retentionSize: 85GiB` on a 100Gi PVC | Thanos: raw, 5m and 1h kept 30 days in GCS; bucket lifecycle 35 days | Rendered and validated only |
+
+Measured lab ingest (2026-11-08): 3,429 samples/s, 150,952 head series, so 8.89 billion samples and ~12–18 GB raw per
+replica in 30 days (in the bucket); 2 days locally is ~1–2 GB plus the WAL, so `8GiB` is a safety cap only. The lab
+PVC stays 40Gi because a PVC cannot shrink; a smaller disk needs a new PVC on a fresh install. When the lab switched to
+the sidecar, blocks that Prometheus had already compacted locally were not uploaded (the sidecar ships only 2h blocks), so
+history older than the switch (a few hours in the lab) is gone after 2 days. History started on 2026-11-08, so 30-day
+trends fill in over time.
+
+**How the lab PVC was expanded (10Gi → 40Gi, online):** `standard-rwo` allows volume expansion. The PVC request was
+raised to 40Gi, the new size set in `values-lab.yaml` (`storageSpec`) and applied with `helm upgrade`; the operator
+then recreated its StatefulSet with the new `volumeClaimTemplates` (the pod and its data stay). Check with
+`kubectl -n monitoring get pvc` (`CAPACITY 40Gi`). Prometheus operator guide:
+[storage](https://prometheus-operator.dev/docs/platform/storage/).
 
 ## 📌 Pinned images
 
@@ -67,7 +96,7 @@ digests of the images running in the lab match.
 | `quay.io/prometheus/node-exporter` | `v1.12.1-distroless` | `sha256:8c9bac11973b94b59be88d6e11fee4429aa743c8846cdc75d65b18db33f6a106` | node-exporter |
 | `ghcr.io/jkroepke/kube-webhook-certgen` | `1.11.1` | `sha256:8009b04f9873f7279b5adee37fdd03b6a9aa7b6751d4f69fde2683010e41cd1f` | Webhook cert Jobs (install/upgrade) |
 | `quay.io/prometheus-operator/admission-webhook` | `v0.95.1` | `sha256:5a5b2a9302e2373fc5ff5979d4d773690e05ab072b1ad49eb985529042199f3f` | Not deployed (pinned) |
-| `quay.io/thanos/thanos` | `v0.42.5` | `sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7` | Not deployed (pinned) |
+| `quay.io/thanos/thanos` | `v0.42.5` | `sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7` | Thanos sidecar in the Prometheus pods (both profiles) |
 
 Re-resolve a digest after a version bump, for example:
 
@@ -263,9 +292,11 @@ RBAC from the chart.
 | Area | Production setting / action |
 |---|---|
 | HA sizing | 2 Prometheus (1 CPU / 4Gi request, 8Gi limit) and 2 Alertmanager replicas on different nodes, spread over zones, PDB `minAvailable: 1`. Re-size from `prometheus_tsdb_head_series` (roughly 4 KiB of RAM per active series incl. headroom) |
-| Remote write to both replicas | The Service load-balances, so a remote-write sender pointed at it splits its data between replicas. Point senders (Tempo metrics-generator, Hermes) at both pods: `http://prometheus-prometheus-kube-prometheus-prometheus-0.prometheus-operated.monitoring:9090/api/v1/write` and `...-1...`. For one global view or long retention add Thanos/Mimir or a managed backend |
-| Disk | Retention `15d` capped at `85GiB` on a 100Gi PD (15% headroom for compaction and WAL checkpoints); alert `KubePersistentVolumeFillingUp` (default rules) covers it. Grow the PVC (`standard-rwo` allows expansion) before raising retention |
-| Backups | Metrics are rebuildable, so the PVCs are not backed up by default. If history matters: scheduled PD snapshots of the Prometheus PVCs (VolumeSnapshot or a GCE snapshot schedule). Alertmanager silences live on its 2Gi PVC and are replicated by gossip |
+| Remote write to both replicas | The Service load-balances, so a remote-write sender pointed at it splits its data between replicas. Point senders (Tempo metrics-generator, Hermes) at both pods: `http://prometheus-prometheus-kube-prometheus-prometheus-0.prometheus-operated.monitoring:9090/api/v1/write` and `...-1...`. Reads go through `thanos-query`, which deduplicates the pair |
+| Retention | Local `2d` (buffer for sidecar upload retries); 30 days of history in GCS via Thanos ([`../thanos/README.md`](../thanos/README.md)); bucket lifecycle 35 days (30 days + 48h compactor delete delay) |
+| Thanos prerequisites | Secret `monitoring/thanos-objstore` (bucket name only, no key; created by `scripts/deploy.sh`) and `roles/storage.objectUser` on the bucket for KSA `prometheus-kube-prometheus-prometheus` before install |
+| Disk | `85GiB` cap on a 100Gi PD; with 2-day retention ~1–2 GB is used, so a fresh install can use a smaller PVC (~20Gi); alert `KubePersistentVolumeFillingUp` (default rules) covers it |
+| Backups | The Thanos bucket is the system of record for history (soft delete, default 7 days; versioning off by design); the local PVCs are not backed up. Alertmanager silences live on its 2Gi PVC and are replicated by gossip |
 | Upgrades | Read the chart's UPGRADE notes; apply the new operator CRDs server-side first (below); `helm diff` then `helm upgrade`; rollback with `helm rollback prometheus <rev>` (CRDs are not rolled back) |
 | Cost (requests) | 2.35 vCPU / 8.72 GiB requests and 204Gi `standard-rwo` for 3 nodes; node-exporter adds 20m / 32Mi per extra node |
 | SLOs | Alerting pipeline: `Watchdog` always firing (route it to a dead man's switch to page when it stops); sample-app SLOs in [`../../apps/monitoring/prometheusrule.yaml`](../../apps/monitoring/prometheusrule.yaml) |
@@ -291,8 +322,8 @@ Run on 2026-11-08 with chart 93.1.0, helm v3.17.3, kubeconform v0.8.0, promtool 
 |---|---|---|
 | Lint, production | `helm lint <chart> -f helm/kube-prometheus-stack/values.yaml` | 0 failed |
 | Lint, lab | `helm lint <chart> -f .../values.yaml -f .../values-lab.yaml` | 0 failed |
-| Schema, production | `helm template ... \| kubeconform -strict -kubernetes-version 1.36.0` + CRDs-catalog | 95 valid, 0 invalid |
-| Schema, lab | same with `values-lab.yaml` | 93 valid, 0 invalid |
+| Schema, production | `helm template ... \| kubeconform -strict -kubernetes-version 1.36.0` + CRDs-catalog | 97 valid, 0 invalid |
+| Schema, lab | same with `values-lab.yaml` (adds the Thanos discovery Service and sidecar ServiceMonitor) | 95 valid, 0 invalid |
 | Schema, rules | `kubeconform -strict ... helm/kube-prometheus-stack/rules/` | 4 valid |
 | Rule syntax | `promtool check rules` on each rule file's `spec` | 15 rules, all `SUCCESS` |
 | Rules on real data | Each expression queried on the lab Prometheus | All valid; none firing; source series present |
@@ -314,6 +345,8 @@ Run on 2026-11-08 with chart 93.1.0, helm v3.17.3, kubeconform v0.8.0, promtool 
 | `remote write receiver needs to be enabled` errors in Tempo | Flag off | Check `enableRemoteWriteReceiver: true` and re-run the install |
 | Prometheus PVC `Pending` | `standard-rwo` missing | `kubectl get storageclass`; GKE provides `standard-rwo` by default |
 | Disk full / OOM | Too many series | Lower retention or drop labels; check `prometheus_tsdb_head_series` |
+| Prometheus pods `CreateContainerConfigError` | Secret `thanos-objstore` missing (both profiles) | Create it ([`../thanos/README.md`](../thanos/README.md) Install) or run `scripts/deploy.sh prometheus` |
+| `helm upgrade` changes the PVC size but the disk stays small | StatefulSet `volumeClaimTemplates` are immutable | Raise the PVC request (`kubectl patch pvc`), then let the operator recreate the StatefulSet ([Retention](#-retention)) |
 | Collector alerts never fire | Metric names with `_total` | The rules already use the suffix-less names exposed by the Collector |
 
 ## 🔗 References

@@ -1,17 +1,21 @@
-# OPTIONAL overlay on values.yaml: trace blocks in a Google Cloud Storage bucket instead of the local PV.
-# Not used by the lab (the lab keeps blocks on the local PV); production uses helm/tempo-distributed.
+# OPTIONAL overlay on values.yaml: trace blocks in a Google Cloud Storage bucket.
+# Not used by the lab (the lab stores blocks in SeaweedFS S3 via values-s3.yaml); production uses
+# helm/tempo-distributed.
 # Chart grafana-community/tempo 3.2.1, Tempo 3.1.1. Use it together with values.yaml:
 #   helm upgrade --install tempo grafana-community/tempo --version 3.2.1 \
 #     --namespace observability --create-namespace \
 #     -f helm/tempo/values.yaml -f helm/tempo/values-gcs.yaml \
 #     --set tempo.storage.trace.gcs.bucket_name="$TEMPO_BUCKET"
 #
-# Auth: GKE Workload Identity Federation, no key files, no Google service account, no annotation.
-# infra/create-tempo-bucket.sh (ACCESS_MODE=principal, the default) grants roles/storage.objectAdmin
-# on THIS bucket only to the principal of the Kubernetes ServiceAccount observability/tempo:
-#   principal://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<PROJECT_ID>.svc.id.goog/subject/ns/observability/sa/tempo
-# (ACCESS_MODE=gsa impersonates an existing Google service account instead; NOT recommended:
-# that account usually has project-wide access, far broader than one bucket.)
+# Auth: GKE Workload Identity Federation, no key files. infra/create-tempo-bucket.sh (wrapper around
+# infra/create-gcs-bucket.sh) creates a dedicated bucket (uniform access, public access prevention,
+# versioning off, 33-day lifecycle backstop) and grants roles/storage.objectUser for the Kubernetes
+# ServiceAccount observability/tempo:
+#   ACCESS_MODE=bucket (default)  on THIS bucket to the principal
+#     principal://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<PROJECT_ID>.svc.id.goog/subject/ns/observability/sa/tempo
+#   ACCESS_MODE=conditional       project-level binding with an IAM condition limited to this bucket
+#   ACCESS_MODE=gsa               a DEDICATED Google service account (never a default compute account)
+#                                 that the KSA impersonates; scripts/deploy.sh adds the annotation.
 # The WAL, live-store data and generator WAL stay on the PV from values.yaml.
 
 serviceAccount:

@@ -16,6 +16,13 @@ on each file's `spec`, `kubeconform -strict` valid; every alert has a `runbook_u
 | [`cert-manager.yaml`](cert-manager.yaml) | PrometheusRule `cert-manager`: controller up, certificate readiness and expiry (label `tls_mode=letsencrypt`) | `CertManagerDown`, `CertManagerCertificateNotReady`, `CertManagerCertificateExpiringSoon`, `CertManagerCertificateExpiryCritical` |
 | [`grafana.yaml`](grafana.yaml) | PrometheusRule `grafana`: all replicas or one replica down | `GrafanaDown`, `GrafanaReplicaDown` |
 
+**Collector rule pattern:** each signal (`spans`, `metric_points`, `log_records`) is aggregated on its own and tagged
+with a `signal` label (`label_replace`), then the three results are joined with `or`. A single regex selector such as
+`rate({__name__=~"otelcol_receiver_refused_(spans|metric_points|log_records)"}[5m])` fails at evaluation time in
+Prometheus 3 ("vector cannot contain metrics with the same labelset") because `rate()` drops `__name__`. Check rule
+health after any change: `/api/v1/rules` must show `health: ok` for every rule, and `PrometheusRuleFailures` must stay
+inactive.
+
 All four live in namespace `monitoring`; Prometheus selects them because `ruleSelectorNilUsesHelmValues: false`
 ([`../values.yaml`](../values.yaml)). Severities, routing and one runbook per alert:
 [`../README.md`](../README.md#-alert-rules-and-runbooks).

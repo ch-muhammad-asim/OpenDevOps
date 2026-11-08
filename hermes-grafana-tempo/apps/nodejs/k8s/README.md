@@ -19,11 +19,11 @@ live on GKE 1.36 since 2026-11-08 (lab profile, image by digest), read-only root
 
 | Setting | Value | Why |
 |---|---|---|
-| Image | `tempo-apps/nodejs:1.0.2` | `apps/deploy-apps.sh` replaces it with `<registry>/nodejs@sha256:<digest>` |
+| Image | `tempo-apps/nodejs:1.0.3` | `apps/deploy-apps.sh` replaces it with `<registry>/nodejs@sha256:<digest>` |
 | Labels | `app.kubernetes.io/name=nodejs`, `app.kubernetes.io/part-of=tempo-apps` | Selector, NetworkPolicies, dashboards |
 | Resources | requests 50m / 128Mi, limits 500m / 256Mi | The planted leak stops at a 120 MiB cache, about 165 MiB total, below the limit |
 | Readiness | `GET /healthz` every 5 s, timeout 3 s, 3 failures | Takes the pod out of the Service while the event loop is blocked |
-| Liveness | `GET /healthz` every 10 s, timeout 5 s, 6 failures, 10 s delay | Tolerates the planted CPU hog (~1-3 s blocks) without restarts |
+| Liveness | `GET /healthz` every 20 s, timeout 10 s, 6 failures (~2 min), 10 s delay | Tolerates the planted CPU hog and sustained CPU stress without restarts; readiness sheds traffic instead |
 | `/tmp` | `emptyDir`, 16 Mi | The only writable path (root FS is read-only) |
 | OTLP endpoint | `http://otel-collector.observability:4318` (http/protobuf) | Collector in namespace `observability` |
 | Resource attributes | `deployment.environment.name=lab,service.namespace=tempo-apps,k8s.namespace.name,k8s.pod.name` | Pod name and namespace via the downward API |
@@ -49,7 +49,7 @@ Expected: `deployment "nodejs" successfully rolled out` and 2 pods `1/1 Running`
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ImagePullBackOff` on `tempo-apps/nodejs:1.0.2` | Applied with `kubectl apply -k apps/nodejs/k8s` directly, so the registry prefix was not set | Deploy with `apps/deploy-apps.sh` |
+| `ImagePullBackOff` on `tempo-apps/nodejs:1.0.3` | Applied with `kubectl apply -k apps/nodejs/k8s` directly, so the registry prefix was not set | Deploy with `apps/deploy-apps.sh` |
 | Pod Security warning on apply | A field from the `restricted` profile was removed | Restore the `securityContext` blocks in `deployment.yaml` |
 | `OOMKilled` | Memory limit lowered below ~200 Mi while the leak is at its cap | Keep the 256 Mi limit, or `kubectl -n tempo-apps rollout restart deploy/nodejs` |
 | Pod `0/1` for a few seconds under load | Planted CPU hog blocks readiness | Expected; it recovers without a restart |

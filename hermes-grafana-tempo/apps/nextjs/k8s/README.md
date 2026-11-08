@@ -4,7 +4,7 @@ Deployment and Service for `nextjs-web` in namespace `tempo-apps`. Back to the [
 
 | File | What it does |
 |---|---|
-| [`deployment.yaml`](deployment.yaml) | 2 replicas (lab: 1), node/zone topology spread, surge-only rollout, preStop drain, image `tempo-apps/nextjs:1.0.2`, OTel env, probes on `/healthz`, Pod Security `restricted` |
+| [`deployment.yaml`](deployment.yaml) | 2 replicas (lab: 1), node/zone topology spread, surge-only rollout, preStop drain, image `tempo-apps/nextjs:1.0.3`, OTel env, probes on `/healthz`, Pod Security `restricted` |
 | [`service.yaml`](service.yaml) | ClusterIP `nextjs`, port 3000 (target of the `tempo-nextjs` IngressRoute) |
 | [`pdb.yaml`](pdb.yaml) | PodDisruptionBudget `maxUnavailable: 1`: drains/upgrades keep a pod serving, never block with 1 replica |
 | [`kustomization.yaml`](kustomization.yaml) | Sets namespace `tempo-apps`; included by [`apps/kustomization.yaml`](../../kustomization.yaml) |
@@ -12,7 +12,7 @@ Deployment and Service for `nextjs-web` in namespace `tempo-apps`. Back to the [
 | Setting | Value |
 |---|---|
 | Resources | requests `50m` / `128Mi`, limits `500m` / `384Mi` |
-| Probes | readiness and liveness `GET /healthz` on port `http` (3000) |
+| Probes | readiness (10 s period, 3 s timeout) and liveness (20 s period, 10 s timeout, 6 failures: ~2 min) `GET /healthz` on port `http` (3000); sustained CPU stress makes the pod unready, not restarted |
 | Security context | `runAsNonRoot`, UID/GID 10001, `allowPrivilegeEscalation: false`, drop ALL, seccomp `RuntimeDefault`, `readOnlyRootFilesystem: true`, no service account token |
 | Writable paths | `/tmp` (emptyDir, 64Mi), `/app/.next/cache` (emptyDir, 128Mi) |
 | Labels | `app.kubernetes.io/name=nextjs`, `app.kubernetes.io/part-of=tempo-apps` |

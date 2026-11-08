@@ -3,7 +3,7 @@
 # Usage: apps/build-push.sh            (all apps)
 #        apps/build-push.sh nodejs     (one app)
 # Env:   PROJECT_ID (default: gcloud config), REGION (default us-central1),
-#        AR_REPO (default tempo-apps), TAG (default 1.0.2)
+#        AR_REPO (default tempo-apps), TAG (default 1.0.3)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,7 +11,7 @@ command -v gcloud >/dev/null || { echo "gcloud CLI not found" >&2; exit 1; }
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 REGION="${REGION:-us-central1}"
 AR_REPO="${AR_REPO:-tempo-apps}"
-TAG="${TAG:-1.0.2}"
+TAG="${TAG:-1.0.3}"
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}"
 if [[ $# -gt 0 ]]; then APPS=("$@"); else APPS=(python nodejs nextjs); fi
 

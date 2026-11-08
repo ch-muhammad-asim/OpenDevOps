@@ -1,0 +1,18 @@
+# Lab: one querier, small requests (measured lab ingest: 3,429 samples/s, ~151k series).
+# --query.max-concurrent is lowered to 4 in kustomization.yaml to fit the 192Mi limit.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-query
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: thanos-query
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              memory: 192Mi

@@ -29,7 +29,7 @@ The project [architecture diagram](../docs/diagrams/architecture.mmd) shows the 
 
 | File | What it does (one line) | Security role |
 |---|---|---|
-| [`namespaces.yaml`](namespaces.yaml) | Creates traefik, observability, tempo-apps, hermes, monitoring with Pod Security labels | `restricted` everywhere except monitoring (`privileged`, node-exporter) |
+| [`namespaces.yaml`](namespaces.yaml) | Creates traefik, observability, tempo-apps, hermes, monitoring with Pod Security labels (the lab namespace `object-storage` is defined in [`../helm/seaweedfs/namespace.yaml`](../helm/seaweedfs/namespace.yaml)) | `restricted` everywhere except monitoring (`privileged`, node-exporter) |
 | [`cert-manager.yaml`](cert-manager.yaml) | Namespace cert-manager + its NetworkPolicies (`TLS_MODE=letsencrypt` only) | `restricted`, default-deny ingress, webhook 10250 and metrics 9402 allows |
 | [`traefik-values.yaml`](traefik-values.yaml) | Traefik 42.3.1 production values: 3 replicas, PDB, node/zone spread, digest-pinned image, CRD provider on 4 namespaces | Non-root, read-only rootfs, no dashboard/API, Cloudflare-only `trustedIPs` and LB `loadBalancerSourceRanges` |
 | [`traefik-values-lab.yaml`](traefik-values-lab.yaml) | Lab overlay: 1 replica, no PDB/spread, small requests | Same security settings (inherits them) |
@@ -173,7 +173,7 @@ To test Let's Encrypt issuance on staging first, set `issuerRef.name: letsencryp
 | Data exfiltration / metadata-server abuse (prod) | Default-deny egress in observability and tempo-apps; only Tempo may reach the GKE metadata server | `networkpolicies-egress.yaml` | From a tempo-apps pod, `curl -m 5 https://example.com` times out |
 | Traefik reading cluster Secrets | Namespaced RBAC, provider limited to traefik/observability/tempo-apps/hermes, cross-namespace refs off | Chart `rbac.namespaced: true` (Roles only in those 4 namespaces) | `kubectl auth can-i get secrets -n monitoring --as=system:serviceaccount:traefik:traefik`: `no` |
 | Image tampering / tag drift | Every Traefik and cert-manager image pinned by digest | Helm values `image.tag@digest` / `image.digest` | `kubectl get pods -o jsonpath='{..imageID}'` equals the digests in the values files |
-| Privileged or root pods | Pod Security `restricted` in traefik, cert-manager, observability, tempo-apps, hermes | Namespace labels (enforce + warn + audit) | A pod without `runAsNonRoot`/seccomp in tempo-apps is rejected at admission |
+| Privileged or root pods | Pod Security `restricted` in traefik, cert-manager, observability, tempo-apps, hermes (and lab `object-storage`) | Namespace labels (enforce + warn + audit) | A pod without `runAsNonRoot`/seccomp in tempo-apps is rejected at admission |
 | Noisy neighbour / runaway sample app | LimitRange max 1 CPU / 1Gi per container, ResourceQuota on tempo-apps | `limitrange.yaml` | A pod asking for 2 CPU in tempo-apps is rejected |
 | DNS token leak (letsencrypt) | Token only in Secret `cloudflare-api-token`, created from a file, scoped to DNS edit | `kubectl create secret --from-file` | Token never appears in Git or shell history |
 | Losing the edge in a node drain (prod) | 3 replicas, PDB `minAvailable: 2`, one per node | Traefik chart PDB + topology spread | `kubectl drain` waits instead of evicting a second Traefik pod |
@@ -194,6 +194,8 @@ Ingress flows allowed (container ports):
 | Every observability / tempo-apps pod | Prometheus | all |
 | Sample apps | Traefik 3000/8000; same namespace | 3000, 8000 |
 | Prometheus | Grafana, Tempo (9090); monitoring namespace | 9090, all |
+| Thanos query, store, compactor ([`../helm/thanos/`](../helm/thanos/README.md)) | query: Grafana, Hermes gateway (10902); sidecar and store: thanos-query (10901); Prometheus scrapes all (10902) | 10902, 10901 |
+| SeaweedFS S3, lab ([`../helm/seaweedfs/`](../helm/seaweedfs/README.md)) | Tempo, Thanos sidecar / store / compactor / query (8333); Prometheus (9327) | 8333, 9327 |
 | Alertmanager | Prometheus (9093, 8080), Grafana (9093), Alertmanager peers (9094 TCP/UDP) | 9093, 8080, 9094 |
 | Prometheus operator | any source (kube-apiserver admission + Prometheus scrape) | 10250 |
 | kube-state-metrics | Prometheus | 8080, 8081 |
@@ -204,9 +206,9 @@ Egress flows allowed by `networkpolicies-egress.yaml` (all other egress from the
 |---|---|---|
 | Every pod in observability and tempo-apps | kube-dns and NodeLocal DNSCache pods in kube-system | 53 UDP/TCP |
 | Sample apps | Same namespace; OTel Collector | any; 4317, 4318 |
-| Grafana | Prometheus 9090, Alertmanager 9093, Tempo 3200; other Grafana pods 9094 TCP/UDP (alerting gossip); external database in `GRAFANA_DB_CIDR` (default `10.0.0.0/8`, narrow it to the Cloud SQL private range); HTTPS anywhere except the metadata server (kube-apiserver for sidecars) | 9090, 9093, 3200, 9094, 5432, 3306, 443 |
+| Grafana | Prometheus 9090, Thanos query 10902, Alertmanager 9093, Tempo 3200; other Grafana pods 9094 TCP/UDP (alerting gossip); external database in `GRAFANA_DB_CIDR` (default `10.0.0.0/8`, narrow it to the Cloud SQL private range); HTTPS anywhere except the metadata server (kube-apiserver for sidecars) | 9090, 10902, 9093, 3200, 9094, 5432, 3306, 443 |
 | OTel Collector | Tempo 4317/4318; other Collector pods 4317/4318; HTTPS anywhere except the metadata server (kube-apiserver for `k8sattributes` and the load-balancing exporter's k8s resolver) | 4317, 4318, 443 |
-| Tempo | Tempo components; Prometheus (remote write); test Kafka; HTTPS + Kafka anywhere except the metadata server (GCS, kube-apiserver, managed Kafka) | all, 9090, 9092, 9093, 443 |
+| Tempo | Tempo components; Prometheus (remote write); lab SeaweedFS S3 in `object-storage`; test Kafka; HTTPS + Kafka anywhere except the metadata server (GCS, kube-apiserver, managed Kafka) | all, 9090, 8333, 9092, 9093, 443 |
 | Tempo | GKE metadata server for Workload Identity: `169.254.169.254` ports 80 and 988, `169.254.169.252` port 988 | 80, 988 |
 
 What is **not** protected:

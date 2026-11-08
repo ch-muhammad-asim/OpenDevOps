@@ -1,0 +1,12 @@
+# Lab object storage (SeaweedFS). Pod Security Standards "restricted", enforced at admission:
+# the server and the bootstrap Job run as UID/GID 1000 (the image's "seaweed" user), non-root,
+# seccomp RuntimeDefault, no privilege escalation, all capabilities dropped, read-only root FS.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: object-storage
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

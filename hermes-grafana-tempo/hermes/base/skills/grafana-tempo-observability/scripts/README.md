@@ -1,6 +1,6 @@
 # 🐍 obs.py
 
-Read-only client for Prometheus (`prometheus-kube-prometheus-prometheus.monitoring:9090`), Tempo
+Read-only client for Prometheus data through the Thanos querier (`thanos-query.monitoring:10902`), Tempo
 (`tempo.observability:3200`) and Grafana (`grafana.observability`, Viewer token from env `GRAFANA_TOKEN`). HTTP GET
 only, except Grafana's `/api/ds/query` (a datasource query). Output is compact JSON with bounded time ranges and
 result limits; `trace` returns at most 60 spans. Run `python3 obs.py --help` for all commands.

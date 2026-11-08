@@ -1,0 +1,274 @@
+# Thanos alerts, adapted from the upstream Thanos mixin (examples/alerts/alerts.yaml at
+# v0.42.5) to this project's job names:
+#   sidecar  job="prometheus-kube-prometheus-thanos-discovery" (kube-prometheus-stack)
+#   query    job="thanos-query"   store job="thanos-store"   compact job="thanos-compact"
+# Severity routing follows helm/kube-prometheus-stack/values.yaml (critical pages, warning Slack).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: thanos
+  labels:
+    app.kubernetes.io/name: thanos
+    app.kubernetes.io/part-of: thanos
+spec:
+  groups:
+    - name: thanos-sidecar
+      rules:
+        - alert: ThanosSidecarBucketOperationsFailed
+          expr: |
+            sum by (job, pod) (rate(thanos_objstore_bucket_operation_failures_total{job="prometheus-kube-prometheus-thanos-discovery"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos sidecar bucket operations are failing.
+            description: Sidecar in {{ $labels.pod }} fails bucket operations; new blocks are not reaching the bucket (check Secret thanos-objstore, then the Workload Identity grant on GCS or the SeaweedFS S3 service in the lab).
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanossidecarbucketoperationsfailed
+        - alert: ThanosSidecarUploadFailures
+          expr: |
+            sum by (job, pod) (increase(thanos_shipper_upload_failures_total{job="prometheus-kube-prometheus-thanos-discovery"}[1h])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos sidecar failed to upload blocks.
+            description: Sidecar in {{ $labels.pod }} failed {{ $value | humanize }} block uploads in the last hour. Local retention is 2d; uploads must recover before then or data is lost.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanossidecarbucketoperationsfailed
+        - alert: ThanosSidecarNoRecentUpload
+          # Prometheus cuts a 2h block every 2h; no successful upload for 6h means the shipper is stuck.
+          # The metric is 0 until the first upload, so that case is measured from process start.
+          expr: |
+            (
+              (time() - max by (job, pod) (thanos_objstore_bucket_last_successful_upload_time{job="prometheus-kube-prometheus-thanos-discovery"}) > 6 * 3600)
+              and on (job, pod)
+              (max by (job, pod) (thanos_objstore_bucket_last_successful_upload_time{job="prometheus-kube-prometheus-thanos-discovery"}) > 0)
+            )
+            or on (job, pod)
+            (
+              (time() - max by (job, pod) (process_start_time_seconds{job="prometheus-kube-prometheus-thanos-discovery"}) > 6 * 3600)
+              and on (job, pod)
+              (max by (job, pod) (thanos_objstore_bucket_last_successful_upload_time{job="prometheus-kube-prometheus-thanos-discovery"}) == 0)
+            )
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos sidecar has not uploaded a block for 6 hours.
+            description: Sidecar in {{ $labels.pod }} has had no successful upload for {{ $value | humanizeDuration }}. Local retention is 2d; after that the data is gone.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanossidecarbucketoperationsfailed
+        - alert: ThanosSidecarNoConnectionToStartedPrometheus
+          expr: |
+            thanos_sidecar_prometheus_up{job="prometheus-kube-prometheus-thanos-discovery"} == 0
+            and on (namespace, pod)
+            prometheus_tsdb_data_replay_duration_seconds != 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos sidecar cannot reach its Prometheus.
+            description: Sidecar in {{ $labels.pod }} is unhealthy although Prometheus has replayed its WAL.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanossidecarnoconnectiontostartedprometheus
+
+    - name: thanos-compact
+      rules:
+        - alert: ThanosCompactHalted
+          expr: thanos_compact_halted{job="thanos-compact"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos compactor has halted.
+            description: The compactor hit an unrecoverable error (often an overlapping or corrupt block) and stopped compacting, downsampling and applying retention. The bucket grows without bound until it is fixed.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanoscompacthalted
+        - alert: ThanosCompactMultipleRunning
+          expr: sum by (job) (up{job="thanos-compact"}) > 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: More than one Thanos compactor is running.
+            description: '{{ $value }} compactors run against one bucket; this corrupts blocks. Scale thanos-compact to 1.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanoscompactmultiplerunning
+        - alert: ThanosCompactHighCompactionFailures
+          expr: |
+            (
+              sum by (job) (rate(thanos_compact_group_compactions_failures_total{job="thanos-compact"}[5m]))
+            /
+              sum by (job) (rate(thanos_compact_group_compactions_total{job="thanos-compact"}[5m]))
+            * 100 > 5
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor is failing compactions.
+            description: '{{ $value | humanize }}% of compactions fail.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanoscompacthighcompactionfailures
+        - alert: ThanosCompactBucketHighOperationFailures
+          expr: |
+            (
+              sum by (job) (rate(thanos_objstore_bucket_operation_failures_total{job="thanos-compact"}[5m]))
+            /
+              sum by (job) (rate(thanos_objstore_bucket_operations_total{job="thanos-compact"}[5m]))
+            * 100 > 5
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor bucket operations are failing.
+            description: '{{ $value | humanize }}% of bucket operations from the compactor fail.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanoscompactbuckethighoperationfailures
+        - alert: ThanosCompactHasNotRun
+          # The metric is 0 until the compactor's first upload (it only writes once blocks are due for
+          # compaction or downsampling), so staleness is measured only after a first upload; a compactor
+          # that never uploaded alerts after 48h of uptime instead.
+          expr: |
+            (
+              (time() - max by (job) (max_over_time(thanos_objstore_bucket_last_successful_upload_time{job="thanos-compact"}[24h]))) / 60 / 60 > 24
+              and on (job)
+              max by (job) (thanos_objstore_bucket_last_successful_upload_time{job="thanos-compact"}) > 0
+            )
+            or
+            (
+              max by (job) (thanos_objstore_bucket_last_successful_upload_time{job="thanos-compact"}) == 0
+              and on (job)
+              (time() - max by (job) (process_start_time_seconds{job="thanos-compact"})) > 48 * 3600
+            )
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor has not uploaded anything for 24 hours.
+            description: No compacted or downsampled block was written in 24h (or none at all after 48h of uptime).
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanoscompacthasnotrun
+
+    - name: thanos-store
+      rules:
+        - alert: ThanosStoreGrpcErrorRate
+          expr: |
+            (
+              sum by (job) (rate(grpc_server_handled_total{grpc_code=~"Unknown|Internal|Unavailable|DataLoss|DeadlineExceeded", job="thanos-store"}[5m]))
+            /
+              sum by (job) (rate(grpc_server_started_total{job="thanos-store"}[5m]))
+            * 100 > 5
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos store gateway is failing gRPC requests.
+            description: '{{ $value | humanize }}% of store gateway gRPC requests fail.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosstoregrpcerrorrate
+        - alert: ThanosStoreBucketHighOperationFailures
+          expr: |
+            (
+              sum by (job) (rate(thanos_objstore_bucket_operation_failures_total{job="thanos-store"}[5m]))
+            /
+              sum by (job) (rate(thanos_objstore_bucket_operations_total{job="thanos-store"}[5m]))
+            * 100 > 5
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos store gateway bucket operations are failing.
+            description: '{{ $value | humanize }}% of bucket operations from the store gateway fail.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosstorebuckethighoperationfailures
+        - alert: ThanosStoreSeriesGateLatencyHigh
+          expr: |
+            (
+              histogram_quantile(0.99, sum by (job, le) (rate(thanos_bucket_store_series_gate_duration_seconds_bucket{job="thanos-store"}[5m]))) > 2
+            and
+              sum by (job) (rate(thanos_bucket_store_series_gate_duration_seconds_count{job="thanos-store"}[5m])) > 0
+            )
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos store gateway requests queue for too long.
+            description: p99 series gate wait is {{ $value | humanize }}s.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosstoreseriesgatelatencyhigh
+
+    - name: thanos-query
+      rules:
+        - alert: ThanosQueryHttpRequestQueryRangeErrorRateHigh
+          expr: |
+            (
+              sum by (job) (rate(http_requests_total{code=~"5..", job="thanos-query", handler="query_range"}[5m]))
+            /
+              sum by (job) (rate(http_requests_total{job="thanos-query", handler="query_range"}[5m]))
+            ) * 100 > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos query is failing range queries.
+            description: '{{ $value | humanize }}% of query_range requests (Grafana panels) fail.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosqueryhttprequestqueryrangeerrorratehigh
+        - alert: ThanosQueryGrpcClientErrorRate
+          expr: |
+            (
+              sum by (job) (rate(grpc_client_handled_total{grpc_code!="OK", job="thanos-query"}[5m]))
+            /
+              sum by (job) (rate(grpc_client_started_total{job="thanos-query"}[5m]))
+            ) * 100 > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos query cannot reach its stores.
+            description: '{{ $value | humanize }}% of requests to sidecars/store gateways fail (results may be partial).'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosquerygrpcclienterrorrate
+        - alert: ThanosQueryHighDNSFailures
+          expr: |
+            (
+              sum by (job) (rate(thanos_query_store_apis_dns_failures_total{job="thanos-query"}[5m]))
+            /
+              sum by (job) (rate(thanos_query_store_apis_dns_lookups_total{job="thanos-query"}[5m]))
+            ) * 100 > 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos query fails to resolve store endpoints.
+            description: '{{ $value | humanize }}% of DNS SRV lookups for sidecars/store gateways fail.'
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosqueryhighdnsfailures
+
+    - name: thanos-component-absent
+      rules:
+        - alert: ThanosQueryIsDown
+          expr: absent(up{job="thanos-query"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos query has disappeared.
+            description: No healthy thanos-query target; Grafana's Prometheus data source is down.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosqueryisdown
+        - alert: ThanosStoreIsDown
+          expr: absent(up{job="thanos-store"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos store gateway has disappeared.
+            description: No healthy thanos-store target; history older than ~2 days is not queryable.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanosstoreisdown
+        - alert: ThanosCompactIsDown
+          expr: absent(up{job="thanos-compact"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor has disappeared.
+            description: No healthy thanos-compact target; retention and downsampling are not running.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanoscompactisdown
+        - alert: ThanosSidecarIsDown
+          expr: absent(up{job="prometheus-kube-prometheus-thanos-discovery"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Thanos sidecars have disappeared.
+            description: No healthy sidecar target; recent data is not queryable through thanos-query and no blocks are uploaded.
+            runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanossidecarisdown

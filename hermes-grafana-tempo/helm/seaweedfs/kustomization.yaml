@@ -1,0 +1,16 @@
+# SeaweedFS: in-cluster S3 object store for the LAB profile (OBJECT_STORE=seaweedfs).
+# Production uses GCS buckets instead (see README). Needs the Prometheus operator CRDs
+# (ServiceMonitor, PrometheusRule) and Secret object-storage/seaweedfs-s3-config (key s3.json,
+# created by scripts/deploy.sh, never in git; format in README "Credentials").
+#   kubectl apply -k helm/seaweedfs
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: object-storage
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - statefulset.yaml
+  - bootstrap-job.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+  - networkpolicies.yaml

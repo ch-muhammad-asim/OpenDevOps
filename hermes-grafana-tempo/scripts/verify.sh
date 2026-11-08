@@ -58,7 +58,8 @@ for r in $CM_RELEASE traefik:traefik prometheus:monitoring tempo:observability \
 done
 
 # 3. Pods Ready (Completed job pods ignored)
-for ns in $CM_NS traefik monitoring observability tempo-apps; do
+OS_NS=""; kubectl get ns object-storage >/dev/null 2>&1 && OS_NS="object-storage"   # lab SeaweedFS
+for ns in $CM_NS $OS_NS traefik monitoring observability tempo-apps; do
   bad="$(kubectl -n "$ns" get pods --no-headers 2>/dev/null | awk '$3!="Completed"{split($2,a,"/"); if (a[1]!=a[2] || $3!="Running") print $1}')"
   if [ -z "$bad" ]; then pass "pods Ready in $ns"; else fail "pods not Ready in $ns: ${bad//$'\n'/ }"; fi
 done
@@ -78,6 +79,14 @@ pf observability grafana 80; GRAFANA_PORT=$PORT
 check "grafana /api/health" curl -fsS -m 10 "http://127.0.0.1:$GRAFANA_PORT/api/health"
 pf monitoring prometheus-kube-prometheus-prometheus 9090; PROM_PORT=$PORT
 check "prometheus /-/ready" curl -fsS -m 10 "http://127.0.0.1:$PROM_PORT/-/ready"
+
+# Thanos (30-day metrics): querier ready and connected to the sidecar and the store-gateway.
+if kubectl -n monitoring get svc thanos-query >/dev/null 2>&1; then
+  pf monitoring thanos-query 10902; THANOS_PORT=$PORT
+  check "thanos-query /-/ready" curl -fsS -m 10 "http://127.0.0.1:$THANOS_PORT/-/ready"
+  check "thanos-query sees sidecar + store-gateway" sh -c \
+    "curl -fsS -m 10 'http://127.0.0.1:$THANOS_PORT/api/v1/stores' | python3 -c 'import json,sys;d=json.load(sys.stdin)[\"data\"];sys.exit(0 if d.get(\"sidecar\") and d.get(\"store\") else 1)'"
+fi
 
 # Grafana datasources (admin creds read into variables from the Secret, never printed)
 gu="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d)"

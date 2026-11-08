@@ -6,8 +6,9 @@ good and bad look like, and a "try it" step with the demo apps.
 
 **Inventory:** 34 dashboards in 4 folders, listed live from the Grafana API on 2026-11-08 (lab profile). Log in with
 the Grafana admin user (Secret `observability/grafana-admin`, see [`helm/grafana/`](../../helm/grafana/README.md)).
-Dashboards are provisioned from Git (ConfigMaps labelled `grafana_dashboard`), so edits made in the UI are lost on the
-next restart: change the source file instead.
+Dashboards are provisioned as ConfigMaps labelled `grafana_dashboard`, so edits made in the UI are lost on the next
+restart. Change the source file listed in the Inventory below instead; the General dashboards have no file in
+this repository (they come from the kube-prometheus-stack chart).
 
 ## 📏 How metrics are measured
 
@@ -80,23 +81,48 @@ answered. ([OpenTelemetry traces](https://opentelemetry.io/docs/concepts/signals
 
 ## 🗂️ Inventory
 
-| Folder | Dashboard | Data in the lab |
-|---|---|---|
-| Hermes | [Hermes Agent gateway](#hermes-agent-gateway) | ✅ |
-| Tests | [Stress tests](#stress-tests) | ✅ while/after a k6 run |
-| Tempo | [Tempo Service Graph](#tempo-service-graph) | ✅ |
-| Tempo | [Tempo Operational](#tempo-operational) | ✅ mostly (Memcached, Vulture rows empty) |
-| Tempo | [Tempo / Writes](#tempo--writes) | ✅ gateway and distributor rows; Envoy, Kafka, Memcached rows production only |
-| Tempo | [Tempo / Reads](#tempo--reads) | ✅ gateway, frontend, querier rows; partition, Memcached, external rows production only |
-| Tempo | [Tempo / Livestore](#tempo--livestore) | partly: live traces, resources; lag, zones, KEDA production only |
-| Tempo | [Tempo / Resources](#tempo--resources) | ✅ (every row shows the one `tempo-0` pod in the lab) |
-| Tempo | [Tempo / Tenants](#tempo--tenants) | ✅ (one tenant: `single-tenant`) |
-| Tempo | [Tempo - Backend Work](#tempo---backend-work) | partly: blocklist, compaction, jobs; redaction and KEDA rows usually empty |
-| General | [Alertmanager / Overview](#alertmanager--overview) | ✅ |
-| General | [Grafana Overview](#grafana-overview) | ✅ |
-| General | [Prometheus / Overview](#prometheus--overview) | ✅ |
-| General | [Kubernetes mixin (16 dashboards)](#kubernetes-mixin-dashboards) | ✅ |
-| General | [Node Exporter (5 dashboards)](#node-exporter-dashboards) | ✅ Nodes and USE; AIX and MacOS empty (Linux nodes) |
+"Prometheus" is the Grafana data source with uid `prometheus`; it queries Thanos (Prometheus's last 2 days
+plus 30 days from object storage). "Tempo" is uid `tempo`. The General dashboards are created by the
+kube-prometheus-stack chart (`grafana.forceDeployDashboards`) as ConfigMaps in namespace `monitoring`: there is no
+source file for them in this repository; change them through the chart version or its values
+([`helm/kube-prometheus-stack/`](../../helm/kube-prometheus-stack/README.md)).
+
+| Folder | Dashboard | uid | Source | Datasource | Data in the lab |
+|---|---|---|---|---|---|
+| Hermes | [Hermes Agent gateway](#hermes-agent-gateway) | `hermes-gateway` | [`hermes/base/hermes-gateway-dashboard.json`](../../hermes/base/hermes-gateway-dashboard.json) | Prometheus, Tempo | ✅ |
+| Tests | [Stress tests](#stress-tests) | `stress-tests` | [`tests/dashboards/stress-tests.yaml`](../../tests/dashboards/stress-tests.yaml) | Prometheus, Tempo | ✅ k6 panels during/after a run |
+| Tempo | [Tempo - Backend Work](#tempo---backend-work) | `eeht753h7e5tse` | [`tempo-mixin-backendwork.yaml`](../../helm/grafana/dashboards/tempo-mixin-backendwork.yaml) | Prometheus (+ unused Loki variable) | Blocklist, compaction, jobs; redaction and KEDA rows usually empty |
+| Tempo | [Tempo / Livestore](#tempo--livestore) | `tempo-livestore` | [`tempo-mixin-livestore.yaml`](../../helm/grafana/dashboards/tempo-mixin-livestore.yaml) | Prometheus | Live traces, resources; lag, zones, KEDA production only |
+| Tempo | [Tempo / Reads](#tempo--reads) | `tempo-reads` | [`tempo-mixin-reads.yaml`](../../helm/grafana/dashboards/tempo-mixin-reads.yaml) | Prometheus | Gateway, frontend, querier rows; partition, Memcached, external rows production only |
+| Tempo | [Tempo / Resources](#tempo--resources) | `tempo-resources` | [`tempo-mixin-resources.yaml`](../../helm/grafana/dashboards/tempo-mixin-resources.yaml) | Prometheus | ✅ (every row shows the one `tempo-0` pod) |
+| Tempo | [Tempo / Tenants](#tempo--tenants) | `tempo-tenants` | [`tempo-mixin-tenants.yaml`](../../helm/grafana/dashboards/tempo-mixin-tenants.yaml) | Prometheus | ✅ (`single-tenant`) |
+| Tempo | [Tempo / Writes](#tempo--writes) | `tempo-writes` | [`tempo-mixin-writes.yaml`](../../helm/grafana/dashboards/tempo-mixin-writes.yaml) | Prometheus | Gateway, distributor rows; Envoy, Kafka, Memcached rows production only |
+| Tempo | [Tempo Operational](#tempo-operational) | `a6175b9cc7ec20591890117c39580030` | [`tempo-mixin-operational.yaml`](../../helm/grafana/dashboards/tempo-mixin-operational.yaml) | Prometheus (+ unused Loki variable) | General, Maintenance, Read, Write, Backend, Compactor rows; empty by design: bad words (promtail/Loki), Ring/Memberlist, Memcached, Vulture |
+| Tempo | [Tempo Service Graph](#tempo-service-graph) | `tempo-service-graph` | [`tempo-mixin-service-graph.yaml`](../../helm/grafana/dashboards/tempo-mixin-service-graph.yaml) | Prometheus | ✅ |
+| General | [Alertmanager / Overview](#alertmanager--overview) | `alertmanager-overview` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Grafana Overview](#grafana-overview) | `6be0s85Mk` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / API server](#kubernetes-mixin-dashboards) | `09ec8aa1e996d6ffcd6817bbaff4db1b` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Cluster](#kubernetes-mixin-dashboards) | `efa86fd1d0c121a26444b636a3f509a8` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Multi-Cluster](#kubernetes-mixin-dashboards) | `b59e6c9f2fcbe2e16d77fc492374cc4f` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Namespace (Pods)](#kubernetes-mixin-dashboards) | `85a562078cdf77779eaa1add43ccec1e` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Namespace (Workloads)](#kubernetes-mixin-dashboards) | `a87fb0d919ec0ea5f6543124e16c42a5` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Node (Pods)](#kubernetes-mixin-dashboards) | `200ac8fdbfbb74b39aff88118e4d1c2c` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Nodes Overview](#kubernetes-mixin-dashboards) | `058020e04168bfdea0c52269cb699df2` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Pod](#kubernetes-mixin-dashboards) | `6581e46e4e5c7ba40a07646395ef7b23` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Compute Resources / Workload](#kubernetes-mixin-dashboards) | `a164a7f0339f99e89cea5cb47e9be617` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Kubelet](#kubernetes-mixin-dashboards) | `3138fa155d5915769fbded898ac09fd9` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Networking / Cluster](#kubernetes-mixin-dashboards) | `ff635a025bcfea7bc3dd4f508990a3e9` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Networking / Namespace (Pods)](#kubernetes-mixin-dashboards) | `8b7a8b326d7a6f1f04244066368c67af` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Networking / Namespace (Workload)](#kubernetes-mixin-dashboards) | `bbb2a765a623ae38130206c7d94a160f` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Networking / Pod](#kubernetes-mixin-dashboards) | `7a18067ce943a40ae25454675c19ff5c` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Networking / Workload](#kubernetes-mixin-dashboards) | `728bf77cc1166d2f3133bf25846876cc` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Kubernetes / Persistent Volumes](#kubernetes-mixin-dashboards) | `919b92a8e8041bd567af9edab12c840c` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Node Exporter / AIX](#node-exporter-dashboards) | `7e0a61e486f727d763fb1d86fdd629c2` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | Empty (Linux nodes) |
+| General | [Node Exporter / MacOS](#node-exporter-dashboards) | `629701ea43bf69291922ea45f4a87d37` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | Empty (Linux nodes) |
+| General | [Node Exporter / Nodes](#node-exporter-dashboards) | `7d57716318ee0dddbac5a7f451fb7753` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Node Exporter / USE Method / Cluster](#node-exporter-dashboards) | `3e97d1d02672cdd0861f4c97c64f89b2` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Node Exporter / USE Method / Node](#node-exporter-dashboards) | `fac67cfbe174d3ef53eb473d73d9212f` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
+| General | [Prometheus / Overview](#prometheus--overview) | `9fa0d141-d019-4ad7-8bc5-42196ee308bd` | kube-prometheus-stack chart ConfigMap (`monitoring`) | Prometheus | ✅ |
 
 There is no CoreDNS dashboard: GKE runs kube-dns, and its metrics are not scraped in this stack.
 
@@ -158,8 +184,10 @@ panel show `nextjs-web → nodejs-orders`.
 These are the official [Tempo mixin](https://grafana.com/docs/tempo/latest/operations/monitor/) dashboards. They read
 Tempo's own `/metrics` (`tempo_*`, `tempodb_*`) plus cAdvisor. They are written for **distributed** Tempo (production
 profile); in the lab's single-binary Tempo every component is the one `tempo-0` pod, and rows for parts the lab does
-not run (Kafka, Memcached, Envoy, Vulture, KEDA, zone-aware live-stores) stay empty. Use them when traces are missing
-or slow to appear, or when Tempo itself alerts.
+not run stay empty by design: Kafka, Memcached, Envoy, Vulture (Tempo's synthetic checker), KEDA, zone-aware
+live-stores, memberlist (the ring gossip of distributed Tempo) and Loki/promtail (log panels and their data-source
+variable; this stack has no log backend). Use them when traces are missing or slow to appear, or when Tempo itself
+alerts.
 
 ### Tempo Service Graph
 
@@ -180,6 +208,9 @@ stopped sending spans or stopped propagating `traceparent`. For call rates and f
 
 **What it is for:** Tempo's overall health on one page: Go runtime, maintenance, reads, writes, storage, compaction.
 **Who and when:** the platform team, first stop for any Tempo problem.
+**Empty by design in this stack:** the *bad words* panel (a promtail/Loki log metric), the Ring/Memberlist row
+(memberlist gossip, distributed Tempo only), the Memcached row and the Vulture row; the `logsds` Loki variable has no
+data source.
 
 | Row: panel | Measures | Query (simplified) | Good / bad |
 |---|---|---|---|

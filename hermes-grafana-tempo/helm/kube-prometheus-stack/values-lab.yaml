@@ -2,17 +2,47 @@
 #   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version 93.1.0 -n monitoring \
 #     -f helm/kube-prometheus-stack/values.yaml -f helm/kube-prometheus-stack/values-lab.yaml
 # Target: 3 x e2-standard-2 in one zone (~5.8 vCPU / 17.6 GiB allocatable shared by everything).
-# Only what differs from production: one replica each, no PDBs, short retention, small PVC,
-# small requests, no alert receivers (and so no receivers Secret). Images/digests, selectors,
-# remote-write receiver, exemplars, security contexts and the route tree stay as in production.
+# Only what differs from production: one replica each, no PDBs, a 40Gi PVC with an 8GiB cap, small
+# requests (Prometheus and its Thanos sidecar), no alert receivers (and so no receivers Secret).
+# Same as production: 2-day local TSDB + Thanos sidecar (30 days via helm/thanos/overlays/lab, object
+# store = in-cluster SeaweedFS S3 through the same Secret monitoring/thanos-objstore), images/digests,
+# selectors, remote-write receiver, exemplars, security contexts and the route tree.
 
 prometheus:
   podDisruptionBudget:
     enabled: false               # one replica: a minAvailable=1 PDB would block node drains
+  # Thanos sidecar on, as in production (values.yaml): the discovery Service and the sidecar
+  # ServiceMonitor are restated here so the lab profile does not depend on the merge order.
+  thanosService:
+    enabled: true
+  thanosServiceMonitor:
+    enabled: true
   prometheusSpec:
     replicas: 1
-    retention: 1d
-    retentionSize: 5GiB          # below the 10Gi PVC to leave room for the WAL
+    # Sidecar uploads each 2h block to bucket thanos-metrics on SeaweedFS S3. objstore.yml in the
+    # Secret (written by scripts/deploy.sh, never in Git) is "type: S3" with endpoint
+    # seaweedfs.object-storage:8333, insecure: true and the thanos S3 access key; image, version and
+    # blockSize come from values.yaml. Only the requests are smaller.
+    thanos:
+      objectStorageConfig:
+        existingSecret:
+          name: thanos-objstore
+          key: objstore.yml
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+    # Local compaction off (min = max block duration = 2h), required by the sidecar; the Thanos
+    # compactor compacts and downsamples in the bucket.
+    disableCompaction: true
+    # 2 days locally: a buffer for upload retries (ThanosSidecarNoRecentUpload fires after 6h); 30 days
+    # of history are served by thanos-store. At the measured 3,429 samples/s, 2d is ~1-2 GB plus WAL.
+    # The size cap deletes the oldest blocks first if uploads stall. The PVC stays 40Gi: a PVC cannot
+    # shrink, so a smaller disk needs a new PVC (fresh install).
+    retention: 2d
+    retentionSize: 8GiB
     resources:
       requests:
         cpu: 300m
@@ -24,7 +54,7 @@ prometheus:
         spec:
           resources:
             requests:
-              storage: 10Gi
+              storage: 40Gi
 
 alertmanager:
   podDisruptionBudget:

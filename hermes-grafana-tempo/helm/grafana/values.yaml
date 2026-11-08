@@ -128,9 +128,11 @@ securityContext:
   seccompProfile:
     type: RuntimeDefault
 
-# Tempo query endpoint, read by the Tempo data source below (Grafana expands ${VAR} in
-# provisioning files). Production: tempo-distributed query-frontend.
+# Query endpoints, read by the data sources below (Grafana expands ${VAR} in provisioning
+# files). Production: Thanos query (30 days from GCS + the last ~2 days from the Prometheus
+# sidecars, HA pair deduplicated; helm/thanos/) and the tempo-distributed query-frontend.
 env:
+  PROMETHEUS_QUERY_URL: http://thanos-query.monitoring:10902
   TEMPO_QUERY_URL: http://tempo-query-frontend.observability:3200
 
 grafana.ini:
@@ -171,16 +173,16 @@ grafana.ini:
     ha_reconnect_timeout: 2m
 
 # Provisioned data sources. "$$" escapes "$" from Grafana's env-var expansion in provisioning files;
-# the single "$" in ${TEMPO_QUERY_URL} is expanded on purpose.
+# the single "$" in ${PROMETHEUS_QUERY_URL} and ${TEMPO_QUERY_URL} is expanded on purpose.
 datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
       - name: Prometheus
         type: prometheus
-        uid: prometheus
+        uid: prometheus           # unchanged uid: every dashboard and Tempo link keeps working
         access: proxy
-        url: http://prometheus-kube-prometheus-prometheus.monitoring:9090
+        url: ${PROMETHEUS_QUERY_URL}   # thanos-query:10902 in both profiles (env above); Prometheus :9090 only without Thanos
         isDefault: true
         editable: false
         jsonData:

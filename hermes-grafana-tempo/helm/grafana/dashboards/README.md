@@ -58,6 +58,7 @@ Do not edit the generated YAML by hand: the next run overwrites it.
 | `job="<namespace>/<component>"`, `container`, `deployment`/`statefulset`, `pod` selectors → `job="tempo"`, `container="tempo"`, `pod=~"tempo-.*"` | The upstream mixin targets the microservices deployment |
 | Every Prometheus data source → uid `prometheus` | Upstream hard-codes some UIDs |
 | `cluster` / `namespace` variables optional (`.*`) | This stack has no `cluster` label |
+| `cluster="$cluster"` / `namespace="$namespace"` → `=~` | With the variables on All (`.*`) an exact match matches nothing; checked 2026-11-08: Tempo Operational 58/98 PromQL targets (35/53 panels) return data through the Grafana proxy, the rest are Memcached, Kafka, Loki and other rows this stack does not run |
 | Service Graph: `traces_service_graph_connection_info` → `group by (client, server) (max_over_time(traces_service_graph_request_total{...}[$__range]))` | The connection-info gauge needs the opt-in processor `service-graphs-connection-info`; the request counter is always written |
 
 ## ✅ Verify

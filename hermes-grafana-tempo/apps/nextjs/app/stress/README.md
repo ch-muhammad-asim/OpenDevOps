@@ -2,7 +2,7 @@
 
 Bounded CPU and memory load for the [resource tests](../../../../tests/README.md). Both are off unless
 `STRESS_ENABLED=true`, are capped by env, and answer 404 to any request that came through Traefik (it sets
-`X-Forwarded-For`), so only in-cluster callers reach them. Shared helpers are in [`stress.ts`](../../stress.ts).
+`X-Real-Ip` and `X-Forwarded-Server`; `X-Forwarded-For` is not usable because the Next.js server adds it itself), so only in-cluster callers reach them. Shared helpers are in [`stress.ts`](../../stress.ts).
 
 | Route | Query | Cap (env, default) | Span |
 |---|---|---|---|

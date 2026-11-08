@@ -7,10 +7,12 @@
 #     --namespace monitoring --create-namespace -f helm/kube-prometheus-stack/values.yaml
 #   (lab: add -f helm/kube-prometheus-stack/values-lab.yaml; scripts/deploy.sh does this with PROFILE=lab)
 # Production needs Secret monitoring/alertmanager-receivers (keys slack-webhook-url,
-# pagerduty-routing-key) before install; see README "Alert routing".
+# pagerduty-routing-key) before install; see README "Alert routing". It also needs Secret
+# monitoring/thanos-objstore and the bucket IAM grant (helm/thanos/README.md "Install").
 #
-# Prometheus (2 replicas) + Alertmanager (2 replicas) + operator + kube-state-metrics +
-# node-exporter. Grafana runs as its own release (helm/grafana/); this chart still ships its
+# Prometheus (2 replicas, each with a Thanos sidecar uploading to GCS; 30-day history via
+# helm/thanos/) + Alertmanager (2 replicas) + operator + kube-state-metrics + node-exporter.
+# Grafana runs as its own release (helm/grafana/); this chart still ships its
 # dashboards as ConfigMaps for the Grafana dashboard sidecar.
 #
 # Images: every image is pinned by tag AND multi-arch index digest (resolved from the registry
@@ -65,6 +67,22 @@ prometheus:
   service:
     sessionAffinity: ClientIP
 
+  # Fixed name: this KSA is the Workload Identity principal of the Thanos sidecar (bucket IAM
+  # grant in helm/thanos/README.md "IAM"). Same as the chart default, pinned so a release
+  # rename cannot silently break the grant.
+  serviceAccount:
+    create: true
+    name: prometheus-kube-prometheus-prometheus
+
+  # Headless Service "prometheus-kube-prometheus-thanos-discovery" (gRPC 10901, HTTP 10902):
+  # thanos-query discovers both sidecars via DNS SRV _grpc._tcp on it.
+  thanosService:
+    enabled: true
+  # Scrapes the sidecars (job "prometheus-kube-prometheus-thanos-discovery").
+  thanosServiceMonitor:
+    enabled: true
+    interval: 30s
+
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
@@ -103,12 +121,43 @@ prometheus:
     enableFeatures:
       - exemplar-storage
 
-    # 15 days; the size cap (85GiB on the 100Gi PVC) deletes the oldest blocks first so the disk
-    # never fills. retentionSize counts blocks and WAL; the rest is headroom for head-block
-    # compaction and checkpoints. Size the PVC from: samples/s x ~2 bytes x retention seconds x 1.2.
-    retention: 15d
+    # Local TSDB keeps 2 days only: the Thanos sidecar uploads every 2h block to GCS and the
+    # 30-day history is served by helm/thanos/ (store gateway + compactor). 2d gives the sidecar
+    # a buffer to retry failed uploads (alert ThanosSidecarNoRecentUpload fires after 6h). The
+    # size cap (85GiB on the 100Gi PVC) still deletes the oldest blocks first so the disk never
+    # fills; at the measured ingest 2d is ~1-2 GB (helm/thanos/README.md "Sizing").
+    retention: 2d
     retentionSize: 85GiB
     walCompression: true
+
+    # ---------- Thanos sidecar (production; helm/thanos/README.md) ----------
+    # Uploads each 2h block to the GCS bucket named in Secret monitoring/thanos-objstore (key
+    # objstore.yml: "type: GCS" + bucket only, no service_account key) and serves recent data to
+    # thanos-query over gRPC 10901. Credentials: Workload Identity Federation for GKE (ADC) for
+    # the fixed KSA monitoring/prometheus-kube-prometheus-prometheus (prometheus.serviceAccount),
+    # which holds roles/storage.objectUser on that bucket only.
+    # External labels set by the operator: prometheus="monitoring/prometheus-kube-prometheus-
+    # prometheus" and prometheus_replica="prometheus-prometheus-kube-prometheus-prometheus-<N>";
+    # thanos-query deduplicates the HA pair on prometheus_replica.
+    thanos:
+      image: quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
+      version: v0.42.5
+      objectStorageConfig:
+        existingSecret:
+          name: thanos-objstore
+          key: objstore.yml
+      blockSize: 2h
+      logFormat: logfmt
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+    # Local compaction off (min = max block duration = 2h), as the Thanos sidecar docs require:
+    # the compactor in helm/thanos/ compacts in the bucket. Without this flag operator v0.95.1
+    # picks "delayed compaction" for Prometheus >= 3.9 + Thanos >= 0.42 instead of disabling it.
+    disableCompaction: true
 
     resources:
       requests:
@@ -276,7 +325,8 @@ prometheusOperator:
       limits:
         memory: 64Mi
 
-  # Thanos sidecar image: not deployed, pinned so enabling it cannot pull a moving tag.
+  # Operator default Thanos image. The sidecar sets its own image (same tag + digest) under
+  # prometheus.prometheusSpec.thanos.image; this stays pinned for anything that falls back to it.
   thanosImage:
     registry: quay.io
     repository: thanos/thanos

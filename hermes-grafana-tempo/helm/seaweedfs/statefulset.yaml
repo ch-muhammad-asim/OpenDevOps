@@ -1,0 +1,234 @@
+# SeaweedFS 4.52 as ONE process: `weed server` runs master, volume server, filer and the S3
+# gateway together. Lab only: one replica, replication 000 (no copies), data on one zonal PV.
+#
+# Image: chrislusf/seaweedfs, tag + multi-arch index digest (amd64, arm64, arm, 386, ppc64le,
+# s390x); the digest wins at pull time. The image has no USER (starts as root) and its
+# /entrypoint.sh chowns /data and drops to the "seaweed" user (UID/GID 1000) with su-exec.
+# Here the entrypoint is skipped: /usr/bin/weed starts directly as UID/GID 1000, fsGroup 1000
+# makes the PV writable, the root FS is read-only and /tmp (gRPC local sockets, shell history)
+# is an emptyDir.
+#
+# Addresses: -ip is the stable per-pod DNS name from the headless Service, so the master's
+# raft state and the volume server ID survive pod IP changes; -ip.bind=0.0.0.0 listens on all
+# interfaces. Clients use only Service seaweedfs (S3 8333); the other ports are pod-internal
+# (and open to the bootstrap Job, see networkpolicies.yaml).
+#
+# Ports: 8333 S3 (plaintext HTTP, path-style), 9327 Prometheus metrics (all components),
+# 9333/19333 master HTTP/gRPC, 8080/18080 volume HTTP/gRPC, 8888/18888 filer HTTP/gRPC.
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: object-storage
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: object-storage
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: s3
+      protocol: TCP
+    - name: metrics
+      port: 9327
+      targetPort: metrics
+      protocol: TCP
+---
+# Headless: gives the pod the stable DNS name used by -ip (seaweedfs-0.seaweedfs-headless...).
+# publishNotReadyAddresses so the name resolves while the server is still starting.
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs-headless
+  namespace: object-storage
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/component: peers
+    app.kubernetes.io/part-of: object-storage
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: seaweedfs
+  ports:
+    - name: master
+      port: 9333
+      targetPort: master
+    - name: master-grpc
+      port: 19333
+      targetPort: master-grpc
+    - name: volume
+      port: 8080
+      targetPort: volume
+    - name: volume-grpc
+      port: 18080
+      targetPort: volume-grpc
+    - name: filer
+      port: 8888
+      targetPort: filer
+    - name: filer-grpc
+      port: 18888
+      targetPort: filer-grpc
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: seaweedfs
+  namespace: object-storage
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/part-of: object-storage
+    app.kubernetes.io/version: "4.52"
+spec:
+  replicas: 1                      # single node; SeaweedFS HA needs 3 masters + replication
+  serviceName: seaweedfs-headless
+  podManagementPolicy: OrderedReady
+  revisionHistoryLimit: 5
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain            # deleting the StatefulSet keeps the data PVC
+    whenScaled: Retain
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: seaweedfs
+        app.kubernetes.io/part-of: object-storage
+        app.kubernetes.io/version: "4.52"
+    spec:
+      serviceAccountName: seaweedfs
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 1000              # "seaweed" user baked into the image
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:4.52@sha256:57877e32bb90073b37dc109b438ba66e84fd5ed9ced5f5c04f56444ef243ce59
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/weed"]   # skip /entrypoint.sh (root-only chown + su-exec)
+          args:
+            - -logtostderr=true
+            - server
+            - -dir=/data                              # master meta, volumes, filer leveldb2 (/data/filerldb2)
+            - -ip=$(POD_NAME).seaweedfs-headless.object-storage.svc
+            - -ip.bind=0.0.0.0
+            - -master.peers=none                      # single-master mode, no raft quorum wait
+            - -master.volumeSizeLimitMB=1024          # 1 GiB volume files (default 30 GiB is too coarse for 100Gi)
+            - -master.defaultReplication=000          # one copy: single node, single disk
+            - -master.telemetry=false                 # no usage statistics leave the cluster
+            - -volume.max=85                          # 85 x 1 GiB volumes fit the 100Gi PV with headroom
+            - -volume.minFreeSpace=5                  # below 5% free the volumes turn read-only (protects the filer DB)
+            - -s3
+            - -s3.port=8333
+            - -s3.config=/etc/seaweedfs/s3.json       # identities from Secret seaweedfs-s3-config
+            - -s3.iam=false                           # no embedded IAM API; identities come only from s3.json
+            - -s3.autoCreateBucket=false              # buckets exist only via the bootstrap Job
+            - -s3.port.iceberg=0                      # Iceberg REST catalog off
+            - -s3.port.lance=0                        # Lance namespace server off
+            - -metricsPort=9327
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: s3
+              containerPort: 8333
+              protocol: TCP
+            - name: metrics
+              containerPort: 9327
+              protocol: TCP
+            - name: master
+              containerPort: 9333
+              protocol: TCP
+            - name: master-grpc
+              containerPort: 19333
+              protocol: TCP
+            - name: volume
+              containerPort: 8080
+              protocol: TCP
+            - name: volume-grpc
+              containerPort: 18080
+              protocol: TCP
+            - name: filer
+              containerPort: 8888
+              protocol: TCP
+            - name: filer-grpc
+              containerPort: 18888
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 60          # up to 5 min (volume index load after a restart)
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: s3
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: s3
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # No CPU limit on purpose (throttling stalls uploads and vacuum); memory is capped.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs/s3.json   # subPath: /etc/seaweedfs/filer.toml from the image stays visible
+              subPath: s3.json
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: s3-config
+          secret:
+            secretName: seaweedfs-s3-config     # created by scripts/deploy.sh, never in git
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: seaweedfs
+          app.kubernetes.io/part-of: object-storage
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: standard-rwo
+        resources:
+          requests:
+            storage: 100Gi

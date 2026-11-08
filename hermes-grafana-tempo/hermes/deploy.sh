@@ -96,29 +96,54 @@ fi
 
 # 4. Grafana Viewer service account for the observability skill (read-only: dashboards, panels, /api/ds/query).
 #    Created once in Grafana (namespace observability, admin login from Secret grafana-admin); the token is stored
-#    only in Secret hermes-grafana-token (key GRAFANA_TOKEN) and never printed. Delete that Secret to rotate.
-if ! kubectl -n hermes get secret hermes-grafana-token >/dev/null 2>&1; then
-  if kubectl -n observability get secret grafana-admin >/dev/null 2>&1; then
-    gport="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
-    kubectl -n observability port-forward svc/grafana "$gport:80" >/dev/null 2>&1 & gpf=$!
-    for _ in $(seq 1 30); do curl -fs "http://127.0.0.1:$gport/api/health" >/dev/null 2>&1 && break; sleep 1; done
-    printf 'user = "%s:%s"\n' "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' | base64 -d)" \
-      "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d)" >"$tmp/gadmin"
-    gapi() { curl -fsS -K "$tmp/gadmin" -H 'Content-Type: application/json' "$@"; }
-    said="$(gapi "http://127.0.0.1:$gport/api/serviceaccounts/search?query=hermes-readonly" \
-            | python3 -I -c 'import json, sys; a = [x for x in json.load(sys.stdin)["serviceAccounts"] if x["name"] == "hermes-readonly"]; print(a[0]["id"] if a else "")')"
+#    only in Secret hermes-grafana-token (key GRAFANA_TOKEN) and never printed. Delete that Secret to rotate; tokens
+#    expire after GRAFANA_TOKEN_TTL_DAYS (default 90) and are re-minted by the next deploy.sh run.
+#    Re-minted when Grafana rejects the stored token (e.g. Grafana without a persistent database was restarted).
+if kubectl -n observability get secret grafana-admin >/dev/null 2>&1; then
+  gport="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  kubectl -n observability port-forward svc/grafana "$gport:80" >/dev/null 2>&1 & gpf=$!
+  for _ in $(seq 1 30); do curl -fs "http://127.0.0.1:$gport/api/health" >/dev/null 2>&1 && break; sleep 1; done
+  printf 'user = "%s:%s"\n' "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' | base64 -d)" \
+    "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d)" >"$tmp/gadmin"
+  gapi() { curl -fsS -K "$tmp/gadmin" -H 'Content-Type: application/json' "$@"; }
+  said="$(gapi "http://127.0.0.1:$gport/api/serviceaccounts/search?query=hermes-readonly" \
+          | python3 -I -c 'import json, sys; a = [x for x in json.load(sys.stdin)["serviceAccounts"] if x["name"] == "hermes-readonly"]; print(a[0]["id"] if a else "")')"
+  # An existing account must still be a Viewer (someone may have raised its role): reset it on every run.
+  if [[ -n "$said" ]]; then
+    role="$(gapi "http://127.0.0.1:$gport/api/serviceaccounts/$said" | python3 -I -c 'import json, sys; print(json.load(sys.stdin).get("role", ""))')"
+    if [[ "$role" != Viewer ]]; then
+      echo "Grafana service account hermes-readonly had role '$role': resetting to Viewer"
+      gapi -X PATCH --data '{"role":"Viewer"}' "http://127.0.0.1:$gport/api/serviceaccounts/$said" >/dev/null
+    fi
+  fi
+  if kubectl -n hermes get secret hermes-grafana-token >/dev/null 2>&1; then
+    printf 'header = "Authorization: Bearer %s"\n' "$(kubectl -n hermes get secret hermes-grafana-token -o jsonpath='{.data.GRAFANA_TOKEN}' | base64 -d)" >"$tmp/gtok"
+    if ! curl -fs -K "$tmp/gtok" -o /dev/null "http://127.0.0.1:$gport/api/search?limit=1"; then
+      echo "Grafana rejects the stored token: re-creating it"
+      kubectl -n hermes delete secret hermes-grafana-token >/dev/null
+      regrafana=1
+    fi
+  fi
+  if ! kubectl -n hermes get secret hermes-grafana-token >/dev/null 2>&1; then
     [[ -n "$said" ]] || said="$(gapi -X POST --data '{"name":"hermes-readonly","role":"Viewer","isDisabled":false}' \
             "http://127.0.0.1:$gport/api/serviceaccounts" | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["id"])')"
-    gapi -X POST --data "{\"name\":\"hermes-$(date +%Y%m%d%H%M%S)\"}" "http://127.0.0.1:$gport/api/serviceaccounts/$said/tokens" \
-      | python3 -I -c 'import json, sys; sys.stdout.write(json.load(sys.stdin)["key"])' >"$tmp/GRAFANA_TOKEN"
-    kill "$gpf" 2>/dev/null
+    # Tokens expire after GRAFANA_TOKEN_TTL_DAYS (default 90); an expired token is rejected and re-minted by this step.
+    ttl=$(( ${GRAFANA_TOKEN_TTL_DAYS:-90} * 86400 ))
+    gapi -X POST --data "{\"name\":\"hermes-$(date +%Y%m%d%H%M%S)\",\"secondsToLive\":$ttl}" "http://127.0.0.1:$gport/api/serviceaccounts/$said/tokens" \
+      | python3 -I -c 'import json, sys; d = json.load(sys.stdin); open(sys.argv[1], "w").write(str(d["id"])); sys.stdout.write(d["key"])' "$tmp/tokid" >"$tmp/GRAFANA_TOKEN"
+    # Revoke every older token of the account, so only the new one (in the Secret) is valid.
+    gapi "http://127.0.0.1:$gport/api/serviceaccounts/$said/tokens" \
+      | python3 -I -c 'import json, sys; [print(t["id"]) for t in json.load(sys.stdin) if str(t["id"]) != sys.argv[1]]' "$(cat "$tmp/tokid")" \
+      | while read -r old; do gapi -X DELETE "http://127.0.0.1:$gport/api/serviceaccounts/$said/tokens/$old" >/dev/null; done
     [[ -s "$tmp/GRAFANA_TOKEN" ]] || { echo "Grafana token creation failed" >&2; exit 1; }
     kubectl -n hermes create secret generic hermes-grafana-token --from-file=GRAFANA_TOKEN="$tmp/GRAFANA_TOKEN"
-  else
-    echo "Secret observability/grafana-admin not found: skipping the Grafana token (skill works without Grafana links)" >&2
   fi
+  kill "$gpf" 2>/dev/null
+else
+  echo "Secret observability/grafana-admin not found: skipping the Grafana token (skill works without Grafana links)" >&2
 fi
 
 kubectl apply -k "$dir"
+[[ -n "${regrafana:-}" ]] && kubectl -n hermes rollout restart deploy/hermes-gateway >/dev/null   # reload GRAFANA_TOKEN
 kubectl -n hermes rollout status deploy/hermes-gateway --timeout=300s
 echo "Dashboard: https://hermes-gke.saqlainmushtaq.com  (user and password: see hermes/README.md, 'Log in')"

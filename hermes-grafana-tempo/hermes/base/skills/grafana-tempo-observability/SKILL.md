@@ -31,6 +31,7 @@ Grafana's `/api/ds/query` (a query, Viewer role). It cannot change anything. Do 
 | User asks | Run |
 |---|---|
 | "diagnose", "what's wrong", "suggest issues", "health of the platform" | `obs.py diagnose` |
+| "trends", "last 30 days", "week over week", "getting worse?", "capacity", "error budget" | `obs.py trends` (add `--range 7d` for a shorter range) |
 | Hermes itself: "is the gateway up", "which alerts fire" | `obs.py hermes` (and `obs.py alerts`) |
 | "slowest traces for <app>" | `obs.py slowest <nextjs\|nodejs\|python> --since 15m --limit 5`, then `obs.py trace <id>` for the slowest |
 | "errors in <app>" | `obs.py errors <app> --since 15m` |
@@ -51,6 +52,17 @@ Grafana's `/api/ds/query` (a query, Viewer role). It cannot change anything. Do 
    look at, a suggested fix, and the Grafana link from the output (`links.trace`). Rank by severity:
    errors users see > latency > resource leaks.
 5. If a command returns `"error"`, say which system failed (Prometheus/Tempo/Grafana) and show the message.
+
+## Trends (30 days)
+
+`obs.py trends` compares the current window with the previous one: week-over-week when 14+ days of history exist,
+day-over-day with 2+ days, otherwise "last window vs the one before" (it says which in `comparison`; always tell
+the user how much history there was, `history_available_h`). It ranks: error-ratio rises, p95 latency growth per
+service and per route (top regressions), error-budget burn against the 99% SLO (`budget_used_pct`), TraceQL
+p95 trends from Tempo, CPU/memory growth and container restarts. A latency trend on a service whose traffic also
+jumped is flagged as likely load-driven. Long ranges use steps of 1 h-6 h. All metrics (PromQL, alerts, rules,
+targets) come from the Thanos querier (`thanos-query.monitoring:10902`, 30 days); if `endpoint_note` is set, say
+the metrics endpoint was unreachable.
 
 ## The services
 

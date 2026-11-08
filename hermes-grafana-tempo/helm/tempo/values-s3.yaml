@@ -1,0 +1,36 @@
+# LAB overlay on values.yaml: trace blocks in the in-cluster SeaweedFS S3 store
+# (helm/seaweedfs, OBJECT_STORE=seaweedfs) instead of the local PV. Production uses GCS
+# (helm/tempo-distributed). Chart grafana-community/tempo 3.2.1, Tempo 3.1.1:
+#   helm upgrade --install tempo grafana-community/tempo --version 3.2.1 \
+#     --namespace observability --create-namespace \
+#     -f helm/tempo/values.yaml -f helm/tempo/values-s3.yaml
+#
+# Credentials: Secret observability/tempo-s3 (keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY),
+# created by scripts/deploy.sh, never in git. They reach Tempo only as environment variables:
+# access_key/secret_key stay unset here, so Tempo's S3 client (minio-go credential chain:
+# static -> AWS env -> MinIO env -> files -> IAM) skips the empty static pair and uses the
+# AWS env pair. No key is rendered into the Tempo ConfigMap, and -config.expand-env is not
+# needed. The identity behind the key may only Read/Write/List bucket tempo-traces.
+#
+# Endpoint: plaintext HTTP inside the cluster (insecure: true), path-style URLs
+# (forcepathstyle: true; SeaweedFS has no per-bucket DNS names here). NetworkPolicies in
+# helm/seaweedfs admit only Tempo and the Thanos components to port 8333.
+# The WAL, live-store data and generator WAL stay on the PV from values.yaml.
+
+tempo:
+  storage:
+    trace:
+      backend: s3
+      local: null      # drop the local block path from values.yaml
+      s3:
+        bucket: tempo-traces
+        endpoint: seaweedfs.object-storage:8333
+        region: us-east-1   # any value works for SeaweedFS; set so the client skips GetBucketLocation
+        insecure: true
+        forcepathstyle: true
+      wal:
+        path: /var/tempo/wal
+
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY

@@ -100,7 +100,7 @@ hostname spread); lab 150m / 352Mi (3 pods).
 ```bash
 # 1. One-time: an Artifact Registry Docker repo; immutable tags so a pushed tag can never be overwritten
 gcloud artifacts repositories create tempo-apps --repository-format=docker --location=us-central1 --immutable-tags
-# 2. Build linux/amd64 images and push them (tag 1.0.2)
+# 2. Build linux/amd64 images and push them (tag 1.0.3)
 apps/build-push.sh
 # 3. Apply all three apps pinned by digest (tag resolved to sha256), waits for rollout
 apps/deploy-apps.sh          # production profile; use `apps/deploy-apps.sh lab` on a 3 x e2-standard-2 cluster
@@ -110,12 +110,12 @@ scripts/load.sh public 20
 
 | Script | What it does |
 |---|---|
-| [build-push.sh](build-push.sh) | Builds and pushes `<region>-docker.pkg.dev/<project>/tempo-apps/<app>:1.0.2`; `apps/build-push.sh nodejs` builds one. Tags are immutable: after a code change set a new `TAG` (e.g. `TAG=1.0.3`) |
+| [build-push.sh](build-push.sh) | Builds and pushes `<region>-docker.pkg.dev/<project>/tempo-apps/<app>:1.0.3`; `apps/build-push.sh nodejs` builds one. Tags are immutable: after a code change set a new `TAG` (e.g. `TAG=1.0.4`) |
 | [deploy-apps.sh](deploy-apps.sh) | `[production\|lab]`: resolves each `TAG` to its digest, renders the profile with `image: <registry>/<app>@sha256:...`, applies, waits for rollout |
 | [kustomization.yaml](kustomization.yaml) | Production profile: the three `*/k8s` folders + `monitoring/` |
 
 Env overrides for both scripts: `PROJECT_ID` (default: gcloud config), `REGION` (`us-central1`), `AR_REPO`
-(`tempo-apps`), `TAG` (`1.0.2`).
+(`tempo-apps`), `TAG` (`1.0.3`).
 
 ## ✅ Verify
 

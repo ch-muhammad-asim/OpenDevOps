@@ -1,15 +1,19 @@
 # 🔥 Stress and resilience tests
 
 Load, resource and failure tests for the three sample apps (`nextjs`, `nodejs`, `python`). Everything runs **inside
-the cluster** as Kubernetes Jobs and Pods against the internal Services, so the public edge is never load-tested.
+the cluster** as Kubernetes Jobs and Pods in `tempo-apps` against the internal Services, so the public edge is never
+load-tested. The one exception is the `netpol` negative probe: a short-lived, Pod Security `restricted`-compliant curl
+pod in namespace `default`, on purpose (a namespace with no allow rule into `tempo-apps`). **For lab and staging
+clusters only, not for production clusters:** the tests patch Deployments, scale an app to 0, delete a pod and run an
+OOM pod.
 [Grafana k6](https://grafana.com/docs/k6/latest/) sends its metrics through its
 [OpenTelemetry output](https://grafana.com/docs/k6/latest/results-output/real-time/opentelemetry/) to the existing
 OTel Collector, so every run shows up in Prometheus and in the **Stress tests** Grafana dashboard next to the pods'
 CPU, memory and restarts and the traces in Tempo. **Why:** see what each kind of overload and failure looks like in
 metrics and traces before it happens in production.
 
-**Status:** ✅ every test below ran once, live, on 2026-11-08 on the lab cluster (3 × e2-standard-2, GKE, lab profile:
-1 replica per app, apps 1.0.2, k6 2.3.0, `SCALE=0.6`). Results with real numbers: [Results](#-results-2026-11-08-lab).
+**Status:** ✅ every test below ran live on 2026-11-08 on the lab cluster (3 × e2-standard-2, GKE, lab profile:
+1 replica per app, k6 image pinned by digest in [`run.sh`](run.sh), `SCALE=0.6`). Results with real numbers: [Results](#-results-2026-11-08-lab).
 Not run: a long soak (the lab ran 72 s; use `SOAK_DURATION=2h`), the production profile (2 replicas per app).
 
 > ⚠️ **Disruption warning.** `dependency` scales `nodejs` to 0 for 45 s (nextjs answers errors), `podkill` deletes an
@@ -47,7 +51,7 @@ flowchart LR
 | `GET /stress/memory?mb=32&hold_s=5` | Allocates and fills `mb` MiB, holds it `hold_s` s, releases it | `STRESS_MAX_MB` 128 (total held by all requests; above: 429), `STRESS_MAX_HOLD_S` 30 | `stress.memory` (events `memory.allocated`, `memory.released`) |
 
 Safety: `STRESS_ENABLED=false` in every Deployment (404 until switched on); any request carrying `X-Forwarded-For`
-(set by Traefik for all public traffic) gets 404, so only in-cluster callers reach them; the caps keep a busy loop
+(set by Traefik for all public traffic; nextjs checks `X-Real-Ip`/`X-Forwarded-Server` instead, because the Next.js server adds `X-Forwarded-For` itself) gets 404, so only in-cluster callers reach them; the caps keep a busy loop
 under the 60 s liveness budget and held memory (128 MiB) under every app's memory limit (256Mi, nextjs 384Mi).
 Code: [nodejs/server.js](../apps/nodejs/server.js), [python/main.py](../apps/python/main.py),
 [nextjs/app/stress/](../apps/nextjs/app/stress/README.md).
@@ -56,7 +60,7 @@ Code: [nodejs/server.js](../apps/nodejs/server.js), [python/main.py](../apps/pyt
 
 | Need | Version / note |
 |---|---|
-| Cluster with the platform deployed | `scripts/deploy.sh` + `apps/deploy-apps.sh` (apps 1.0.2 or later, which have the stress endpoints) |
+| Cluster with the platform deployed | `scripts/deploy.sh` + `apps/deploy-apps.sh` (apps 1.0.3 or later; 1.0.2 nextjs rejects in-cluster stress calls) |
 | `kubectl` | context on the cluster; rights to create Jobs/Pods in `tempo-apps` and `default`, and patch Deployments |
 | `python3`, `curl`, `bash` 4+ | used by `run.sh` |
 | Capacity | one k6 Job at a time: 100m / 128Mi requested, 1 CPU / 512Mi limit (fits the `tempo-apps` quota) |
@@ -106,7 +110,27 @@ the run: healthy requests queue behind the busy loop (python: GIL; Node.js: even
 
 ## 📊 Results (2026-11-08, lab)
 
-RESULTS_PLACEHOLDER
+| Test | Peak VUs | Requests | RPS | p95 | p99 | Errors | Result |
+|---|---|---|---|---|---|---|---|
+| python smoke / load / soak | 2 / 10 / 10 | 636 / 2689 / 5624 | 71 / 75 / 78 | 63 / 246 / 261 ms | 118 / 429 / 384 ms | 0 % | ✅ pass |
+| python spike | 100 | 2528 | 84 | 1.47 s | 1.66 s | 0 % | ✅ pass |
+| python stress | 150 | 4038 | 75 | 2.90 s | 3.23 s | 0 % | ❌ p95 > 2 s: breaking point ~75 req/s at 500m CPU |
+| nodejs smoke / load / soak | 2 / 10 / 10 | 850 / 4595 / 8986 | 94 / 128 / 125 | 75 / 156 / 175 ms | 105 / 208 / 257 ms | 0 % | ✅ pass |
+| nodejs spike / stress | 100 / 150 | 3912 / 6812 | 130 / 126 | 0.90 / 1.33 s | 1.02 / 1.61 s | 0 % | ✅ pass (plateau ~128 req/s) |
+| nextjs smoke / load | 2 / 10 | 210 / 1444 | 23 / 40 | 228 / 443 ms | 273 / 638 ms | 0 % | ✅ pass |
+| nextjs soak | 10 | 1820 | 25 | 821 ms | 1.08 s | 0 % | ❌ p95 > 500 ms |
+| nextjs spike | 100 | 1066 | 35 | 9.99 s | 10 s | 5.06 % | ❌ timeouts |
+| nextjs stress | 150 | 2476 | 45 | 3.67 s | 9.99 s | 1.57 % | ❌ breaking point ~40 req/s (CPU 0.49 of 0.5, 96 % periods throttled) |
+| python cpu (4 × 500 ms) | 5 | 2107 | 39 | probe 50 ms | probe 693 ms | 0 % | ✅ |
+| nodejs cpu | 5 | 1060 | 20 | probe 37 ms | probe 85 ms (max 10 s) | probe 0.3 % | ✅ |
+| python / nodejs memory (4 × 40 MiB, 10 s) | 5 | 6470 / 12479 | 120 / 231 | probe 68 / 40 ms | 126 / 78 ms | probe errors 0 % | ✅ budget 429s as designed (k6 `http_req_failed` counts these 429s) |
+| nextjs cpu / memory | 5 | 493 / 2893 | 9 / 54 | probe 94 / 125 ms | probe 313 / 326 ms | probe errors 0.5 % / 0 % | ✅ stress calls 200 (memory: 200/429, the 429s count in k6 `http_req_failed`). ⚠️ liveness probe timeouts under 4 × 500 ms loops at the 500m limit; use fewer VUs or a lower `CPU_MS` for nextjs |
+| python oom (300 MiB vs 160Mi) | 1 | 1 | - | - | - | EOF | ✅ pod `OOMKilled`, exit 137, Deployment untouched |
+| dependency (nodejs at 0 for 46 s) | - | 551 | 4.6 | - | - | 33.8 % (186) | ✅ errors only during the outage |
+| podkill nodejs (20 req/s) | - | 1069 | 19.8 | 59 ms | 296 ms | 1.0 % (11) | ✅ ~2 s of refused connections with 1 replica |
+| netpol | - | - | - | - | - | - | ✅ python and nextjs: blocked from `default`; public `/stress/cpu` 404 |
+
+Peak during load phase (Prometheus): CPU nextjs 0.49, python 0.44, nodejs 0.38 cores (limit 0.5); throttled share 96 / 82 / 57 %; working set 102 / 70 / 63 MiB.
 
 ## 🛡️ Safety limits
 

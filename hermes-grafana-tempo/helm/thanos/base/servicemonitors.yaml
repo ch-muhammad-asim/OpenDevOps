@@ -1,0 +1,51 @@
+# Prometheus scrapes every Thanos component on its HTTP port (/metrics). The job label is the
+# Service name: thanos-query, thanos-store, thanos-compact. The sidecars are scraped by the
+# ServiceMonitor that kube-prometheus-stack renders (prometheus.thanosServiceMonitor), job
+# "prometheus-kube-prometheus-thanos-discovery".
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: thanos-query
+  labels:
+    app.kubernetes.io/name: thanos-query
+    app.kubernetes.io/part-of: thanos
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-query
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: thanos-store
+  labels:
+    app.kubernetes.io/name: thanos-store
+    app.kubernetes.io/part-of: thanos
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-store
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: thanos-compact
+  labels:
+    app.kubernetes.io/name: thanos-compact
+    app.kubernetes.io/part-of: thanos
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-compact
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

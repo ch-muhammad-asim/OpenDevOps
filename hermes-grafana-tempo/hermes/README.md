@@ -2,7 +2,8 @@
 
 [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) v0.23.0 runs as a gateway plus its web dashboard in
 namespace `hermes`; the dashboard (with its chat) is published at `https://hermes-gke.saqlainmushtaq.com` behind
-Hermes's own login. The agent's model is `@cf/openai/gpt-oss-120b` on Cloudflare Workers AI (OpenAI-compatible, tool calling).
+Hermes's own login. The agent's model is `@cf/qwen/qwen3.8-27b` on Cloudflare Workers AI (OpenAI-compatible, tool calling;
+free daily quota, see [Model provider](#-model-provider)).
 The gateway's **built-in gateway monitoring exporter** sends service-health metrics, spans and diagnostic logs over OTLP/HTTP
 to the OpenTelemetry Collector. The Collector forwards spans to Tempo and metrics to Prometheus. A Grafana dashboard
 shows the gateway's health with a link to its traces, and Prometheus alerts fire when the gateway goes down.
@@ -12,7 +13,7 @@ conversation content.
 Part of [hermes-grafana-tempo](../README.md).
 
 **Status:** ✅ live on GKE on 2026-11-08 (Hermes v0.23.0, Collector 0.165.0, Tempo 3.1.1, kube-prometheus-stack
-93.1.0): `verify.sh` 21/21 PASS, including the public URL, the Hermes login, the model credentials and the dashboard chat attach; one chat through the
+93.1.0): `verify.sh` 29/29 PASS on 2026-11-08, including the public URL, the Hermes login, the model settings, the dashboard chat attach and the read-only observability skill; one chat through the
 API server and one through the dashboard chat got model replies. Chat text never appears in metrics or traces.
 
 ## 🔭 What Hermes exports (and what it doesn't)
@@ -73,8 +74,8 @@ Kustomize overlay without the persistent disk and with smaller requests).
 | [`base/pvc.yaml`](base/pvc.yaml) | 10Gi PVC for `HERMES_HOME` | Sessions and memory survive restarts |
 | [`base/pdb.yaml`](base/pdb.yaml) | PodDisruptionBudget (`maxUnavailable: 1`) | Never blocks node drains or GKE upgrades |
 | [`base/namespace.yaml`](base/namespace.yaml) | Namespace `hermes` | Pod Security `restricted` enforced |
-| [`base/networkpolicy.yaml`](base/networkpolicy.yaml) | Default deny; egress to DNS (kube-dns and NodeLocal DNSCache), Collector `:4318`, Prometheus `:9090`, Tempo `:3200`, Grafana `:3000` and public HTTPS `:443` (model API); ingress only from namespace `traefik` to `:9119` | No private, link-local/metadata or Service-range HTTPS egress; API server port never reachable |
-| [`base/networkpolicy-observability.yaml`](base/networkpolicy-observability.yaml) | Ingress in `monitoring` / `observability`: only the Hermes pod to Prometheus `:9090`, Tempo `:3200`, Grafana `:3000` | Additive to the platform's default deny; opens nothing else |
+| [`base/networkpolicy.yaml`](base/networkpolicy.yaml) | Default deny; egress to DNS (kube-dns and NodeLocal DNSCache), Collector `:4318`, Thanos querier `:10902`, Tempo `:3200`, Grafana `:3000` (not Prometheus `:9090`) and public HTTPS `:443` (model API); ingress only from namespace `traefik` to `:9119` | No private, link-local/metadata or Service-range HTTPS egress; API server port never reachable |
+| [`base/networkpolicy-observability.yaml`](base/networkpolicy-observability.yaml) | Ingress in `monitoring` / `observability`: only the Hermes pod to the Thanos querier `:10902`, Tempo `:3200`, Grafana `:3000` | Additive to the platform's default deny; opens nothing else |
 | [`base/prometheusrule.yaml`](base/prometheusrule.yaml) | 5 alerts with `runbook_url` ([Runbooks](#-runbooks)) | Detects a down gateway or lost telemetry |
 | [`base/hermes-gateway-dashboard.json`](base/hermes-gateway-dashboard.json) | Grafana dashboard (uid `hermes-gateway`) | Read-only view |
 | [`base/skills/`](base/skills/README.md) | Read-only observability skill (`SKILL.md` + `scripts/obs.py`), shipped as ConfigMap `hermes-skill-observability` | Queries only; Grafana Viewer token |
@@ -117,7 +118,7 @@ account ID, URL or key is in Git. After a switch: `kubectl -n hermes rollout res
 
 | Provider | Command | Default model | Cost | Credentials file (outside the repo, mode 600) |
 |---|---|---|---|---|
-| Cloudflare Workers AI (default, live) | `CLOUDFLARE_AI_CREDS_FILE=<file> hermes/deploy.sh` | MODEL_PENDING | 10,000 Neurons/day free; beyond that Workers Paid only ($0.011 per 1,000 Neurons) | `Account ID: <cloudflare-account-id>` and `API: <workers-ai-api-token>` |
+| Cloudflare Workers AI (default, live) | `CLOUDFLARE_AI_CREDS_FILE=<file> hermes/deploy.sh` | `@cf/qwen/qwen3.8-27b` (deployed) | 10,000 Neurons/day free; beyond that Workers Paid only ($0.011 per 1,000 Neurons) | `Account ID: <cloudflare-account-id>` and `API: <workers-ai-api-token>` |
 | OpenCode Zen / Go | `MODEL_PROVIDER=opencode OPENCODE_API_KEY_FILE=<file> hermes/deploy.sh` | `glm-5.3-flash` (Zen, paid) | Zen: pay per token (credits); Go: subscription | the key alone, or `API: <opencode-api-key>` |
 
 Override the model with `HERMES_MODEL=<id>`; for OpenCode Go set `OPENCODE_BASE_URL` to the Go endpoint from the
@@ -156,7 +157,21 @@ search) through the API server, then scores each reply *clean* (no `<|...|>` tok
 CLOUDFLARE_AI_CREDS_FILE=~/keys/cloudflare-ai hermes/model-eval.sh @cf/openai/gpt-oss-20b @cf/qwen/qwen3.8-27b
 ```
 
-EVAL_RESULTS_PENDING
+Results on 2026-11-08 (`@cf/...` Workers AI models, via the Hermes API server):
+
+| Model | Result |
+|---|---|
+| `@cf/qwen/qwen3.8-27b` (deployed) | Clean, correct answer with real skill data to "Is the hermes gateway up and which alerts are firing?" (51 s); the eval run itself hit the daily quota before reaching it, so it is not fully scored yet |
+| `@cf/openai/gpt-oss-120b` | 4/5, but fails the tool-result round trip: leaked chat-template tokens (`<\|call\|>`, `<\|return\|>`), repeated words and a made-up trace ID after tool results |
+| `@cf/openai/gpt-oss-20b` | 3/5 before the quota ran out (one HTTP 400 "Invalid input") |
+| `@cf/mistralai/mistral-small-3.1-24b-instruct`, `@cf/meta/llama-4-scout-17b-16e-instruct` | Not scored: every call returned HTTP 429 (daily free allocation used up) |
+
+Free-tier limits, plainly: the Workers AI free allocation is 10,000 Neurons per day per account. One full
+5-model eval, or an afternoon of agent chats (each turn sends ~9,000 prompt tokens), uses it up; after that every
+call returns HTTP 429 until the daily reset, and chat stops working (`verify.sh` without `VERIFY_CHAT` is unaffected).
+Continuous use needs Workers Paid ($0.011 per 1,000 Neurons beyond the free allocation) or another paid provider.
+OpenCode's free models only work inside the OpenCode client, not from Hermes. Re-run the full comparison with
+`model-eval.sh` once quota is available; the model choice for ongoing use is open.
 
 ### 💬 Chat
 
@@ -179,16 +194,28 @@ terminal:
 | Command | Answers |
 |---|---|
 | `diagnose` | Ranked issues: firing alerts, failing alert rules, Hermes health, every planted issue of the three apps (TraceQL match + example trace), RED anomalies vs a 6 h baseline, failing service-graph edges; each with evidence, probable root cause, file to look at, suggested fix and a Grafana Explore link |
+| `trends [--range 30d]` | Ranked trends over up to 30 days: error-ratio and p95 changes per service and route (week-over-week, day-over-day, or last window vs the one before when history is short), error-budget burn against the 99% SLO, Tempo TraceQL p95 trends, CPU/memory growth and restarts; each explained, with a Grafana Explore link |
 | `hermes`, `alerts`, `targets` | Gateway health, firing/pending alerts, scrape health |
 | `red`, `graph`, `slowest`, `errors`, `issue`, `trace` | Span-metrics RED, service graph, slowest/error traces, planted issues per app, compact span tree |
 | `prom`, `traceql`, `tags`, `dashboards`, `panels`, `gquery`, `link` | Raw PromQL/TraceQL, Grafana dashboards and panels, queries through Grafana, Explore deep links |
 
 Read-only by design: the script only reads (HTTP GET; Grafana `/api/ds/query` is a query), Grafana access uses a
 **Viewer** service account (`hermes-readonly`, token in Secret `hermes-grafana-token`, created once by `deploy.sh`;
-a write returns 403, checked by `verify.sh`), and the NetworkPolicies open only Prometheus `:9090`, Tempo `:3200` and
+a write returns 403, checked by `verify.sh`; the token expires after 90 days, `GRAFANA_TOKEN_TTL_DAYS`, and `deploy.sh`
+re-mints it, revokes older tokens and resets the account to Viewer), and the NetworkPolicies open only the Thanos
+querier `:10902`, Tempo `:3200` and
 Grafana `:3000` from the Hermes pod ([`base/networkpolicy.yaml`](base/networkpolicy.yaml) egress plus
 [`base/networkpolicy-observability.yaml`](base/networkpolicy-observability.yaml) ingress in `monitoring` and
 `observability`). Output is compact JSON with bounded time ranges and limits; `diagnose` takes about 2 s in-cluster.
+
+All metric queries of the skill (PromQL, alerts, rules, targets) go to the Thanos querier
+(`http://thanos-query.monitoring:10902`, free OSS, 30-day metrics; override with `OBS_METRICS_URL`). The Hermes pod
+has no route to Prometheus `:9090`, which serves remote-write, `/-/reload` and `/-/quit` without authentication;
+`verify.sh` checks that it is blocked. If Thanos is down, `trends` reports it in `endpoint_note`. Range queries use 1 h steps
+from 1 day and 6 h steps from 7 days; TraceQL metrics come from Tempo's `/api/metrics/query_range` (Tempo 3.x
+runs them on the stored blocks; span metrics in Prometheus are the cheaper source for 30 days). The output always
+states how much history exists: on 2026-11-08 only ~3 hours existed, so it compared the last 80 minutes with the 80
+minutes before and flagged the latency jumps as load-driven (traffic rose 15-100x in the same window).
 
 Optional scheduled diagnose (off by default, no model calls; the job runs the script and logs its summary):
 
@@ -247,6 +274,32 @@ then `kubectl -n hermes rollout restart deploy/hermes-gateway` (the dashboard re
 A crashed pod stops sending metrics instead of sending `0`, so `HermesTelemetryAbsent` covers that case once the
 last samples go stale (about 5 minutes).
 
+## 🗄️ Retention and storage
+
+What the skill's `trends` command can look back on, and where it reads from:
+
+| Signal | Lab (live) | Production | Endpoint for `trends` (env) |
+|---|---|---|---|
+| Traces (Tempo) | 720 h (30 days), blocks in in-cluster SeaweedFS (S3 API) | 720 h, GCS bucket via Workload Identity (`roles/storage.objectUser` on the bucket only) | `http://tempo.observability:3200` (lab) / `http://tempo-query-frontend.observability:3200` (prod), `OBS_TEMPO_URL`; TraceQL metrics `/api/metrics/query_range`, step >= 1 h for 30 days |
+| Metrics | Prometheus 2 days local + Thanos (free OSS: sidecar, store-gateway, querier) 30 days in in-cluster SeaweedFS (S3 API) | Thanos: 2 days local + GCS, raw / 5m / 1h resolutions kept 30 days | `http://thanos-query.monitoring:10902` (`OBS_METRICS_URL`); Prometheus `:9090` is not reachable from Hermes |
+
+- 30-day RED trends come from Tempo's span metrics (`traces_spanmetrics_*`) and service graph
+  (`traces_service_graph_request_total`) in Prometheus: the cheapest source. TraceQL metrics over 30 days are slower;
+  `trends` uses them for the p95 trend per app only.
+- Live check (2026-11-08): `trends` and `diagnose` answered from the Thanos querier. Production: no change is
+  needed for metrics (the skill uses the Thanos querier); set `OBS_TEMPO_URL` to the query frontend on both
+  containers (e.g. an `env` patch in an overlay). The
+  NetworkPolicies already allow the Hermes pod to reach the Thanos querier (`app.kubernetes.io/name=thanos-query`,
+  `:10902`) and Tempo pods (`app.kubernetes.io/instance=tempo`, `:3200`, which also matches the query frontend of a
+  release named `tempo`).
+- History on 2026-11-08 was only a few hours (cluster created that day), so `trends` compared short windows and said
+  so; week-over-week comparisons start once 14 days exist.
+- Lab vs production: GCS + Workload Identity for Tempo and Thanos is validated (rendered, kubeconform, promtool) but
+  not run live in the lab, where bucket IAM cannot be read or granted without approval; the lab stores the same
+  30 days in an in-cluster SeaweedFS S3 store instead (see [`../helm/tempo/`](../helm/tempo/) and [`../helm/kube-prometheus-stack/`](../helm/kube-prometheus-stack/)).
+- Hermes's own state (`HERMES_HOME`: sessions, memory, cron jobs) is separate: the `hermes-home` PVC in production
+  (snapshots: [`backup-snapshot.yaml`](backup-snapshot.yaml)), an `emptyDir` in the lab profile.
+
 ## 🛡️ Security model
 
 | Threat | Control | Enforced by | Test |
@@ -257,13 +310,15 @@ last samples go stale (about 5 minutes).
 | Plain-HTTP or spoofed-host access | Cloudflare "Always Use HTTPS"; HSTS; dashboard accepts only its public URL as Host/Origin | Cloudflare, `security-headers`, `HERMES_DASHBOARD_PUBLIC_URL` | `verify.sh`: `http://` → 301 |
 | Container escape / privilege use | Non-root uid 10000, `drop: [ALL]`, no privilege escalation, read-only root FS, seccomp `RuntimeDefault` | Pod Security `restricted` on the namespace | Admission rejects any weaker pod |
 | Kubernetes API abuse | No service-account token mounted | `automountServiceAccountToken: false` | — |
-| Exfiltration from the pod / SSRF | Egress only to DNS, the Collector `:4318`, Prometheus `:9090` / Tempo `:3200` / Grafana `:3000` (read-only skill) and public HTTPS `:443` (model API); private, CGNAT, link-local (metadata server) and Service ranges excluded; `security.allow_private_urls: false` | `networkpolicy.yaml` (GKE Dataplane V2), `config.yaml` | — |
+| Exfiltration from the pod / SSRF | Egress only to DNS, the Collector `:4318`, Thanos querier `:10902` / Tempo `:3200` / Grafana `:3000` (read-only skill) and public HTTPS `:443` (model API); private, CGNAT, link-local (metadata server) and Service ranges excluded; `security.allow_private_urls: false` | `networkpolicy.yaml` (GKE Dataplane V2), `config.yaml` | — |
 | Agent runs harmful commands | `approvals.mode: manual` (a human approves flagged commands), API-server runs never auto-approved, `max_turns: 30`, 15 min run budget; non-root, read-only root FS | `config.yaml`, `deployment.yaml` | — |
 | Secret exposure | API key and dashboard login generated in `deploy.sh`; model settings read from a local file; Grafana Viewer token minted once; stored only in Secrets `hermes-api-server`, `hermes-dashboard-auth`, `hermes-model-key`, `hermes-grafana-token`; `security.redact_secrets: true` masks keys in tool output and logs | `deploy.sh`, `config.yaml` | Values never printed or committed; no key or chat text found in metrics or traces |
-| Observability skill used to change the platform | Script reads only; Grafana Viewer token (writes → 403); egress only to Prometheus `:9090`, Tempo `:3200`, Grafana `:3000` | `obs.py`, Grafana role, `networkpolicy.yaml`, `networkpolicy-observability.yaml` | `verify.sh`: Grafana write → 403 |
+| Observability skill used to change the platform | Script reads only; all metrics through the Thanos querier (read API only: write, reload and quit return 404); Grafana Viewer token (writes → 403, 90-day expiry, role reset to Viewer on every `deploy.sh`); egress only to Thanos `:10902`, Tempo `:3200`, Grafana `:3000` | `obs.py`, Grafana role, `networkpolicy.yaml`, `networkpolicy-observability.yaml` | `verify.sh`: Grafana write → 403; Hermes pod cannot reach Prometheus `:9090` |
+| Unauthenticated Prometheus write/admin endpoints (residual) | Prometheus runs with the remote-write receiver and the lifecycle API on (`/api/v1/write`, `/-/reload`, `/-/quit`, no auth). The Hermes pod has no route to `:9090`; only pods the platform's policies admit (Grafana, Tempo's metrics-generator, the monitoring namespace) can reach it. The Thanos querier and Tempo have no auth either, but serve read APIs only | `networkpolicy.yaml` (no `:9090` egress), platform NetworkPolicies | `verify.sh`: Hermes pod cannot reach Prometheus `:9090`; Thanos write/reload/quit → 404 (checked 2026-11-08) |
 | Usage data to the vendor | `telemetry.shared_metrics.enabled/send: false` (also the default) | `config.yaml` | — |
 
-Not protected: the Collector → Tempo/Prometheus hops are plain HTTP/gRPC inside the cluster; Cloudflare → Traefik
+Not protected: the Collector → Tempo/Prometheus hops are plain HTTP/gRPC inside the cluster; Prometheus and the
+Thanos querier have no authentication (Hermes reaches only the read-only Thanos querier, see the threat table); Cloudflare → Traefik
 uses Traefik's default certificate (SSL mode "Full", not "Full (strict)"); anyone with Grafana Viewer access sees
 gateway health and span metadata (never content); the dashboard can edit Hermes config and keys, so treat its login
 as an admin credential. Port 443 egress is open to any public address (NetworkPolicy cannot match host names), so
@@ -321,6 +376,8 @@ set `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.observability:4318`, and 
 | Gateway log `RateLimitError` / HTTP 429 | Workers AI rate limit or daily free allocation used up | Hermes retries 3 times; wait, or use a paid plan |
 | Logs show `Auxiliary Nous client unavailable` | No main model configured, so auxiliary `auto` falls back to the Nous Portal | Configure `model:` in `config.yaml` (auxiliary `auto` then uses it) |
 | `kubectl get --raw .../services/...:9090/proxy` times out | Default-deny ingress in `monitoring`/`observability` blocks the API server proxy | Use `kubectl port-forward` on a free local port (as `verify.sh` does) |
+| Skill's Grafana calls return 401; `verify.sh` "skill -> Grafana: HTTP 401" | Grafana restarted without a persistent database, so the `hermes-readonly` service account and its token are gone | Re-run `hermes/deploy.sh`: it detects the rejected token, re-creates the Viewer account and token, and restarts the pod |
+| Skill metric queries fail, `trends` shows `endpoint_note: ... not reachable` | The Thanos querier (`thanos-query.monitoring:10902`) is down or not ready | `kubectl -n monitoring get pods -l app.kubernetes.io/name=thanos-query`; the skill deliberately has no fallback to Prometheus `:9090` |
 
 Health: the gateway probes call `http://127.0.0.1:8642/health`, the dashboard probes `http://127.0.0.1:9119/api/status`.
 `HERMES_HOME` (`/opt/data/home`, created by the init container so the Hermes user owns it) lives on the `hermes-home`
@@ -369,7 +426,9 @@ Cron jobs missed their schedule. Check `hermes_cron_scheduler_heartbeat_age_seco
 | Storage | 10Gi zonal PD (`standard-rwo`) | For zone failure tolerance use a regional PD StorageClass; watch disk use |
 | Backups | [`backup-snapshot.yaml`](backup-snapshot.yaml) (manual snapshot) | Schedule snapshots with Backup for GKE; test a restore |
 | Secrets | API key, dashboard login and model key in Secrets, created by `deploy.sh`, never in Git | Prefer syncing them from Secret Manager; use a dedicated (not shared) model key |
+| Grafana token | Viewer service account `hermes-readonly`; token expires after 90 days (`GRAFANA_TOKEN_TTL_DAYS`); `deploy.sh` re-mints a rejected/expired token, revokes older tokens and resets the role to Viewer | Run `deploy.sh` from a scheduled pipeline (or before expiry) so the token never lapses; keep Grafana's database on a PVC |
 | Network | Default deny; egress DNS, Collector and public HTTPS `:443` (model API) | Restrict `:443` to the model host with an egress proxy or FQDN policy |
+| Metrics API auth | Prometheus `:9090` (remote-write + lifecycle API on) and the Thanos querier `:10902` are unauthenticated inside the cluster; Hermes reaches only Thanos | Put an auth proxy (e.g. kube-rbac-proxy or oauth2-proxy) or a read-only Service in front of Prometheus/Thanos, and turn off `web.enable-lifecycle` if not needed |
 | Upgrades | Image pinned by digest in [`base/deployment.yaml`](base/deployment.yaml) (both containers) | Read the Hermes release notes, change the digest, apply, run `verify.sh`; roll back with the previous digest |
 | SLOs | Alerts: gateway down 2m, telemetry absent 5m | Suggested SLO: `hermes_gateway_up` = 1 for 99.5% of 30 days; page on `HermesGatewayDown` |
 | Cost | ≈ 0.1 vCPU + 0.4 GiB + 10Gi PD | — |
@@ -380,8 +439,9 @@ Cron jobs missed their schedule. Check `hermes_cron_scheduler_heartbeat_age_seco
 | Date | Where | Result |
 |---|---|---|
 | 2026-11-08 | Local, official image + Collector 0.165.0, internal network | ✅ 18/18 metrics, `hermes.gateway_health` spans (`gateway.lifecycle`, `gateway.health_snapshot`), diagnostic logs; `hermes_gateway_up 1`, `hermes_platform_up{hermes_platform="api_server"} 1`; non-root, read-only root FS, all capabilities dropped |
-| 2026-11-08 | GKE `tempo-demo` (3 × e2-standard-2), production profile, `verify.sh` | ✅ 21/21 PASS (adds: model credentials Secret present and loaded in both containers, dashboard chat can attach to the gateway): pod 2/2 Ready, 0 restarts; `max(hermes_gateway_up)` = 1, `hermes_platform_up` = 1, 18 `hermes_*` metric names; 5 rules loaded, none firing; TraceQL lifecycle query → 3 traces; Grafana dashboard 20 panels, Grafana → Prometheus and → Tempo queries answer; public URL: no `WWW-Authenticate` challenge, `/` → 302 to `/login`, `/login` 200, `http://` → 301, `/api/config` 401 without a session, Hermes login 200, `/api/config` 200 with a session |
-| 2026-11-08 | GKE, Workers AI `@cf/openai/gpt-oss-120b` | ✅ direct tool-call test (`finish_reason: tool_calls`); chat via API server → reply in 10 s; dashboard `/chat` terminal over the public URL (login → ticket → `/api/pty?profile=default`) → reply in 5 s, no `retrying`/`reconnect` text, 0 reconnects in `tui_gateway_crash.log`; no prompt, reply or key text in Tempo traces, `hermes_*` series or the Collector `:8889` output |
+| 2026-11-08 | GKE `tempo-demo` (3 × e2-standard-2), production profile, `verify.sh` | ✅ 29/29 PASS (adds: model settings Secret present and loaded in both containers, dashboard chat can attach to the gateway, skill loaded, skill reads Thanos/Tempo/Grafana, Hermes pod cannot reach Prometheus `:9090`, Grafana write → 403, `diagnose` and `trends` run): pod 2/2 Ready, 0 restarts; `max(hermes_gateway_up)` = 1, `hermes_platform_up` = 1, 18 `hermes_*` metric names; 5 rules loaded, none firing; TraceQL lifecycle query → 3 traces; Grafana dashboard 20 panels, Grafana → Prometheus and → Tempo queries answer; public URL: no `WWW-Authenticate` challenge, `/` → 302 to `/login`, `/login` 200, `http://` → 301, `/api/config` 401 without a session, Hermes login 200, `/api/config` 200 with a session |
+| 2026-11-08 | GKE, Workers AI `@cf/openai/gpt-oss-120b` (replaced) | ✅ simple chat; chat via API server → reply in 10 s; dashboard `/chat` terminal over the public URL (login → ticket → `/api/pty?profile=default`) → reply in 5 s, no `retrying`/`reconnect` text, 0 reconnects in `tui_gateway_crash.log`; no prompt, reply or key text in Tempo traces, `hermes_*` series or the Collector `:8889` output |
+| 2026-11-08 | GKE, Workers AI `@cf/qwen/qwen3.8-27b` + observability skill | ✅ skill question via API server answered with real data (gateway up, firing alert `PrometheusRuleFailures`, pending alerts) in 51 s; `diagnose` run directly: all 14 planted issues of the 3 apps with trace IDs, ~2 s; `verify.sh` 29/29 PASS. ⚠️ model eval stopped by the free daily quota (HTTP 429), see [Choosing a model](#choosing-a-model-model-evalsh) |
 
 ## 🧹 Teardown
 
@@ -398,7 +458,7 @@ In production this also deletes the `hermes-home` PVC and its data; take a snaps
 | Hermes Agent image | `nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002` |
 | OpenTelemetry SDK in the image | `opentelemetry-sdk` / `opentelemetry-exporter-otlp-proto-http` 1.45.1 |
 | OTLP transport | HTTP/protobuf, port 4318 |
-| Model | `@cf/openai/gpt-oss-120b` via `https://api.cloudflare.com/client/v4/accounts/<account-id>/ai/v1` (`custom` provider) |
+| Model | `@cf/qwen/qwen3.8-27b` via `https://api.cloudflare.com/client/v4/accounts/<account-id>/ai/v1` (`custom` provider; set by `deploy.sh`) |
 
 ## 🔗 References
 

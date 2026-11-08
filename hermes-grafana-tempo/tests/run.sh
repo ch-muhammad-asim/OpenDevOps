@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Stress and resilience tests for the sample apps, run in-cluster (never through the public edge).
+# For lab and staging clusters only, NOT for production clusters: scenarios patch Deployments,
+# scale an app to 0, delete a pod and run an OOM pod. The netpol probe pod runs in namespace default.
 # Usage: tests/run.sh <app> <scenario>
 #   app       nextjs | nodejs | python
 #   scenario  smoke | load | stress | spike | soak         k6 load tests (Kubernetes Job)
@@ -28,7 +30,7 @@ usage() { sed -n '3,15p' "$0" >&2; exit 2; }
 [[ -n "$SCENARIO" ]] || usage
 if [[ "$APP" != all ]]; then [[ -n "${PORT[$APP]:-}" ]] || usage; fi
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
-save() { [[ -n "$EVIDENCE_DIR" ]] && { mkdir -p "$EVIDENCE_DIR"; cat > "$EVIDENCE_DIR/$1"; } || cat >/dev/null; }
+save() { if [[ -n "$EVIDENCE_DIR" ]]; then mkdir -p "$EVIDENCE_DIR"; cat > "$EVIDENCE_DIR/$1"; else cat >/dev/null; fi; }
 
 # ---------------------------------------------------------------- k6 Job
 # run_k6 <name> <script> <env...>: one k6 Job (restricted PSS, non-root, limits), metrics to the

@@ -1,6 +1,6 @@
 {
   "name": "nodejs-orders",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Orders API with planted code issues, traced with OpenTelemetry and Grafana Tempo",
   "main": "server.js",

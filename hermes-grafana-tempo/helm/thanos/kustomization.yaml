@@ -1,0 +1,8 @@
+# Production profile: Thanos query (2), store gateway (2) and compactor (1) on GCS, unchanged from base/.
+# The manifests live in base/ so overlays/lab can reuse them (kustomize does not allow an overlay
+# inside its own base directory).
+#   kubectl apply -k helm/thanos
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base

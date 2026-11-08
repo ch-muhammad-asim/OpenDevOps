@@ -1,0 +1,30 @@
+# Lab: one store gateway, small requests, 5Gi index-header cache PVC. Index cache 64MB (max item
+# 16MB) and chunk
+# pool 128MB (kustomization.yaml) keep it inside the 384Mi limit.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: thanos-store
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: thanos-store
+          resources:
+            requests:
+              cpu: 25m
+              memory: 192Mi
+            limits:
+              memory: 384Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: thanos-store
+      spec:
+        storageClassName: standard-rwo
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi

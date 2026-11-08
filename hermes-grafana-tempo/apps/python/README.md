@@ -55,7 +55,7 @@ The project [architecture diagram](../../docs/diagrams/architecture.mmd) shows t
 | `OTEL_LOGS_EXPORTER` | `none` | Dockerfile, k8s | No OTLP logs |
 | `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Dockerfile, k8s | Keep every trace; follow the caller's sampling decision |
 | `OTEL_PYTHON_EXCLUDED_URLS` | `healthz` | Dockerfile, k8s | No spans for probe traffic |
-| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=lab,service.namespace=tempo-apps,service.version=1.0.2,k8s.namespace.name=…,k8s.pod.name=…` (compose: `deployment.environment.name=local,service.namespace=tempo-apps,service.version=dev`) | compose, k8s | Extra resource attributes; namespace and pod name come from the downward API |
+| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=lab,service.namespace=tempo-apps,service.version=1.0.3,k8s.namespace.name=…,k8s.pod.name=…` (compose: `deployment.environment.name=local,service.namespace=tempo-apps,service.version=dev`) | compose, k8s | Extra resource attributes; namespace and pod name come from the downward API |
 | `INVENTORY_DB_PATH` | `/tmp/inventory.db` | Dockerfile, k8s | SQLite file; `/tmp` is the only writable path |
 | `SUPPLIER_SYNC_SECONDS` | `3` (default) | code | Length of the planted wait in `/inventory/slow` |
 
@@ -120,7 +120,7 @@ curl -s -o /dev/null -w '%{time_total}\n' "$B/inventory/fib?n=35"     # expect: 
 ## ☸️ Deploy to Kubernetes
 
 ```bash
-apps/build-push.sh python   # why: build linux/amd64 and push <registry>/python:1.0.2
+apps/build-push.sh python   # why: build linux/amd64 and push <registry>/python:1.0.3
 apps/deploy-apps.sh         # why: render the production profile (or `lab`), pin images by digest, apply, wait
 kubectl -n tempo-apps rollout status deployment/python
 ```
@@ -170,7 +170,7 @@ here: parameters are bound, so values are not in the SQL text), stack traces are
 | No traces in Tempo | Wrong `OTEL_EXPORTER_OTLP_ENDPOINT` or protocol | Endpoint is the base URL (`:4318`, no `/v1/traces`) with `http/protobuf`; check the Collector logs |
 | Search returns nothing right after a call | Tempo makes new traces searchable after a short delay | Wait 15-30 s and widen the time range |
 | Server span but no `SELECT` spans | Queries run through `conn.execute()` | Use `conn.cursor().execute()` |
-| Pod briefly unready while `/inventory/fib?n=35` runs | Event loop blocked longer than the probe timeout (CPU limit 500m makes it slower) | Expected for this bug: one failed probe at most; liveness restarts only after ~60 s blocked (20 s period x 3 failures); the fix is in the code |
+| Pod briefly unready while `/inventory/fib?n=35` runs | Event loop blocked longer than the probe timeout (CPU limit 500m makes it slower) | Expected for this bug: one failed probe at most; liveness restarts only after ~2 min blocked (20 s period x 6 failures, 10 s timeout); the fix is in the code |
 | `sqlite3.OperationalError: unable to open database file` | `/tmp` not writable with a read-only root | Mount an emptyDir (k8s) or `--tmpfs /tmp` (docker) |
 | `/inventory/slow` shows an error in `nodejs-orders` but 200 here | The caller times out after 2 s; this service still finishes in 3 s | Expected; compare both spans in the same trace |
 
