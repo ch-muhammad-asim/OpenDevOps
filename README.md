@@ -1,9 +1,9 @@
 <div align="center">
 
-# 🌉 Hermes × Claude Code Bridge
+# OpenDevOps · Secure AI Agents & Infrastructure Engineering
 
-**Run [Claude Code](https://claude.com/claude-code) as an OpenAI-compatible backend — anywhere.**
-From a single Windows laptop to a production GKE cluster, with a **security-first, read-only** operations posture. 🔒
+**Practical DevOps, SRE, and platform-engineering examples for running AI agents, Kubernetes workloads, and observability stacks securely.**
+Hands-on guides span local development, Docker, Kubernetes, GKE, AWS, infrastructure-as-code, and production-style security controls. Individual projects document their own testing scope. 🔒
 
 [![Deploy: macOS](https://img.shields.io/badge/deploy-macOS-000000?logo=apple&logoColor=white)](./mac)
 [![Deploy: Windows](https://img.shields.io/badge/deploy-Windows-0078D6?logo=windows&logoColor=white)](./windows)
@@ -24,6 +24,25 @@ From a single Windows laptop to a production GKE cluster, with a **security-firs
 
 ---
 
+## 🧭 Explore OpenDevOps
+
+OpenDevOps is a collection of **reproducible engineering examples**, not a single deployed product. It includes runnable code, configuration, deployment guides, security checks, and documented labs. Some projects are lab-tested, some have live deployments, and others are work in progress; check each project README before using anything in production.
+
+| Area | Where to start |
+|---|---|
+| **Hermes and Claude Code bridge** | [Cross-platform bridge](./claude-bridge-with-hermes/) · [GKE deployment](./kubernetes/) |
+| **Agent isolation and guardrails** | [NVIDIA OpenShell sandbox](./sandbox/) |
+| **Kubernetes, tracing, and observability** | [Hermes + Grafana Tempo on GKE](./hermes-grafana-tempo/) |
+| **AI agent operations** | [Herdr + Hermes integration](./herdr/) · [Docker Agent](./docker-agent/) |
+| **Cloud infrastructure as code** | [AWS infrastructure](./aws/) · [GCP examples](./gcp/) · [Vertex AI](./vertex-ai/) |
+| **Other agent and model integrations** | [OpenCode](./opencode/) · [pi agents](./pi-agents/) · [Bedrock](./aws-bedrock/) |
+
+**Contributing:** See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, issue reporting, and pull requests.
+**Security:** Please follow [SECURITY.md](SECURITY.md) when reporting vulnerabilities; do not disclose credentials or exploits in public issues.
+**License:** See [LICENSE](LICENSE) for the project's MIT terms; third-party tools and components retain their own licenses.
+
+---
+
 > ### 🎥 Watch it in action
 > **[I Turned Claude Code Into an OpenAI-Compatible SRE Agent on GKE 🤖☸️](https://www.youtube.com/watch?v=m8k2GGRldiU)**
 > A full walkthrough — deploying the read-only agent on GKE, and watching Hermes **diagnose and fix** a broken Kubernetes deployment through the three-gate security model, then revoke access.
@@ -31,9 +50,9 @@ From a single Windows laptop to a production GKE cluster, with a **security-firs
 
 ---
 
-## 🧭 What is this?
+## 🌉 Featured example: Hermes × Claude Code bridge
 
-A small, dependency-light **HTTP bridge** that turns your authenticated **Claude Code CLI** into an **OpenAI-compatible `/v1/chat/completions` endpoint**. Any tool, SDK, or agent gateway that speaks the OpenAI API can now use Claude Code as its model backend — with streaming, real token accounting, concurrency control, and tool-permission enforcement.
+This featured component is a small, dependency-light **HTTP bridge** that turns your authenticated **Claude Code CLI** into an **OpenAI-compatible `/v1/chat/completions` endpoint**. Any tool, SDK, or agent gateway that speaks the OpenAI API can now use Claude Code as its model backend — with streaming, real token accounting, concurrency control, and tool-permission enforcement.
 
 It ships with five production-tested ways to run it, and pairs with the **Hermes agent gateway** to deliver a read-only **Lead DevOps/SRE investigation assistant** ("Hermes SRE") that reasons across Kubernetes, GitHub, and Google Cloud observability — **without any write access**.
 
@@ -255,7 +274,7 @@ The repositories are complementary but independent—this directory links to the
 
 ---
 
-## 🤖 Planned project: Docker Agent
+## 🤖 Docker Agent: ongoing implementation
 
 Explore **[Docker Agent](https://docs.docker.com/ai/docker-agent/)** for a security-first DevOps/SRE agent: **build and test locally → share on Docker Hub → containerize → deploy on Kubernetes**. The new guide documents the implementation roadmap and distinguishes agent OCI artifacts from runnable container images.
 
