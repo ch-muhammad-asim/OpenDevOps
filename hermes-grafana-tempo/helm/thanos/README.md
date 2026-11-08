@@ -4,19 +4,21 @@ Thanos query, store gateway and compactor as plain Kubernetes manifests, plus th
 pods (set in [`../kube-prometheus-stack/values.yaml`](../kube-prometheus-stack/values.yaml)). **Why:** Prometheus keeps
 only 2 days on its disk; every 2-hour block goes to an object-storage bucket, and Grafana (and anything else that
 speaks PromQL) reads 30 days of history through one endpoint, `http://thanos-query.monitoring:10902`, with the HA
-Prometheus pair deduplicated and long ranges served from downsampled blocks. Production stores the blocks in GCS; the
-lab stores them in an in-cluster SeaweedFS S3 bucket, because the lab account cannot grant bucket IAM.
+Prometheus pair deduplicated and long ranges served from downsampled blocks. Both profiles store the blocks in a GCS
+bucket reached keylessly through GKE Workload Identity. In-cluster SeaweedFS S3
+([`../seaweedfs/`](../seaweedfs/README.md), `OBJECT_STORE=seaweedfs`) is an optional fallback for clusters without
+cloud object storage.
 
-**Cost:** All software is free and open source (Thanos, Prometheus, SeaweedFS: Apache-2.0; Tempo, Grafana: AGPL-3.0).
-Only GCS storage/operations (production) and persistent disks are billed.
+**Cost:** All software is free and open source (Thanos, Prometheus: Apache-2.0; Tempo, Grafana: AGPL-3.0).
+Only GCS storage/operations and persistent disks are billed.
 
-**Status (2026-11-08, Thanos v0.42.5, kube-prometheus-stack 93.1.0):** ✅ **lab live** on SeaweedFS S3: sidecar uploads
-ok 2, failed 0; store gateway loaded 2 blocks; thanos-query sees the sidecar and the store gateway; Grafana reads
-through it; `PROFILE=lab scripts/verify.sh` 32 PASS, 0 failures (includes `thanos-query /-/ready` and "sees sidecar +
-store-gateway"). History is a few hours old; 30-day trends fill in over time. **Production** (GCS + Workload Identity)
-is rendered and validated only: `kubectl kustomize` of [`kustomization.yaml`](kustomization.yaml) and
+**Status (2026-11-08, Thanos v0.42.5, kube-prometheus-stack 93.1.0):** ✅ **lab live on GCS** with Workload Identity
+(bucket `thanos-metrics-<suffix>`, Secret `thanos-objstore` = `type: GCS` + bucket name, no key); sidecar, store gateway
+and compactor reach GCS on 443; `PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures. **Production** (HA
+sizing) is rendered and validated only: `kubectl kustomize` of [`kustomization.yaml`](kustomization.yaml) and
 [`overlays/lab/`](overlays/lab/kustomization.yaml) + kubeconform strict (Kubernetes 1.36), `helm lint` / `helm template`
-of kube-prometheus-stack and Grafana, `promtool check rules`; bucket IAM cannot be granted in the lab account.
+of kube-prometheus-stack and Grafana, `promtool check rules`. Earlier lab runs on SeaweedFS S3 are recorded in
+[`../seaweedfs/`](../seaweedfs/README.md).
 
 ## 🏗️ Architecture
 
@@ -24,7 +26,7 @@ of kube-prometheus-stack and Grafana, `promtool check rules`; bucket IAM cannot 
 |---|---|---|
 | Recent data (last ~2 days, not yet uploaded) | thanos-query → Thanos sidecar in each Prometheus pod | 10901 gRPC (StoreAPI) |
 | History (everything in the bucket) | thanos-query → thanos-store (prod 2, lab 1) | 10901 gRPC (StoreAPI) |
-| Upload | Thanos sidecar → bucket (one 2h block per Prometheus replica every 2h) | Prod GCS 443 HTTPS + Workload Identity; lab `seaweedfs.object-storage:8333` S3 (plain HTTP, in-cluster) |
+| Upload | Thanos sidecar → bucket (one 2h block per Prometheus replica every 2h) | GCS 443 HTTPS + Workload Identity (both profiles); fallback `seaweedfs.object-storage:8333` S3 (plain HTTP, in-cluster) |
 | Compaction, downsampling, retention | thanos-compact (singleton) ↔ bucket | Same as upload |
 | Reads | thanos-store → bucket (index-headers cached on its PVC) | Same as upload |
 | Dashboards | Grafana data source uid `prometheus` → thanos-query | 10902 HTTP (PromQL API) |
@@ -37,18 +39,18 @@ write still go to `prometheus-kube-prometheus-prometheus:9090`, and alert rules 
 
 | Name | What it does (one line) | Where defined | Security role |
 |---|---|---|---|
-| Thanos sidecar (container in `prometheus-*` pods) | Uploads each 2h TSDB block to the bucket; serves recent data over gRPC | [`../kube-prometheus-stack/values.yaml`](../kube-prometheus-stack/values.yaml) `prometheusSpec.thanos` (lab requests in `values-lab.yaml`) | Prod: KSA `prometheus-kube-prometheus-prometheus` with `objectUser` on the bucket; lab: S3 key in the Secret |
+| Thanos sidecar (container in `prometheus-*` pods) | Uploads each 2h TSDB block to the bucket; serves recent data over gRPC | [`../kube-prometheus-stack/values.yaml`](../kube-prometheus-stack/values.yaml) `prometheusSpec.thanos` (lab requests in `values-lab.yaml`) | KSA `prometheus-kube-prometheus-prometheus` with `objectUser` on the bucket (fallback: S3 key in the Secret) |
 | Service `prometheus-kube-prometheus-thanos-discovery` | Headless; DNS SRV for the sidecars (gRPC 10901, HTTP 10902) | same file, `prometheus.thanosService` | ClusterIP None, in-cluster only |
 | Deployment `thanos-query` (prod 2, lab 1) | PromQL API for Grafana; fans out, deduplicates on `prometheus_replica` | [`base/query.yaml`](base/query.yaml) | No bucket access, no SA token |
-| StatefulSet `thanos-store` (prod 2, lab 1) | Serves all bucket blocks; index-header cache on a PVC (prod 10Gi, lab 5Gi) | [`base/store.yaml`](base/store.yaml) | Reads the bucket (prod KSA `thanos-store`, lab S3 key) |
-| StatefulSet `thanos-compact` (1) | Compacts, downsamples (5m, 1h), deletes blocks older than 30 days | [`base/compact.yaml`](base/compact.yaml) | The only deleter (prod KSA `thanos-compact`, lab S3 key) |
-| ServiceAccounts | Fixed names = Workload Identity principals (prod) | [`base/serviceaccounts.yaml`](base/serviceaccounts.yaml) | `automountServiceAccountToken: false` |
+| StatefulSet `thanos-store` (prod 2, lab 1) | Serves all bucket blocks; index-header cache on a PVC (prod 10Gi, lab 5Gi) | [`base/store.yaml`](base/store.yaml) | Reads the bucket (KSA `thanos-store`; fallback: S3 key) |
+| StatefulSet `thanos-compact` (1) | Compacts, downsamples (5m, 1h), deletes blocks older than 30 days | [`base/compact.yaml`](base/compact.yaml) | The only deleter (KSA `thanos-compact`; fallback: S3 key) |
+| ServiceAccounts | Fixed names = Workload Identity principals | [`base/serviceaccounts.yaml`](base/serviceaccounts.yaml) | `automountServiceAccountToken: false` |
 | ServiceMonitors (3) + sidecar ServiceMonitor | Prometheus scrapes every Thanos component | [`base/servicemonitors.yaml`](base/servicemonitors.yaml), kps `thanosServiceMonitor` | — |
 | PrometheusRule `thanos` (19 alerts) | Upload failures, compactor halted, store/query errors, components absent | [`base/prometheusrule.yaml`](base/prometheusrule.yaml) | Read-only rules |
 | NetworkPolicies (4) | Ingress allows on top of the `monitoring` default-deny | [`base/networkpolicies.yaml`](base/networkpolicies.yaml) | Least-privilege ports |
 | Production entry point | `kubectl apply -k helm/thanos` = `base/` unchanged | [`kustomization.yaml`](kustomization.yaml) | — |
 | Lab overlay | 1 replica each, small requests, no PDBs, smaller PVCs and caches | [`overlays/lab/`](overlays/lab/kustomization.yaml) | Same security settings as production |
-| Secret `thanos-objstore` (not in Git) | `objstore.yml`: prod `type: GCS` + bucket name; lab `type: S3` + SeaweedFS endpoint and access key | created by `scripts/deploy.sh` | Read by sidecar, store, compactor |
+| Secret `thanos-objstore` (not in Git) | `objstore.yml`: `type: GCS` + bucket name, no key (fallback: `type: S3` + SeaweedFS endpoint and access key) | created by `scripts/deploy.sh` | Read by sidecar, store, compactor |
 
 ## 🤔 Why Thanos
 
@@ -62,14 +64,13 @@ Requirement: 30 days of metrics, PromQL for Grafana and Hermes, free and open so
 | Minimum footprint | Lab: 110m CPU / 608Mi requests in total (below); Prometheus unchanged | Not measured here; at least the 7 components (plus Kafka in the preferred architecture), Prometheus remote-writes to it | Prometheus only |
 | Write path | Prometheus unchanged; the sidecar uploads finished blocks | Prometheus remote-writes every sample to Mimir | Unchanged |
 | Retention / downsampling | 30 days; 5m and 1h downsampled blocks | 30 days; no downsampling | 30 days raw, bounded by the PVC |
-| Survives losing the cluster | Prod yes (GCS); lab no (in-cluster SeaweedFS) | Same, depends on the object store | No |
+| Survives losing the cluster | Yes (GCS bucket, both profiles) | Same, depends on the object store | No |
 
 Thanos keeps PromQL, Grafana, the existing alert rules and the remote-write receiver exactly as they are and adds the
 fewest moving parts: no change to the write path, no queue. Mimir is the stronger choice for multi-tenant, very high
 ingest; at 3,429 samples/s it is more to run for the same result. Google Cloud Managed Service for Prometheus was
 rejected because it is a paid service (list price ~$533/month at the measured ingest,
-[pricing](https://cloud.google.com/stackdriver/pricing)). Local 30-day retention does not survive the cluster; the lab
-used it before switching to Thanos on SeaweedFS.
+[pricing](https://cloud.google.com/stackdriver/pricing)). Local 30-day retention does not survive the cluster.
 
 ## 📐 Sizing and cost
 
@@ -103,21 +104,30 @@ storage **$0.020 per GB-month**, Class A operations **$0.005 per 1,000**, Class 
 | PVCs: store 2 × 10Gi + compactor 50Gi, pd-balanced | $7.00 | $0.10 per GiB-month (below) |
 | **Total, excluding node capacity** | **~$8.50–$11.80** | Node capacity: 1.35 vCPU / 5.5 GiB requests (query 2 × 250m/1Gi, store 2 × 250m/1Gi, compactor 250m/1Gi, sidecars 2 × 50m/256Mi) |
 
-### Lab (SeaweedFS S3, persistent disks only)
+### Lab (GCS + persistent disks)
 
 **pd-balanced, us-central1, list price on 2026-11-08:** $0.000136986 per GiB-hour = **$0.10 per GiB-month**
 ([Disk and image pricing](https://cloud.google.com/compute/disks-image-pricing), "Balanced provisioned space").
-No object-storage bill: SeaweedFS runs in the cluster on its own disk.
 
 | Disk (pd-balanced, `standard-rwo`) | Size | Per month |
 |---|---|---|
-| SeaweedFS data (`helm/seaweedfs`; holds `thanos-metrics` and `tempo-traces`) | 100Gi | $10.00 |
 | Prometheus TSDB (unchanged; a PVC cannot shrink) | 40Gi | $4.00 |
 | thanos-store index-header cache | 5Gi | $0.50 |
 | thanos-compact scratch | 20Gi | $2.00 |
-| **Total** | **165Gi** | **$16.50** |
+| **Total** | **65Gi** | **$6.50** |
 
-Whole lab, adding the Tempo 50Gi (now mostly WAL), Grafana 1Gi and Hermes 10Gi PVCs: **226Gi ≈ $22.60/month**.
+Whole lab, adding the Tempo 50Gi (now mostly WAL), Grafana 1Gi and Hermes 10Gi PVCs: **126Gi ≈ $12.60/month**.
+
+The lab bucket `thanos-metrics-<suffix>` is billed at the GCS prices above. Estimate from the same assumptions as
+production, one sidecar instead of two (not measured):
+
+| Cost item (per month) | Estimate | Assumption |
+|---|---|---|
+| Bucket storage | $0.26–$1.02 | 13–51 GB × $0.020 |
+| Class A operations | ~$0.13 | ~25,000/month: half the production uploads (one sidecar) |
+| Class B operations | $0.40–$2.00 | Same query-driven range as production |
+| Soft-deleted bytes (7-day default) | ~$0.18–$0.28 | Half the production volume |
+| **Total, Thanos bucket** | **~$1.00–$3.45** | Plus the Tempo bucket `tempo-traces-<suffix>`: ~$0.62/month storage for ~31 GB, operations not measured ([`../tempo/`](../tempo/README.md#-retention-and-sizing)) |
 
 Lab requests (Thanos part): query 25m / 96Mi, store 25m / 192Mi, compactor 50m / 256Mi, sidecar 10m / 64Mi =
 **110m CPU / 608Mi** (memory limits 192Mi / 384Mi / 512Mi / 256Mi). Node capacity is the existing 3 x e2-standard-2.
@@ -126,8 +136,8 @@ Lab requests (Thanos part): query 25m / 96Mi, store 25m / 192Mi, compactor 50m /
 
 | Setting | Production (`kubectl apply -k helm/thanos`) | Lab (`kubectl apply -k helm/thanos/overlays/lab`) |
 |---|---|---|
-| Object store | GCS bucket `thanos-metrics-<project>`, Workload Identity, no keys | In-cluster SeaweedFS S3, bucket `thanos-metrics` at `seaweedfs.object-storage:8333`, S3 key of identity `thanos` (bucket-scoped) |
-| Secret `monitoring/thanos-objstore` (key `objstore.yml`) | `type: GCS` + bucket name | `type: S3` + bucket, endpoint, `insecure: true`, access/secret key |
+| Object store | GCS bucket `thanos-metrics-<project>` (`THANOS_BUCKET`), Workload Identity, no keys, `ACCESS_MODE=bucket` | Same, bucket `thanos-metrics-<suffix>`, `ACCESS_MODE=conditional` |
+| Secret `monitoring/thanos-objstore` (key `objstore.yml`) | `type: GCS` + bucket name | Same |
 | Prometheus local retention | `2d` / `85GiB` cap, 100Gi PVC, `disableCompaction: true` | `2d` / `8GiB` cap, 40Gi PVC, `disableCompaction: true` |
 | Prometheus replicas (sidecars) | 2 (HA pair, deduplicated in thanos-query) | 1 |
 | thanos-query | 2 replicas, 250m / 1Gi (4Gi limit), PDB, `max-concurrent=20` | 1, 25m / 96Mi (192Mi), no PDB, `max-concurrent=4` |
@@ -135,8 +145,8 @@ Lab requests (Thanos part): query 25m / 96Mi, store 25m / 192Mi, compactor 50m /
 | thanos-compact | 1, 250m / 1Gi (3Gi), 50Gi PVC | 1, 50m / 256Mi (512Mi), 20Gi PVC |
 | Retention / downsampling | 30 days raw, 5m and 1h | Same |
 | Grafana `prometheus` data source | `http://thanos-query.monitoring:10902` | Same |
-| Survives losing the cluster | Yes (bucket) | No (SeaweedFS disk is zonal and in-cluster) |
-| Why different | — | The lab account cannot grant `roles/storage.objectUser` on a bucket, and the lab is 3 x e2-standard-2 |
+| Survives losing the cluster | Yes (bucket) | Same |
+| Why different | — | The lab is 3 x e2-standard-2: sizing and replicas only |
 
 ## 🚀 Install (production)
 
@@ -189,13 +199,12 @@ Run from the repository root, in this order. `scripts/deploy.sh prometheus` (`PR
 
 ## 🧪 Install (lab)
 
-`PROFILE=lab scripts/deploy.sh` does all of this in order (object store `seaweedfs` is the lab default). By hand:
+`PROFILE=lab ACCESS_MODE=conditional THANOS_BUCKET=thanos-metrics-<suffix> scripts/deploy.sh prometheus` does all of
+this in order (object store `gcs` is the default for both profiles). By hand:
 
-1. SeaweedFS and its buckets (`helm/seaweedfs`; why: the object store must answer before the sidecar uploads). Its
-   NetworkPolicy admits port 8333 from namespace `monitoring`, pods `app.kubernetes.io/name` in
-   (`prometheus`, `thanos-store`, `thanos-compact`, `thanos-query`).
-2. Secret `monitoring/thanos-objstore`: written by `scripts/deploy.sh` with a generated key for the SeaweedFS identity
-   `thanos` (read/write/list on `thanos-metrics` only); never printed, never in Git.
+1. Bucket and IAM: production step 1 with `BUCKET=thanos-metrics-<suffix> ACCESS_MODE=conditional` (why: the lab binds
+   at project level with an IAM condition limited to this bucket and its objects).
+2. Secret `monitoring/thanos-objstore`: production step 2 with the lab bucket name (no key).
 3. kube-prometheus-stack with the lab overlay (why: turns on the sidecar and the 2-day local retention):
 
    ```bash
@@ -232,28 +241,30 @@ Run from the repository root, in this order. `scripts/deploy.sh prometheus` (`PR
 
 ## 🔐 IAM and security
 
-**Production IAM:** `roles/storage.objectUser` (create, read, list, update, delete objects; no bucket admin) granted
+**IAM (both profiles):** `roles/storage.objectUser` (create, read, list, update, delete objects; no bucket admin) granted
 **on the Thanos bucket only** to three Workload Identity Federation principals, created by
 [`../../infra/create-gcs-bucket.sh`](../../infra/create-gcs-bucket.sh):
 `principal://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<PROJECT_ID>.svc.id.goog/subject/ns/monitoring/sa/<KSA>`
 for `<KSA>` = `prometheus-kube-prometheus-prometheus` (sidecar), `thanos-store`, `thanos-compact`. thanos-query has no
 bucket access. No service account keys, no default compute service account. The store gateway only needs read access;
 a custom read-only role (`storage.objects.get`, `storage.objects.list`) is a further tightening if wanted.
+Production binds on the bucket (`ACCESS_MODE=bucket`, the script default); the lab uses `ACCESS_MODE=conditional`
+(project-level binding with an IAM condition limited to the bucket and its objects).
 
-**Lab access:** one SeaweedFS S3 identity `thanos` with read/write/list on bucket `thanos-metrics` only (Tempo has its
-own identity and bucket). The key is generated at deploy time into Secret `monitoring/thanos-objstore`.
+**Fallback access (`OBJECT_STORE=seaweedfs`):** one SeaweedFS S3 identity `thanos` with read/write/list on bucket
+`thanos-metrics` only; the key is generated at deploy time into Secret `monitoring/thanos-objstore`.
 
 | Threat | Control | How it's enforced | Test that proves it |
 |---|---|---|---|
-| Leaked storage credentials (prod) | No keys; KSA principals scoped to one bucket | `objstore.yml` has no `service_account`; bucket-level binding | `kubectl get secret thanos-objstore -o jsonpath='{.data.objstore\.yml}' \| base64 -d` shows bucket only |
-| Leaked storage credentials (lab) | Static S3 key, scoped to one bucket, only in a Secret | Generated by `scripts/deploy.sh`, never printed or committed | Key works on `thanos-metrics`, is denied on `tempo-traces` |
-| S3 traffic sniffed (lab) | **Not protected**: plain HTTP inside the cluster | Pod network only, no external exposure | — |
+| Leaked storage credentials | No keys; KSA principals scoped to one bucket | `objstore.yml` has no `service_account`; bucket-level or bucket-conditioned binding | `kubectl get secret thanos-objstore -o jsonpath='{.data.objstore\.yml}' \| base64 -d` shows bucket only |
+| Leaked storage credentials (SeaweedFS fallback) | Static S3 key, scoped to one bucket, only in a Secret | Generated by `scripts/deploy.sh`, never printed or committed | Key works on `thanos-metrics`, is denied on `tempo-traces` |
+| S3 traffic sniffed (SeaweedFS fallback) | **Not protected**: plain HTTP inside the cluster | Pod network only, no external exposure | — |
 | Unauthenticated PromQL/StoreAPI in-cluster | **Not protected** by auth or mTLS (Thanos has none built in) | NetworkPolicies: only Grafana and Prometheus → 10902, only thanos-query → 10901 | `kubectl -n monitoring get networkpolicy thanos-query-ingress -o yaml` |
 | Public exposure | ClusterIP / headless Services only | No Ingress, no `thanosServiceExternal` | `kubectl -n monitoring get svc -l app.kubernetes.io/part-of=thanos` |
 | Two compactors corrupting the bucket | StatefulSet with 1 replica, `OrderedReady`; alert `ThanosCompactMultipleRunning` | [`base/compact.yaml`](base/compact.yaml), [`base/prometheusrule.yaml`](base/prometheusrule.yaml) | `promtool check rules` |
 | Container privilege | PSS restricted: non-root 1001, `RuntimeDefault` seccomp, drop ALL, read-only root FS, no SA token | Pod and container `securityContext` (unchanged by the lab overlay) | Restricted-profile check on the rendered manifests |
 | Image tampering | Tag + multi-arch index digest | All four Thanos containers | `kubectl get pods -o jsonpath` shows the digest |
-| Bucket data deleted by mistake | Only the compactor deletes; prod lifecycle backstop at 35 days | IAM / S3 identity + compactor retention | — |
+| Bucket data deleted by mistake | Only the compactor deletes; lifecycle backstop at 35 days | IAM + compactor retention | — |
 
 **Not protected:** anyone who can reach port 10902 of thanos-query inside the allowed sources can read all metrics;
 Grafana's own authentication is the user-facing control.
@@ -267,19 +278,21 @@ Grafana's own authentication is the user-facing control.
 | Logs | stdout (`logfmt`), collected by the cluster logging agent |
 | Restart | Any pod can be deleted; prod query and store are HA, the lab has one of each (short gap), the compactor resumes from the bucket state |
 | Compactor halted | Read its log for the block ULID; mark the block with `thanos tools bucket mark --marker=no-compact-mark.json`, or delete the local `/data` and restart |
-| Capacity | Prod `gcloud storage du -s gs://thanos-metrics-$PROJECT_ID`; lab SeaweedFS disk usage (shared with Tempo); store memory via `go_memstats_heap_inuse_bytes` |
+| Capacity | `gcloud storage du -s gs://<THANOS_BUCKET>`; store memory via `go_memstats_heap_inuse_bytes` |
 | Upgrade | Bump the tag and digest in `base/query.yaml`, `base/store.yaml`, `base/compact.yaml` and the kps `prometheusSpec.thanos.image` together; read the Thanos release notes; `kubectl apply -k` and `helm upgrade`; roll back by reverting the commit |
-| Backup | The bucket is the backup of Prometheus; prod: keep soft delete or copy to a second bucket with `thanos tools bucket replicate`; lab: none (in-cluster disk) |
+| Backup | The bucket is the backup of Prometheus; keep soft delete or copy to a second bucket with `thanos tools bucket replicate` |
+| Object store changed | `scripts/deploy.sh prometheus` restarts the sidecar (deletes the Prometheus pod), `thanos-store` and `thanos-compact` when Secret `thanos-objstore` changes: they read `objstore.yml` only at start |
 
 ## 🛠️ Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Prometheus pods `CreateContainerConfigError` | Secret `thanos-objstore` missing | Install step 2 (prod) or `scripts/deploy.sh` (lab) |
-| Sidecar logs `403` / `storage.objects.create` denied (prod) | Bucket IAM grant missing or wrong KSA name | Re-run `infra/create-gcs-bucket.sh`; the KSA must be `prometheus-kube-prometheus-prometheus` |
-| Sidecar logs `could not find default credentials` (prod) | Node pool without the GKE metadata server | Enable Workload Identity on the cluster and node pool |
-| Sidecar/store logs `connection refused` or `i/o timeout` to `seaweedfs.object-storage:8333` (lab) | SeaweedFS down or its NetworkPolicy does not admit `monitoring` | Check the `seaweedfs` pod; allow 8333 from `prometheus`, `thanos-store`, `thanos-compact` |
-| `AccessDenied` from S3 (lab) | Secret key does not match the SeaweedFS identity | Re-create both with `scripts/deploy.sh` (it writes the identity and the Secret together) |
+| Prometheus pods `CreateContainerConfigError` | Secret `thanos-objstore` missing | Install step 2 or `scripts/deploy.sh prometheus` |
+| Sidecar logs `403` / `storage.objects.create` denied | Bucket IAM grant missing or wrong KSA name | Re-run `infra/create-gcs-bucket.sh` (same `ACCESS_MODE`); the KSA must be `prometheus-kube-prometheus-prometheus` |
+| Sidecar logs `could not find default credentials` | Node pool without the GKE metadata server | Enable Workload Identity on the cluster and node pool |
+| Sidecar/store still use the old bucket after a Secret change | They read `objstore.yml` only at start | Re-run `scripts/deploy.sh prometheus` (restarts them on change) or restart the Prometheus pod, `thanos-store`, `thanos-compact` |
+| Sidecar/store logs `connection refused` or `i/o timeout` to `seaweedfs.object-storage:8333` (SeaweedFS fallback) | SeaweedFS down or its NetworkPolicy does not admit `monitoring` | Check the `seaweedfs` pod; allow 8333 from `prometheus`, `thanos-store`, `thanos-compact` |
+| `AccessDenied` from S3 (SeaweedFS fallback) | Secret key does not match the SeaweedFS identity | Re-create both with `scripts/deploy.sh` (it writes the identity and the Secret together) |
 | Grafana shows only ~2 days | Store gateway not discovered or not ready | `/api/v1/stores` on thanos-query; check `thanos-store` readiness and NetworkPolicy |
 | Doubled series in Grafana (prod) | Dedup off | `--query.replica-label=prometheus_replica` in [`base/query.yaml`](base/query.yaml); query with dedup on |
 | Bucket keeps growing | Compactor halted or down | Alerts `ThanosCompactHalted` / `ThanosCompactIsDown`; see Operations |
@@ -308,8 +321,7 @@ Grafana's own authentication is the user-facing control.
 
 Prod `kubectl delete -k helm/thanos` (lab `kubectl delete -k helm/thanos/overlays/lab`), then
 `kubectl -n monitoring delete pvc -l 'app.kubernetes.io/name in (thanos-store,thanos-compact)'`.
-Prod bucket data stays until deleted with `gcloud storage rm -r gs://thanos-metrics-$PROJECT_ID` (irreversible); lab
-data goes with the SeaweedFS PVC.
+Bucket data stays until deleted with `gcloud storage rm -r gs://<THANOS_BUCKET>` (irreversible).
 
 ## 🔗 References
 

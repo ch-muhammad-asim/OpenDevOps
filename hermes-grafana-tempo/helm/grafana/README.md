@@ -8,7 +8,7 @@ service's RED metrics, and to see the service graph.
 the release running on the lab cluster (same settings and requests; it adds image digests, stricter security headers,
 spread constraints and the Prometheus and Tempo URLs through environment variables). Both profiles point the
 Prometheus data source at the Thanos querier; the lab switch from Prometheus `:9090` to Thanos is live (2026-11-08:
-data source healthy, `PROFILE=lab scripts/verify.sh` 32 PASS, 0 failures), and the lab keeps its SQLite database on a
+data source healthy; Thanos on GCS, `PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures), and the lab keeps its SQLite database on a
 1Gi PVC. The **production** profile (`values.yaml`
 alone: 2 replicas on an external database) passes `helm lint`, `helm template` and kubeconform (Kubernetes 1.36,
 strict); it has not been installed yet.
@@ -38,7 +38,7 @@ strict); it has not been installed yet.
 | Database | External PostgreSQL/MySQL from Secret `grafana-db` | SQLite on a 1Gi PVC `standard-rwo` (service accounts, tokens, UI dashboards and annotations survive restarts) |
 | Deployment strategy | Rolling update (chart default) | `Recreate` (RWO disk, one replica: the old pod releases it first); no root `init-chown-data` container (fsGroup 472) |
 | Alerting HA | Gossip on 9094 via `grafana-headless` | Off (`ha_peers: ""`) |
-| Prometheus data source URL (`PROMETHEUS_QUERY_URL`) | `http://thanos-query.monitoring:10902` (Thanos: 30 days from GCS, HA pair deduplicated) | Same URL (Thanos: 30 days from in-cluster SeaweedFS S3, one Prometheus) |
+| Prometheus data source URL (`PROMETHEUS_QUERY_URL`) | `http://thanos-query.monitoring:10902` (Thanos: 30 days from GCS, HA pair deduplicated) | Same URL (Thanos: 30 days from GCS, one Prometheus) |
 | Tempo data source URL (`TEMPO_QUERY_URL`) | `http://tempo-query-frontend.observability:3200` (tempo-distributed) | `http://tempo.observability:3200` (single binary) |
 | Grafana image | `grafana/grafana:13.3.0-distroless` + digest | `grafana/grafana:13.3.0` + digest (the image the lab runs) |
 | Grafana requests / memory limit | 250m, 512Mi / 1Gi | 100m, 256Mi / 512Mi |

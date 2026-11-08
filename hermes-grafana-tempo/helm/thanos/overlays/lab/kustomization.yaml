@@ -1,9 +1,8 @@
 # Lab profile for Thanos: the production base (../../base) with one replica each, small requests, no PDBs and
-# smaller PVCs, sized for 3 x e2-standard-2. Object store: in-cluster SeaweedFS S3 (helm/seaweedfs),
-# because the lab account cannot grant bucket IAM. Same Secret name and key as production
-# (monitoring/thanos-objstore, objstore.yml), written by scripts/deploy.sh with "type: S3", bucket
-# thanos-metrics, endpoint seaweedfs.object-storage:8333 and the thanos S3 identity; nothing here
-# changes for the object store. Retention (30d raw / 5m / 1h) and downsampling stay as in production.
+# smaller PVCs, sized for 3 x e2-standard-2. Object store: GCS via Workload Identity, as in production.
+# Same Secret name and key as production (monitoring/thanos-objstore, objstore.yml), written by
+# scripts/deploy.sh with "type: GCS" and the bucket name only (lab: thanos-metrics-<suffix>, THANOS_BUCKET);
+# nothing here changes for the object store. Retention (30d raw / 5m / 1h) and downsampling stay as in production.
 #   kubectl apply -k helm/thanos/overlays/lab
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

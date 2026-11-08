@@ -11,6 +11,7 @@ resources:
   - pdb.yaml
   - networkpolicy.yaml
   - networkpolicy-observability.yaml
+  - opencode-bridge.yaml
   - prometheusrule.yaml
 configMapGenerator:
   # Hermes config.yaml; the name gets a content hash, so a config change rolls the pod.

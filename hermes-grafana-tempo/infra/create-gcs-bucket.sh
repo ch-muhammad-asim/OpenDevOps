@@ -9,7 +9,9 @@
 # Bucket: uniform bucket-level access, public access prevention, versioning OFF, lifecycle rule
 # deleting objects after LIFECYCLE_DAYS (default 33) as a backstop behind the application's own
 # retention (Tempo block_retention 720h, Thanos compactor 30d).
-# Role: roles/storage.objectUser (objects: create/get/list/update/delete; no bucket admin).
+# Roles (ROLES, space-separated): default roles/storage.objectUser (objects: create/get/list/update/delete;
+# no bucket admin). Tempo also needs roles/storage.bucketViewer (storage.buckets.get: it reads the bucket
+# attributes at start); infra/create-tempo-bucket.sh adds it. Every role gets the same scope below.
 #
 # ACCESS_MODE (least privilege first):
 #   bucket       (default) role bound ON THE BUCKET to each KSA principal
@@ -30,7 +32,7 @@ BUCKET="${BUCKET:?set BUCKET (one dedicated bucket per environment)}"
 KSAS="${KSAS:?set KSAS to space-separated <namespace>/<serviceaccount> pairs}"
 LIFECYCLE_DAYS="${LIFECYCLE_DAYS:-33}"
 ACCESS_MODE="${ACCESS_MODE:-bucket}"
-ROLE="roles/storage.objectUser"
+ROLES="${ROLES:-roles/storage.objectUser}"
 [ -n "$PROJECT_ID" ] || { echo "PROJECT_ID is not set" >&2; exit 1; }
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 POOL="$PROJECT_ID.svc.id.goog"
@@ -49,21 +51,23 @@ gcloud storage buckets update "gs://$BUCKET" --lifecycle-file="$lc" --no-version
 gsa=""
 case "$ACCESS_MODE" in
   bucket)
-    for k in $KSAS; do
-      gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member="$(principal "$k")" --role="$ROLE" >/dev/null
-    done ;;
+    for k in $KSAS; do for r in $ROLES; do
+      gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member="$(principal "$k")" --role="$r" >/dev/null
+    done; done ;;
   conditional)
-    for k in $KSAS; do
-      gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$(principal "$k")" --role="$ROLE" \
+    for k in $KSAS; do for r in $ROLES; do
+      gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="$(principal "$k")" --role="$r" \
         --condition="$COND" >/dev/null
-    done ;;
+    done; done ;;
   gsa)
     GSA_NAME="${GSA_NAME:?ACCESS_MODE=gsa needs GSA_NAME (dedicated, e.g. tempo-gcs)}"
     gsa="$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
     gcloud iam service-accounts describe "$gsa" >/dev/null 2>&1 \
       || gcloud iam service-accounts create "$GSA_NAME" --project="$PROJECT_ID" --display-name="GCS access for $BUCKET"
-    gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$gsa" --role="$ROLE" \
-      --condition="$COND" >/dev/null
+    for r in $ROLES; do
+      gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$gsa" --role="$r" \
+        --condition="$COND" >/dev/null
+    done
     for k in $KSAS; do
       gcloud iam service-accounts add-iam-policy-binding "$gsa" --role=roles/iam.workloadIdentityUser \
         --member="serviceAccount:${POOL}[${k%%/*}/${k##*/}]" >/dev/null
@@ -71,6 +75,6 @@ case "$ACCESS_MODE" in
   *) echo "ACCESS_MODE must be bucket, conditional or gsa" >&2; exit 2 ;;
 esac
 
-echo "gs://$BUCKET ready: $ROLE for [$KSAS] via $ACCESS_MODE, lifecycle ${LIFECYCLE_DAYS}d, versioning off" >&2
+echo "gs://$BUCKET ready: $ROLES for [$KSAS] via $ACCESS_MODE, lifecycle ${LIFECYCLE_DAYS}d, versioning off" >&2
 echo "$BUCKET"
 echo "$gsa"

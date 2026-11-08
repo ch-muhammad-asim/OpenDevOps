@@ -1,5 +1,5 @@
 # Thanos query, store gateway and compactor for 30-day metrics: the production manifests (GCS).
-# Applied through ../kustomization.yaml (production) or ../overlays/lab (SeaweedFS S3).
+# Applied through ../kustomization.yaml (production) or ../overlays/lab (lab sizing; same GCS object store).
 # The sidecar runs inside the Prometheus pods (helm/kube-prometheus-stack/values.yaml).
 # Needs: namespace monitoring, the Prometheus operator CRDs, Secret monitoring/thanos-objstore
 # (key objstore.yml, see README "Install") and the Workload Identity grant on the bucket.

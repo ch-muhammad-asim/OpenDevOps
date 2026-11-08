@@ -6,8 +6,9 @@
 #                                     #   traefik tempo collector grafana dashboards edge dns
 #
 # Env: PROFILE=prod|lab (default prod), TLS_MODE=cloudflare|letsencrypt (default cloudflare),
-#      OBJECT_STORE=gcs|seaweedfs (prod gcs, lab seaweedfs), TEMPO_STORAGE=gcs|s3|local (follows
-#      OBJECT_STORE), KAFKA_BOOTSTRAP (prod Tempo).
+#      OBJECT_STORE=gcs|seaweedfs (default gcs), TEMPO_STORAGE=gcs|s3|local (follows OBJECT_STORE),
+#      TEMPO_BUCKET / THANOS_BUCKET (default tempo-traces-<project>, thanos-metrics-<project>),
+#      ACCESS_MODE=bucket|conditional|gsa (infra/create-gcs-bucket.sh), KAFKA_BOOTSTRAP (prod Tempo).
 # Inputs (files, never values on the command line):
 #   CF_TOKEN_FILE   Cloudflare API token file, Zone:DNS:Edit on the zone (chmod 600). Required by the
 #                   `dns` step (and `certmanager` with TLS_MODE=letsencrypt); no default.
@@ -23,11 +24,12 @@ ZONE="${ZONE:-saqlainmushtaq.com}"
 # PROFILE=lab: values.yaml + values-lab.yaml overlays sized for 3 x e2-standard-2; Tempo = single binary.
 PROFILE="${PROFILE:-prod}"
 case "$PROFILE" in prod|lab) ;; *) echo "PROFILE must be prod or lab" >&2; exit 2 ;; esac
-# (TEMPO_STORAGE: gcs = bucket via Workload Identity, s3 = SeaweedFS (lab default), local = PVC only.)
+# (TEMPO_STORAGE: gcs = bucket via Workload Identity (default), s3 = SeaweedFS, local = PVC only.)
 # Object storage for Tempo blocks and Thanos (30-day retention). All software is free/OSS.
-#   gcs:       production, dedicated GCS buckets, roles/storage.objectUser via Workload Identity (infra/).
-#   seaweedfs: lab, in-cluster SeaweedFS S3 on a PVC (helm/seaweedfs), when GCS IAM cannot be granted.
-if [ "$PROFILE" = lab ]; then OBJECT_STORE="${OBJECT_STORE:-seaweedfs}"; else OBJECT_STORE="${OBJECT_STORE:-gcs}"; fi
+#   gcs:       default (lab and prod), dedicated GCS buckets, roles/storage.objectUser via Workload Identity (infra/).
+#   seaweedfs: optional fallback, in-cluster SeaweedFS S3 on a PVC (helm/seaweedfs), for clusters without
+#              cloud object storage.
+OBJECT_STORE="${OBJECT_STORE:-gcs}"
 case "$OBJECT_STORE" in gcs|seaweedfs) ;; *) echo "OBJECT_STORE must be gcs or seaweedfs" >&2; exit 2 ;; esac
 # Tempo trace storage follows the object store (s3 = SeaweedFS); local = PVC only (no object store).
 if [ "$OBJECT_STORE" = gcs ]; then TEMPO_STORAGE="${TEMPO_STORAGE:-gcs}"; else TEMPO_STORAGE="${TEMPO_STORAGE:-s3}"; fi
@@ -94,7 +96,7 @@ step_traefik() {
     -n traefik "${TRAEFIK_VALS[@]}" --wait --timeout 10m
 }
 
-# Lab object store: SeaweedFS S3 with one identity per bucket. Credentials are generated once into
+# Optional fallback object store (OBJECT_STORE=seaweedfs): SeaweedFS S3 with one identity per bucket. Credentials are generated once into
 # Secrets (never printed, never in git) and reused on re-runs; all three Secrets are written together.
 step_objectstore() {
   [ "$OBJECT_STORE" = seaweedfs ] || { log "object store: GCS (buckets created by the tempo/prometheus steps)"; return 0; }
@@ -149,26 +151,38 @@ step_prometheus() {
     # 30-day metrics in GCS via Thanos (helm/thanos/README.md): dedicated bucket, roles/storage.objectUser
     # for the sidecar (Prometheus SA), store and compactor KSAs via Workload Identity. The Secret must exist
     # before Prometheus starts (the sidecar mounts it). 35-day lifecycle: 30d retention + 48h delete-delay.
-    local out bucket d
+    local out bucket d old
     # ACCESS_MODE=gsa is wired for Tempo only (one KSA annotation); Thanos needs bucket or conditional.
     [ "${ACCESS_MODE:-bucket}" != gsa ] || { echo "error: ACCESS_MODE=gsa is Tempo-only; use bucket or conditional for Thanos" >&2; exit 2; }
     out="$(BUCKET="${THANOS_BUCKET:-thanos-metrics-$PROJECT_ID_FOR_BUCKETS}" LIFECYCLE_DAYS=35 \
       KSAS="monitoring/prometheus-kube-prometheus-prometheus monitoring/thanos-store monitoring/thanos-compact" \
-      "$ROOT/infra/create-gcs-bucket.sh")"
-    bucket="$(printf '%s\n' "$out" | tail -n2 | head -n1)"
+      "$ROOT/infra/create-gcs-bucket.sh"; echo .)"   # "." keeps the (empty) last line: $() strips trailing newlines
+    bucket="$(printf '%s\n' "$out" | tail -n3 | head -n1)"
     d="$(mktemp -d)"; chmod 700 "$d"
     printf 'type: GCS\nconfig:\n  bucket: %s\n' "$bucket" > "$d/objstore.yml"   # no key: Workload Identity
+    old="$(kubectl -n monitoring get secret thanos-objstore -o jsonpath='{.data.objstore\.yml}' 2>/dev/null || true)"
     kubectl -n monitoring create secret generic thanos-objstore --from-file=objstore.yml="$d/objstore.yml" \
       --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    # The sidecar, store and compactor read objstore.yml only at start: restart them when it changed.
+    [ -z "$old" ] || [ "$old" = "$(base64 -w0 < "$d/objstore.yml")" ] || OBJSTORE_CHANGED=1
     rm -rf "$d"
   fi
   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version "$KPS_VERSION" \
     -n monitoring "${V[@]}" --wait --timeout 15m
   [ "$OBJECT_STORE" = seaweedfs ] && apply_seaweedfs
-  # Thanos query, store-gateway, compactor: prod base (GCS) or the lab overlay (1 replica, SeaweedFS S3).
+  # Thanos query, store-gateway, compactor: prod base or the lab overlay (1 replica); objstore from the Secret.
   if [ "$PROFILE" = prod ]; then log "Thanos (helm/thanos)"; kubectl apply -k "$HELM/thanos"
   else log "Thanos (helm/thanos/overlays/lab)"; kubectl apply -k "$HELM/thanos/overlays/lab"; fi
   kubectl -n monitoring rollout status deploy/thanos-query --timeout 10m
+  if [ "${OBJSTORE_CHANGED:-0}" = 1 ]; then
+    log "object store changed: restarting the Thanos sidecar (Prometheus), store and compactor"
+    # The operator owns the Prometheus StatefulSet (it would revert a restart annotation): delete the pod.
+    kubectl -n monitoring delete pod prometheus-prometheus-kube-prometheus-prometheus-0
+    for s in thanos-store thanos-compact; do kubectl -n monitoring rollout restart "statefulset/$s"; done
+    for s in prometheus-prometheus-kube-prometheus-prometheus thanos-store thanos-compact; do
+      kubectl -n monitoring rollout status "statefulset/$s" --timeout 10m
+    done
+  fi
 }
 
 step_tempo() {
@@ -176,8 +190,8 @@ step_tempo() {
   if [ "$TEMPO_STORAGE" = gcs ]; then
     # Dedicated bucket + roles/storage.objectUser on it for observability/tempo via Workload Identity
     # (ACCESS_MODE=bucket|conditional|gsa, see infra/create-gcs-bucket.sh). No keys, no broad roles.
-    out="$("$ROOT/infra/create-tempo-bucket.sh")"
-    bucket="$(printf '%s\n' "$out" | tail -n2 | head -n1)"; gsa="$(printf '%s\n' "$out" | tail -n1)"
+    out="$("$ROOT/infra/create-tempo-bucket.sh"; echo .)"   # "." keeps the empty GSA line: $() strips trailing newlines
+    bucket="$(printf '%s\n' "$out" | tail -n3 | head -n1)"; gsa="$(printf '%s\n' "$out" | tail -n2 | head -n1)"
     # Only ACCESS_MODE=gsa returns a (dedicated) Google service account to impersonate.
     [ -n "$gsa" ] && wi=(--set-string "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=$gsa")
   fi

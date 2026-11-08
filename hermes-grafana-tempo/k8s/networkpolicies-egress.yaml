@@ -244,7 +244,7 @@ spec:
       app.kubernetes.io/instance: tempo
   policyTypes: [Egress]
   egress:
-    # Lab object store: SeaweedFS S3 (helm/seaweedfs), OBJECT_STORE=seaweedfs.
+    # Optional fallback object store only (OBJECT_STORE=seaweedfs, helm/seaweedfs); unused with GCS (default).
     - to:
         - namespaceSelector:
             matchLabels:

@@ -24,7 +24,7 @@ resources:
     memory: 512Mi
 
 env:
-  # Same as production: Thanos query (30 days from SeaweedFS S3 via thanos-store + the last 2 days from
+  # Same as production: Thanos query (30 days from GCS via thanos-store + the last 2 days from
   # the Prometheus sidecar; helm/thanos/overlays/lab). Restated so the lab never falls back to :9090.
   PROMETHEUS_QUERY_URL: http://thanos-query.monitoring:10902
   TEMPO_QUERY_URL: http://tempo.observability:3200   # lab: Tempo single binary (helm/tempo/)

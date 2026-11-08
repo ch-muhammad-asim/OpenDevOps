@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Remove everything this project created (platform, apps, Hermes Agent). Safe to re-run.
 #   scripts/teardown.sh            # uninstall releases + namespaces, keep the cluster
-#   scripts/teardown.sh --cluster  # also delete the Tempo bucket and the GKE cluster (asks to confirm each)
+#   scripts/teardown.sh --cluster  # also delete the Tempo and Thanos buckets and the GKE cluster (asks to confirm each)
+# Env: TEMPO_BUCKET, THANOS_BUCKET (default tempo-traces-<project>, thanos-metrics-<project>).
 # DNS records are left in place; delete them in Cloudflare if the hostnames are not reused.
 set -euo pipefail
 
@@ -22,11 +23,12 @@ kubectl delete clusterissuer letsencrypt-staging letsencrypt-prod --ignore-not-f
   | xargs -r kubectl delete
 
 if [ "${1:-}" = "--cluster" ]; then
-  TEMPO_BUCKET="${TEMPO_BUCKET:-tempo-traces-$PROJECT_ID}"
-  if gcloud storage buckets describe "gs://$TEMPO_BUCKET" >/dev/null 2>&1; then
-    read -r -p "Also delete the Tempo trace bucket and all its objects? [y/N] " b
-    [ "$b" = y ] && gcloud storage rm -r "gs://$TEMPO_BUCKET"
-  fi
+  for bucket in "${TEMPO_BUCKET:-tempo-traces-$PROJECT_ID}" "${THANOS_BUCKET:-thanos-metrics-$PROJECT_ID}"; do
+    gcloud storage buckets describe "gs://$bucket" >/dev/null 2>&1 || continue
+    read -r -p "Also delete bucket gs://$bucket and all its objects? [y/N] " b
+    if [ "$b" = y ]; then gcloud storage rm -r "gs://$bucket"; fi
+  done
+  # IAM bindings for the bucket principals (infra/create-gcs-bucket.sh) are left in place; remove them if unused.
   read -r -p "Delete GKE cluster $CLUSTER_NAME in $ZONE? Type the name to confirm: " ans
   [ "$ans" = "$CLUSTER_NAME" ] || { echo "aborted"; exit 1; }
   gcloud container clusters delete "$CLUSTER_NAME" --project="$PROJECT_ID" --zone="$ZONE" --quiet

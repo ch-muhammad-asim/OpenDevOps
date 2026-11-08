@@ -5,7 +5,7 @@
 # Only what differs from production: one replica each, no PDBs, a 40Gi PVC with an 8GiB cap, small
 # requests (Prometheus and its Thanos sidecar), no alert receivers (and so no receivers Secret).
 # Same as production: 2-day local TSDB + Thanos sidecar (30 days via helm/thanos/overlays/lab, object
-# store = in-cluster SeaweedFS S3 through the same Secret monitoring/thanos-objstore), images/digests,
+# store = GCS via Workload Identity through the same Secret monitoring/thanos-objstore), images/digests,
 # selectors, remote-write receiver, exemplars, security contexts and the route tree.
 
 prometheus:
@@ -19,10 +19,10 @@ prometheus:
     enabled: true
   prometheusSpec:
     replicas: 1
-    # Sidecar uploads each 2h block to bucket thanos-metrics on SeaweedFS S3. objstore.yml in the
-    # Secret (written by scripts/deploy.sh, never in Git) is "type: S3" with endpoint
-    # seaweedfs.object-storage:8333, insecure: true and the thanos S3 access key; image, version and
-    # blockSize come from values.yaml. Only the requests are smaller.
+    # Sidecar uploads each 2h block to the GCS bucket thanos-metrics-<suffix> via Workload Identity.
+    # objstore.yml in the Secret (written by scripts/deploy.sh, never in Git) is "type: GCS" with the
+    # bucket name only, no key; image, version and blockSize come from values.yaml. Only the requests
+    # are smaller.
     thanos:
       objectStorageConfig:
         existingSecret:

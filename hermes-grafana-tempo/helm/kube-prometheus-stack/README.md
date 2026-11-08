@@ -8,9 +8,9 @@ so a latency spike links to the trace behind it, and routes alerts by severity.
 **Status (2026-11-08, chart 93.1.0):** the **lab** profile (`values.yaml` + `values-lab.yaml`) matches the release
 running on the lab cluster (same values; it adds image digests, the route tree, anti-affinity, config-reloader
 requests of 5m / 16Mi per pod and no service account token in the Alertmanager pod).
-Both profiles keep 2 days locally plus the Thanos sidecar (30 days via [`../thanos/`](../thanos/README.md)); the lab
-uploads to in-cluster SeaweedFS S3, production to GCS. The lab switch to the sidecar (`2d` / `8GiB`) is live
-(2026-11-08: sidecar uploads ok 2, failed 0; `PROFILE=lab scripts/verify.sh` 32 PASS, 0 failures). The **production** profile (`values.yaml`
+Both profiles keep 2 days locally plus the Thanos sidecar (30 days via [`../thanos/`](../thanos/README.md)) uploading to
+a GCS bucket through Workload Identity. The lab is live on GCS (2026-11-08: bucket `thanos-metrics-<suffix>`;
+`PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures). The **production** profile (`values.yaml`
 alone: 2 days locally plus the Thanos sidecar uploading to GCS) passes
 `helm lint`, `helm template`, kubeconform (Kubernetes 1.36, strict) and `promtool`; it has not been installed on a
 multi-zone cluster yet.
@@ -20,7 +20,7 @@ multi-zone cluster yet.
 | Name | What it does (one line) | Where defined | Security role |
 |---|---|---|---|
 | Prometheus `prometheus-kube-prometheus-prometheus:9090` | Scrapes monitors in all namespaces, accepts remote write, keeps exemplars | [`values.yaml`](values.yaml) `prometheus` | Internal only; non-root UID 1000, read-only root FS |
-| Thanos sidecar (both profiles) | Uploads each 2h block to the bucket (prod GCS `thanos-metrics-<project>`, lab SeaweedFS `thanos-metrics`); serves recent data to `thanos-query` | `prometheusSpec.thanos`, `thanosService`, `thanosServiceMonitor` ([`../thanos/`](../thanos/README.md)) | Prod: KSA `prometheus-kube-prometheus-prometheus` with `roles/storage.objectUser` via Workload Identity, no keys; lab: S3 key of the `thanos` identity in Secret `thanos-objstore` |
+| Thanos sidecar (both profiles) | Uploads each 2h block to the bucket (GCS: prod `thanos-metrics-<project>`, lab `thanos-metrics-<suffix>`); serves recent data to `thanos-query` | `prometheusSpec.thanos`, `thanosService`, `thanosServiceMonitor` ([`../thanos/`](../thanos/README.md)) | KSA `prometheus-kube-prometheus-prometheus` with `roles/storage.objectUser` via Workload Identity, no keys (both profiles) |
 | Alertmanager `prometheus-kube-prometheus-alertmanager:9093` | Groups, inhibits and routes alerts by severity to Slack / PagerDuty | `alertmanager` | Credentials only as files from Secret `alertmanager-receivers` |
 | Prometheus operator | Turns ServiceMonitor/PodMonitor/PrometheusRule objects into config; serves the admission webhook | `prometheusOperator` | Cluster-scoped RBAC from the chart |
 | config-reloader | Reloads Prometheus/Alertmanager when their config changes | `prometheusOperator.prometheusConfigReloader` | Sidecar, same restricted context |
@@ -41,9 +41,9 @@ Other alert rules in this repo, picked up the same way: Tempo mixin
 | Setting | Production (`values.yaml`) | Lab (`+ values-lab.yaml`) |
 |---|---|---|
 | Prometheus replicas / PDB | 2, hard anti-affinity per node, spread over zones / `minAvailable: 1` | 1 / none |
-| Prometheus retention / size cap / PVC | `2d` / `85GiB` / 100Gi `standard-rwo` (30 days in GCS via Thanos) | `2d` / `8GiB` / 40Gi `standard-rwo` (30 days in SeaweedFS S3 via Thanos; the PVC was 40Gi before and cannot shrink) |
+| Prometheus retention / size cap / PVC | `2d` / `85GiB` / 100Gi `standard-rwo` (30 days in GCS via Thanos) | `2d` / `8GiB` / 40Gi `standard-rwo` (30 days in GCS via Thanos; the PVC was 40Gi before and cannot shrink) |
 | Thanos sidecar / local compaction | Sidecar on (50m, 256Mi / 1Gi), `disableCompaction: true` | Sidecar on (10m, 64Mi / 256Mi), `disableCompaction: true` |
-| Thanos object store (Secret `thanos-objstore`, key `objstore.yml`) | `type: GCS`, bucket name only (Workload Identity) | `type: S3`, bucket `thanos-metrics`, `seaweedfs.object-storage:8333`, access key (written by `scripts/deploy.sh`) |
+| Thanos object store (Secret `thanos-objstore`, key `objstore.yml`) | `type: GCS`, bucket name only (Workload Identity) | Same: `type: GCS`, bucket name only (`thanos-metrics-<suffix>`, written by `scripts/deploy.sh`) |
 | Grafana / Hermes query endpoint | `http://thanos-query.monitoring:10902` | Same |
 | Prometheus requests / memory limit | 1 CPU, 4Gi / 8Gi | 300m, 1Gi / 1536Mi |
 | Alertmanager replicas / PDB / PVC | 2 (gossip cluster) / `minAvailable: 1` / 2Gi | 1 / none / none (emptyDir) |
@@ -65,7 +65,7 @@ sidecars (Thanos query, store and compactor: [`../thanos/`](../thanos/README.md)
 
 | Profile | Local TSDB | Long-term | Tested? |
 |---|---|---|---|
-| Lab | `retention: 2d`, `retentionSize: 8GiB` on a 40Gi PVC | Thanos: raw, 5m and 1h kept 30 days in SeaweedFS S3 (in-cluster) | ✅ Live (2026-11-08) |
+| Lab | `retention: 2d`, `retentionSize: 8GiB` on a 40Gi PVC | Thanos: raw, 5m and 1h kept 30 days in GCS; bucket lifecycle 35 days | ✅ Live (2026-11-08) |
 | Production | `retention: 2d`, `retentionSize: 85GiB` on a 100Gi PVC | Thanos: raw, 5m and 1h kept 30 days in GCS; bucket lifecycle 35 days | Rendered and validated only |
 
 Measured lab ingest (2026-11-08): 3,429 samples/s, 150,952 head series, so 8.89 billion samples and ~12–18 GB raw per

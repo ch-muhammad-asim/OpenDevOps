@@ -50,7 +50,7 @@ factor 3, `min.insync.replicas=2`, `cleanup.policy=delete`, retention 24h (never
 | PrometheusRule `tempo-rollout-operator` | Alerts when the rollout-operator is down or its webhooks fail | [`prometheusrule-rollout-operator.yaml`](prometheusrule-rollout-operator.yaml) | — |
 | Per-tenant limits | Ingest rate/burst, live traces, trace size, generator series, tag-value size | `overrides.defaults` | Bounds a noisy sender and Prometheus cardinality |
 | ServiceMonitors (9) | Prometheus scrapes every component and memcached | `metaMonitoring.serviceMonitor` | — |
-| GCS bucket `tempo-traces-<project>` | Trace blocks, retention enforced by Tempo; lifecycle delete after 33 days as backstop | `storage.trace.gcs`, [`../../infra/create-tempo-bucket.sh`](../../infra/create-tempo-bucket.sh) | `roles/storage.objectUser` on the bucket for the WIF principal `observability/tempo`, no keys |
+| GCS bucket `tempo-traces-<project>` | Trace blocks, retention enforced by Tempo; lifecycle delete after 33 days as backstop | `storage.trace.gcs`, [`../../infra/create-tempo-bucket.sh`](../../infra/create-tempo-bucket.sh) | `roles/storage.objectUser` + `roles/storage.bucketViewer` on the bucket for the WIF principal `observability/tempo`, no keys |
 
 ## 🗓️ Retention and cost
 
@@ -103,19 +103,19 @@ allocatable); use [`../tempo/`](../tempo/) there.
 
 | Step | Command | Why |
 |---|---|---|
-| 1 | `infra/create-tempo-bucket.sh` | Creates bucket `tempo-traces-<project>` (uniform access, public access prevention, versioning off) with a 33-day `Delete` lifecycle backstop (above Tempo's 720h retention) and grants `roles/storage.objectUser` on this bucket to the WIF principal of KSA `observability/tempo` (`ACCESS_MODE=bucket`); prints the bucket name |
-| 2 | Check the binding: `gcloud storage buckets get-iam-policy gs://$TEMPO_BUCKET` | A `principal://…/subject/ns/observability/sa/tempo` member with `roles/storage.objectUser`; no Google service account involved |
+| 1 | `infra/create-tempo-bucket.sh` | Creates bucket `tempo-traces-<project>` (uniform access, public access prevention, versioning off) with a 33-day `Delete` lifecycle backstop (above Tempo's 720h retention) and grants `roles/storage.objectUser` + `roles/storage.bucketViewer` on this bucket to the WIF principal of KSA `observability/tempo` (`ACCESS_MODE=bucket`); prints the bucket name. `bucketViewer`: Tempo reads the bucket attributes at start (`storage.buckets.get`), which `objectUser` lacks |
+| 2 | Check the binding: `gcloud storage buckets get-iam-policy gs://$TEMPO_BUCKET` | A `principal://…/subject/ns/observability/sa/tempo` member with `roles/storage.objectUser` and `roles/storage.bucketViewer`; no Google service account involved |
 | 3 | Create topic `tempo-traces` with the settings above on the Kafka service | Production keeps auto-creation off |
 | 4 | `kubectl -n observability create secret generic tempo-kafka --from-literal=username="$KAFKA_USER" --from-file=password=/path/to/kafka-password` | SASL credentials; never in Git or Helm values |
 | 5 | `helm upgrade --install tempo grafana-community/tempo-distributed --version 3.27.0 -n observability --create-namespace -f helm/tempo-distributed/values.yaml --set storage.trace.gcs.bucket_name="$TEMPO_BUCKET" --set ingest.kafka.address="$KAFKA_BOOTSTRAP"` | Deploy (after kube-prometheus-stack, which provides the ServiceMonitor CRD) |
 | 5b | `kubectl apply -f helm/tempo-distributed/prometheusrule-rollout-operator.yaml` | Alerts for the rollout-operator (see [Rollout-operator](#-rollout-operator)) |
 | 6 | Collector: production [`../otel-collector/values.yaml`](../otel-collector/values.yaml) already exports to `tempo-distributor`; Grafana: use the production data source URL above | The single-binary Service `tempo` does not exist in this profile |
 
-`scripts/deploy.sh` (`PROFILE=prod`, `KAFKA_BOOTSTRAP` set) runs steps 1 and 5 (lifecycle default 33 days). If the
-account cannot read bucket IAM, use `ACCESS_MODE=conditional` (project-level binding with an IAM condition limited to
+`scripts/deploy.sh` (`PROFILE=prod`, `KAFKA_BOOTSTRAP` set) runs steps 1 and 5 (lifecycle default 33 days). Alternatives:
+`ACCESS_MODE=conditional` (project-level binding with an IAM condition limited to
 this bucket and its objects) or `ACCESS_MODE=gsa` (a dedicated Google service account, never a default compute
 account, impersonated via `roles/iam.workloadIdentityUser`; deploy.sh annotates the KSA); see
-[`../../infra/`](../../infra/README.md#-gcs-buckets-production).
+[`../../infra/`](../../infra/README.md#-gcs-buckets-both-profiles).
 
 Test path (no managed Kafka): `kubectl apply -f helm/tempo-distributed/kafka-test.yaml`, then step 5 with
 `-f helm/tempo-distributed/values-kafka-test.yaml` added and without `--set ingest.kafka.address`.
@@ -184,7 +184,7 @@ maintenance, then revert, because without the webhooks live-store zones are not 
 
 | Threat | Control | How it's enforced |
 |---|---|---|
-| Leaked storage keys | No keys: `roles/storage.objectUser` on the bucket for the WIF principal of KSA `observability/tempo` | `serviceAccount`, install step 1 |
+| Leaked storage keys | No keys: `roles/storage.objectUser` + `roles/storage.bucketViewer` on the bucket for the WIF principal of KSA `observability/tempo` | `serviceAccount`, install step 1 |
 | Container escape / privilege | PSS restricted: non-root UID/GID 10001 (the image's user; pod, container and `fsGroup` agree), seccomp `RuntimeDefault`, drop ALL, read-only root FS, no privilege escalation | `tempo.podSecurityContext`, `tempo.securityContext`, `rollout_operator.*` |
 | Image tampering | Every image pinned by tag **and** multi-arch index digest | `*.image.tag` |
 | Kafka credential exposure | Secret `tempo-kafka` injected as env, not written to the ConfigMap; TLS on. **Partly protected:** the chart expands the env vars into container args (`-ingest.sasl-password=$(TEMPO_KAFKA_SASL_PASSWORD)`, upstream behaviour), so the password is in the process command line, readable by anyone who can exec into a Kafka-client pod or read the node's process table | `ingest.kafka.sasl.existingSecret`, `ingest.kafka.tls`; restrict `pods/exec` in `observability` with RBAC |
@@ -198,7 +198,7 @@ maintenance, then revert, because without the webhooks live-store zones are not 
 | HA sizing | Regional cluster, ≥ 2 zones (live-store zones use `topology.kubernetes.io/zone`), enough nodes per zone for the hostname spread; requests above (≈ 14.2 vCPU / 55 GiB) + 30% headroom |
 | HA sizing | Kafka partitions = `liveStore.replicas` = `blockBuilder.replicas`; scale live-stores only with the [safe scale-down procedure](https://grafana.com/docs/tempo/latest/set-up-for-tracing/setup-tempo/configure-kafka/#scale-safely), never an HPA; distributor/querier HPAs need metrics-server |
 | Kafka | External Kafka-compatible service: RF 3, `min.insync.replicas=2`, TLS + SCRAM-SHA-512, topic `tempo-traces` pre-created (settings above), auto-creation off; Secret `tempo-kafka` from a secret manager; the test broker in `kafka-test.yaml` is never production |
-| Storage access | `roles/storage.objectUser` on the bucket only for the WIF principal `ns/observability/sa/tempo` (`ACCESS_MODE=bucket`); no keys, no default compute account, no unconditioned project-wide roles |
+| Storage access | `roles/storage.objectUser` + `roles/storage.bucketViewer` on the bucket only for the WIF principal `ns/observability/sa/tempo` (`ACCESS_MODE=bucket`); no keys, no default compute account, no unconditioned project-wide roles |
 | Backups | The bucket is the system of record for traces. Versioning is off by design (compaction rewrites blocks constantly); GCS soft delete (default 7 days) covers accidental deletes; Bucket Lock or a retention policy only if compliance requires it. Live-store PVCs and Kafka are rebuilt from Kafka/GCS, no backup |
 | Access logs and cost | Cloud Audit Logs Data Access (`DATA_READ`, `DATA_WRITE`) for Cloud Storage; a budget alert covering the bucket |
 | Retention | Tempo deletes blocks after 30 days (`block_retention: 720h`, backend-scheduler); bucket lifecycle `Delete` at 33 days as a backstop (`LIFECYCLE_DAYS=31`, the default) |
@@ -221,7 +221,8 @@ maintenance, then revert, because without the webhooks live-store zones are not 
 | Live-store pods `Pending` | Fewer than 2 zones (zonal cluster) | Use a regional cluster, or set `liveStore.zoneAwareReplication.topologyKey: kubernetes.io/hostname` |
 | `MESSAGE_TOO_LARGE` from distributor | Topic/broker limit below 16 MB | `max.message.bytes=16000000` |
 | Kafka auth/TLS errors | Wrong SASL mechanism, Secret keys or CA | Secret `tempo-kafka` keys `username`/`password`; set `ingest.kafka.tls.caPath` for a private CA |
-| GCS `403` | `roles/storage.objectUser` binding missing for the WIF principal | Re-run install step 1; check project number, namespace and KSA name `tempo` |
+| GCS `403` on objects | `roles/storage.objectUser` binding missing for the WIF principal | Re-run install step 1; check project number, namespace and KSA name `tempo` |
+| Tempo crash-loops, `403` `storage.buckets.get` | `roles/storage.bucketViewer` missing (the GCS backend reads the bucket attributes at start) | Re-run install step 1 (`infra/create-tempo-bucket.sh` grants both roles) |
 | Consumer lag keeps growing | Under-sized block-builders/live-stores or GCS throttling | Add partitions + replicas together (checklist) |
 | Senders get `RATE_LIMITED` | Ingest above `rate_limit_bytes` / `burst_size_bytes` | Check the sender burst; raise the limit in [Limits](#-limits) if the traffic is legitimate |
 | `LIVE_TRACES_EXCEEDED` / `TRACE_TOO_LARGE` in `tempo_discarded_spans_total` | Too many concurrent traces per live-store, or a runaway trace | Add partitions + live-stores, or fix the instrumentation; raise the limit last |

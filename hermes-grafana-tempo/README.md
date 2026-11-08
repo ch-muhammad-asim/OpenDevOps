@@ -8,8 +8,9 @@ Tempo; Grafana shows each bug as spans, errors, latency and a service graph, and
 pipeline; its chat sends prompts only to the configured model provider, never into telemetry. **Why:** one place to see where time goes and where errors start, built only from official Helm charts and
 official OpenTelemetry SDKs, with production-grade defaults and a small lab profile.
 
-**Status:** ✅ lab profile live on GKE 1.36 (3 × `e2-standard-2`), 2026-11-08: `scripts/verify.sh` 0 failures on three
-consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 29/29 (2026-11-08; Hermes runs
+**Status:** ✅ lab profile live on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity,
+2026-11-08: `scripts/verify.sh` 0 failures on three
+consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 31/31 (2026-11-08; Hermes runs
 its production overlay). The production profile
 (tempo-distributed with GCS and Kafka, HA Prometheus, Collector HPA) renders and passes `helm lint` and
 `kubeconform -strict`; it has **not** been run on a cluster. See [Tests](#-tests).
@@ -138,7 +139,7 @@ flowchart TB
 | Grafana | UI with Prometheus, Tempo and Alertmanager data sources and the official Tempo dashboards | [`helm/grafana/`](helm/grafana/README.md) |
 | Prometheus | Metrics store; scrapes the Collector and exporters, receives Tempo's remote write, evaluates rules; keeps 2 days locally | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | Thanos | Sidecar uploads Prometheus blocks to object storage; store gateway, querier and compactor serve 30 days of metrics (downsampled, deduplicated) | [`helm/thanos/`](helm/thanos/README.md) |
-| SeaweedFS (lab only) | In-cluster S3 object store on one PVC with buckets `tempo-traces` and `thanos-metrics`; production uses GCS | [`helm/seaweedfs/`](helm/seaweedfs/README.md) |
+| GCS buckets | Object storage for both profiles: `tempo-traces-<suffix>` (Tempo blocks) and `thanos-metrics-<suffix>` (Thanos blocks), keyless via GKE Workload Identity; optional SeaweedFS fallback in [`helm/seaweedfs/`](helm/seaweedfs/README.md) | [`infra/`](infra/README.md) |
 | Alertmanager | Groups and routes firing alerts (critical → paging, warning → channel) | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | Prometheus Operator | Turns ServiceMonitors and PrometheusRules into Prometheus config | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | kube-state-metrics, node-exporter | Kubernetes object and node metrics | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
@@ -310,18 +311,18 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 |---|---|---|---|
 | Cluster | Zonal, 3 × `e2-standard-2` (6 vCPU / 24 GB) | Regional (≥ 2 zones), larger node pool | [`infra/`](infra/README.md) |
 | Tempo | Single binary `grafana-community/tempo` 3.2.1, embedded metrics-generator, no Kafka | `grafana-community/tempo-distributed` 3.27.0: distributor, zone-aware live-stores, block-builder, metrics-generator, queriers | [`helm/tempo/`](helm/tempo/README.md), [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
-| Object storage | SeaweedFS in-cluster S3 (one pod, 100Gi PVC), buckets `tempo-traces` and `thanos-metrics` | GCS buckets for traces and metrics, keyless GKE Workload Identity, IAM scoped to each bucket | [`helm/seaweedfs/`](helm/seaweedfs/README.md), [`helm/thanos/`](helm/thanos/README.md), [`infra/`](infra/README.md) |
+| Object storage | GCS buckets `tempo-traces-<suffix>` and `thanos-metrics-<suffix>`, keyless GKE Workload Identity, IAM limited to each bucket by condition (`ACCESS_MODE=conditional`) | Same GCS + Workload Identity; IAM bound on each bucket (`ACCESS_MODE=bucket`) | [`infra/`](infra/README.md), [`helm/thanos/`](helm/thanos/README.md) |
 | Retention | 30 days: traces 720h (Tempo `block_retention`), metrics 30 days through Thanos (Prometheus keeps 2 days locally) | Same 30 days | [`helm/tempo/`](helm/tempo/README.md), [`helm/thanos/`](helm/thanos/README.md) |
 | Ingest queue | None (in-process) | External Kafka-compatible queue (TLS + SCRAM, RF 3), required by Tempo 3.x distributed mode | [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
 | OTel Collector | 1 replica, 100m / 256Mi | HPA 3–12, PDB, zone spread; `memory_limiter`, batching, retry + sending queue | [`helm/otel-collector/`](helm/otel-collector/README.md) |
 | Prometheus | 1 replica, 2 days local + Thanos sidecar | 2 replicas (HA pair, deduplicated by Thanos), 2 days local on a 100Gi PVC + Thanos sidecar, PDB | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
-| Thanos | Query, store gateway, compactor on SeaweedFS | Same components on GCS with Workload Identity | [`helm/thanos/`](helm/thanos/README.md) |
+| Thanos | Query, store gateway, compactor (1 replica each) on GCS with Workload Identity | Same components, HA replicas | [`helm/thanos/`](helm/thanos/README.md) |
 | Alertmanager | 1 replica | 2 replicas, critical → paging, warning → channel (receivers from a Secret) | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | Grafana | 1 replica | 2 replicas with an external database (Secret `grafana-db`); no anonymous access | [`helm/grafana/`](helm/grafana/README.md) |
 | Sample apps | Same manifests as production | 2 replicas, PDB, spread, SLO alerts (the app code itself is a demo) | [`apps/`](apps/README.md) |
 | Hermes Agent | Lab overlay `hermes/lab/` (`emptyDir` home, 50m / 256Mi): validated, not the one running | **Runs live on the lab cluster:** `hermes/base/` (10Gi PVC home, 100m / 384Mi, PDB, runbooks) | [`hermes/lab/`](hermes/lab/README.md), [`hermes/base/`](hermes/base/README.md) |
 | Edge TLS | Cloudflare edge TLS on every host (proxied records, SSL mode Full); Traefik serves its default certificate to Cloudflare; no cert-manager (`TLS_MODE=cloudflare`) | Cloudflare **Full (strict)** with validated origin certificates (`TLS_MODE=letsencrypt` or a Cloudflare Origin CA certificate) | [`k8s/`](k8s/README.md), [`scripts/`](scripts/README.md) |
-| Costs | All software is free and open source (no licences); billed: the persistent disks (incl. SeaweedFS's PVC) and the GKE nodes and load balancer they run on | Same; plus GCS storage and operations for the trace and metrics buckets | [`helm/thanos/`](helm/thanos/README.md) |
+| Costs | All software is free and open source (no licences); billed: persistent disks, GCS storage and operations for the trace and metrics buckets, and the GKE nodes and load balancer | Same, at production size | [`helm/thanos/`](helm/thanos/README.md) |
 | Everywhere | Pinned chart versions. By digest: platform chart images, Hermes, the deployed sample-app images (`apps/deploy-apps.sh` resolves each tag to `@sha256`) and the Python base image; by tag only: the Node.js base image of the Next.js and Node.js apps. Requests/limits, Pod Security `restricted` where the workload allows, default-deny NetworkPolicies, PrometheusRules with runbooks | Same | each folder |
 
 ## 🚀 Quickstart
@@ -444,7 +445,7 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 |---|---|---|
 | 2026-11-08 | `PROFILE=lab scripts/verify.sh` (releases, pods, health, test trace through Collector → Tempo → Grafana, scraping, NetworkPolicy, public HTTPS) | ✅ 0 failures, three consecutive runs |
 | 2026-11-08 | Sample apps live (`scripts/load.sh public`, TraceQL per issue, alert rules) | ✅ every planted issue found; 200/500/502/504 mix as designed; 12 rules loaded |
-| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus metrics and rules, Tempo, Grafana, public URL, Hermes login, model settings, observability skill: Thanos/Tempo/Grafana reads, Prometheus `:9090` blocked, Grafana write → 403, `diagnose`, `trends`) | ✅ 29/29; chats through the API server and the dashboard got model replies |
+| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus metrics and rules, Tempo, Grafana, public URL, Hermes login, model settings, observability skill: Thanos/Tempo/Grafana reads, Prometheus `:9090` blocked, Grafana write → 403, `diagnose`, `trends`) | ✅ 31/31; chats through the API server and the dashboard got model replies |
 | 2026-11-08 | Production profiles: `helm template`, `helm lint`, `kubeconform -strict` (Kubernetes 1.36) | ✅ render and validate; not run live |
 
 ## ✅ Production checklist
@@ -467,18 +468,19 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 | Item | Lab | Production |
 |---|---|---|
 | Compute | 3 × `e2-standard-2` | Sized from the production requests (see [`helm/`](helm/README.md#-sizing-requests)) |
-| Storage | Persistent disks: SeaweedFS 100Gi (traces + metrics, 30 days), Prometheus (2 days), Tempo WAL; Hermes 10Gi | Prometheus 2 × 100Gi, Tempo live-store PVCs, GCS buckets (storage + operations) |
+| Storage | Persistent disks 126Gi ≈ $12.60/month (Prometheus 40Gi, Thanos 25Gi, Tempo WAL 50Gi, Grafana 1Gi, Hermes 10Gi); GCS buckets for traces + metrics, 30 days (storage + operations; Thanos bucket estimated ~$1–$3.50/month) | Prometheus 2 × 100Gi, Tempo live-store PVCs, GCS buckets (storage + operations) |
 | Network | One load balancer; Cloudflare in front | Same, plus Kafka and cross-zone traffic |
 
-All components are open source (Tempo and Grafana AGPL-3.0; Prometheus, Thanos, SeaweedFS and the OTel Collector
-Apache-2.0), so there are no licence fees: only the cloud resources above are billed. Costs were not measured; trim
-them with retention, sampling and the HPA limits.
+All components are open source (Tempo and Grafana AGPL-3.0; Prometheus, Thanos and the OTel Collector Apache-2.0), so
+there are no licence fees: only the cloud resources above are billed. Bills were not measured (disk and bucket figures
+are list-price estimates, [`helm/thanos/`](helm/thanos/README.md#-sizing-and-cost)); trim them with retention, sampling
+and the HPA limits.
 
 ## 🧹 Teardown
 
 ```bash
 scripts/teardown.sh             # Helm releases, namespaces, CRDs
-scripts/teardown.sh --cluster   # also the Tempo bucket and the GKE cluster (asks first)
+scripts/teardown.sh --cluster   # also the Tempo and Thanos buckets and the GKE cluster (asks before each)
 ```
 
 ## 📌 Pinned versions

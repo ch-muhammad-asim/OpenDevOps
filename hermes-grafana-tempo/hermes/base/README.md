@@ -13,8 +13,9 @@ overlays these for a small lab cluster. How it works, security model, alerts and
 | [`service.yaml`](service.yaml) | ClusterIP Service `hermes-dashboard:9119` |
 | [`ingress.yaml`](ingress.yaml) | Traefik IngressRoute for `hermes-gke.saqlainmushtaq.com` + Cloudflare-only and security-headers Middlewares (no proxy login) |
 | [`pdb.yaml`](pdb.yaml) | PodDisruptionBudget that never blocks node drains (singleton) |
-| [`networkpolicy.yaml`](networkpolicy.yaml) | Default deny; egress to DNS, the Collector `:4318`, Thanos querier `:10902` / Tempo `:3200` / Grafana `:3000` (read-only skill; not Prometheus `:9090`) and public HTTPS `:443` (model API); ingress only from `traefik` to `:9119` |
+| [`networkpolicy.yaml`](networkpolicy.yaml) | Default deny (all pods); Hermes egress to DNS, the Collector `:4318`, the OpenCode bridge `:18282`, Thanos querier `:10902` / Tempo `:3200` / Grafana `:3000` (read-only skill; not Prometheus `:9090`) and public HTTPS `:443` (model API); ingress only from `traefik` to `:9119`; bridge policy: ingress from Hermes only, egress DNS, HTTPS, read-only endpoints |
 | [`networkpolicy-observability.yaml`](networkpolicy-observability.yaml) | Ingress in `monitoring` / `observability`: only the Hermes pod to the Thanos querier, Tempo and Grafana |
+| [`opencode-bridge.yaml`](opencode-bridge.yaml) | OpenCode bridge (default model provider, free models): ServiceAccount, policy ConfigMap, Deployment, Service; script from `../../../opencode/kubernetes/bridge/` |
 | [`prometheusrule.yaml`](prometheusrule.yaml) | 5 Hermes alerts with runbook links |
 | [`hermes-gateway-dashboard.json`](hermes-gateway-dashboard.json) | Grafana dashboard (uid `hermes-gateway`) |
 | [`skills/`](skills/README.md) | Read-only observability skill (`SKILL.md` + `scripts/obs.py`), shipped as a ConfigMap |

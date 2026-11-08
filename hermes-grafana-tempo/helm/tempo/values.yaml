@@ -9,12 +9,12 @@
 #              helm/tempo-distributed. No values-lab.yaml: this file IS the lab profile.
 #
 # One replica, 720h (30 days) retention. This file alone uses the local backend on the 50Gi
-# standard-rwo PV; the lab deploys it WITH values-s3.yaml (TEMPO_STORAGE=s3), so trace blocks go to
-# the in-cluster SeaweedFS S3 store and the PV holds the WAL and live data only.
+# standard-rwo PV; the lab deploys it WITH values-gcs.yaml (TEMPO_STORAGE=gcs), so trace blocks go to
+# the GCS bucket (Workload Identity) and the PV holds the WAL and live data only.
 # Sizing (measured 2026-11-08): ~39 KB/s received, blocks ~0.31 of received bytes => ~31 GB of
 # blocks per 30 days (in the object store); the PV keeps 50Gi because a PVC cannot shrink.
 # Receives OTLP only from the OpenTelemetry Collector (otel-collector.observability).
-# Overlays: values-s3.yaml (lab, SeaweedFS), values-gcs.yaml (optional GCS bucket).
+# Overlays: values-gcs.yaml (lab default, GCS bucket), values-s3.yaml (optional SeaweedFS fallback).
 
 fullnameOverride: tempo   # Service name "tempo" (shared names contract)
 replicas: 1

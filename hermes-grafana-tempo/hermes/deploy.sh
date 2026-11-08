@@ -2,7 +2,8 @@
 # Deploy Hermes Agent (gateway with OTLP monitoring export + web dashboard) into namespace "hermes".
 #   hermes/deploy.sh                      production profile (hermes/base/)
 #   HERMES_PROFILE=lab hermes/deploy.sh   lab profile (hermes/lab/: no PVC, smaller requests)
-#   CLOUDFLARE_AI_CREDS_FILE=~/keys/cloudflare-ai hermes/deploy.sh                    model: Cloudflare Workers AI (default)
+#   hermes/deploy.sh                                                                  model: OpenCode free models via the bridge (default)
+#   MODEL_PROVIDER=cloudflare CLOUDFLARE_AI_CREDS_FILE=~/keys/cloudflare-ai hermes/deploy.sh   model: Cloudflare Workers AI
 #   MODEL_PROVIDER=opencode OPENCODE_API_KEY_FILE=~/keys/opencode hermes/deploy.sh    model: OpenCode Zen/Go
 # Needs: kubectl pointed at the cluster, kube-prometheus-stack (PrometheusRule CRD), Traefik (IngressRoute
 # CRD) and the OpenTelemetry Collector running in namespace "observability".
@@ -53,9 +54,25 @@ open(sys.argv[2], "w").write("scrypt$16384$8$1$" + base64.b64encode(salt).decode
     --from-file=session_secret="$tmp/session_secret"
 fi
 
-# 3. Model provider -> Secret hermes-model-key (HERMES_MODEL, HERMES_MODEL_BASE_URL, HERMES_MODEL_API_KEY).
+# 3. OpenCode bridge (default model provider: OpenCode's free models, no key, no cost). Reuses the bridge script from
+#    this repository (../../opencode/kubernetes/bridge/opencode_bridge.py) as ConfigMap opencode-bridge-script, and a
+#    random shared key (Secret hermes-opencode-bridge) that Hermes sends to it.
+BRIDGE_SRC="${OPENCODE_BRIDGE_SRC:-../../opencode/kubernetes/bridge/opencode_bridge.py}"
+[[ -r "$BRIDGE_SRC" ]] || { echo "OpenCode bridge script not found at $BRIDGE_SRC (set OPENCODE_BRIDGE_SRC)" >&2; exit 1; }
+if kubectl -n hermes create configmap opencode-bridge-script --from-file=opencode_bridge.py="$BRIDGE_SRC" \
+     --dry-run=client -o yaml | kubectl apply -f - | grep -q configured; then
+  bridge_changed=1
+fi
+if ! kubectl -n hermes get secret hermes-opencode-bridge >/dev/null 2>&1; then
+  rand 48 > "$tmp/OPENCODE_BRIDGE_API_KEY"
+  kubectl -n hermes create secret generic hermes-opencode-bridge --from-file=OPENCODE_BRIDGE_API_KEY="$tmp/OPENCODE_BRIDGE_API_KEY"
+fi
+
+# 4. Model provider -> Secret hermes-model-key (HERMES_MODEL, HERMES_MODEL_BASE_URL, HERMES_MODEL_API_KEY).
 #    Credentials come from local files outside the repo and are never printed. Re-run to switch providers, then
 #    restart the pod. Without a credentials file the existing Secret is kept (or the gateway runs telemetry-only).
+#    MODEL_PROVIDER=opencode-bridge (default)  the in-cluster bridge above; model opencode/deepseek-v4.1-flash-free
+#                               (override: HERMES_MODEL, any free model the bridge lists at /v1/models)
 #    MODEL_PROVIDER=cloudflare  CLOUDFLARE_AI_CREDS_FILE=<file with lines "Account ID: <id>" and "API: <token>">
 #                               model @cf/openai/gpt-oss-120b (override: HERMES_MODEL)
 #    MODEL_PROVIDER=opencode    OPENCODE_API_KEY_FILE=<file with the key>   (OpenCode Zen pay-as-you-go or Go;
@@ -68,9 +85,12 @@ model_secret() {  # $1 model id, $2 base URL, key in $tmp/HERMES_MODEL_API_KEY
   kubectl -n hermes create secret generic hermes-model-key --from-file=HERMES_MODEL="$tmp/HERMES_MODEL" \
     --from-file=HERMES_MODEL_BASE_URL="$tmp/HERMES_MODEL_BASE_URL" --from-file=HERMES_MODEL_API_KEY="$tmp/HERMES_MODEL_API_KEY" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  echo "Secret hermes-model-key: provider ${MODEL_PROVIDER:-cloudflare}, model $1 (restart the pod to load it)"
+  echo "Secret hermes-model-key: provider ${MODEL_PROVIDER:-opencode-bridge}, model $1 (restart the pod to load it)"
 }
-case "${MODEL_PROVIDER:-cloudflare}" in
+case "${MODEL_PROVIDER:-opencode-bridge}" in
+  opencode-bridge)
+    kubectl -n hermes get secret hermes-opencode-bridge -o jsonpath='{.data.OPENCODE_BRIDGE_API_KEY}' | base64 -d >"$tmp/HERMES_MODEL_API_KEY"
+    model_secret "${HERMES_MODEL:-opencode/deepseek-v4.1-flash-free}" "http://opencode-bridge.hermes:18282/v1" ;;
   cloudflare)
     if [[ -n "${CLOUDFLARE_AI_CREDS_FILE:-}" ]]; then
       [[ -r "$CLOUDFLARE_AI_CREDS_FILE" ]] || { echo "CLOUDFLARE_AI_CREDS_FILE not readable" >&2; exit 1; }
@@ -88,13 +108,13 @@ case "${MODEL_PROVIDER:-cloudflare}" in
       [[ -s "$tmp/HERMES_MODEL_API_KEY" ]] || tr -d '[:space:]' <"$OPENCODE_API_KEY_FILE" >"$tmp/HERMES_MODEL_API_KEY"
       model_secret "${HERMES_MODEL:-glm-5.3-flash}" "${OPENCODE_BASE_URL:-https://opencode.ai/inference/openai/v1}"
     fi ;;
-  *) echo "MODEL_PROVIDER must be cloudflare or opencode" >&2; exit 1 ;;
+  *) echo "MODEL_PROVIDER must be opencode-bridge, cloudflare or opencode" >&2; exit 1 ;;
 esac
 if ! kubectl -n hermes get secret hermes-model-key >/dev/null 2>&1; then
   echo "No model configured: see 'Model provider' in hermes/README.md (telemetry works without it)" >&2
 fi
 
-# 4. Grafana Viewer service account for the observability skill (read-only: dashboards, panels, /api/ds/query).
+# 5. Grafana Viewer service account for the observability skill (read-only: dashboards, panels, /api/ds/query).
 #    Created once in Grafana (namespace observability, admin login from Secret grafana-admin); the token is stored
 #    only in Secret hermes-grafana-token (key GRAFANA_TOKEN) and never printed. Delete that Secret to rotate; tokens
 #    expire after GRAFANA_TOKEN_TTL_DAYS (default 90) and are re-minted by the next deploy.sh run.
@@ -144,6 +164,8 @@ else
 fi
 
 kubectl apply -k "$dir"
-[[ -n "${regrafana:-}" ]] && kubectl -n hermes rollout restart deploy/hermes-gateway >/dev/null   # reload GRAFANA_TOKEN
+[[ -n "${regrafana:-}" ]] && kubectl -n hermes rollout restart deploy/hermes-gateway deploy/opencode-bridge >/dev/null   # reload GRAFANA_TOKEN
+[[ -n "${bridge_changed:-}" ]] && kubectl -n hermes rollout restart deploy/opencode-bridge >/dev/null      # new bridge script
+kubectl -n hermes rollout status deploy/opencode-bridge --timeout=300s
 kubectl -n hermes rollout status deploy/hermes-gateway --timeout=300s
 echo "Dashboard: https://hermes-gke.saqlainmushtaq.com  (user and password: see hermes/README.md, 'Log in')"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verify Hermes end to end: pod Ready -> Prometheus metrics + rules -> Tempo spans -> Grafana dashboard
 # and data sources -> public URL (Cloudflare-only route, no proxy login) and the Hermes login -> model settings
+# -> OpenCode bridge (Ready, /v1/models; no chat call)
 # -> read-only observability skill (loaded, reads via Thanos/Tempo/Grafana, Prometheus :9090 blocked, Grafana write refused).
 # Prints PASS/FAIL per check; exit code = number of failures. Prometheus, Tempo and Grafana are reached
 # with kubectl port-forward on free local ports (the API server's service proxy is blocked by the
@@ -119,6 +120,17 @@ done
 gb="$(kubectl -n hermes exec deploy/hermes-gateway -c dashboard -- sh -c 'cd /opt/hermes && PYTHONPATH=/opt/hermes HERMES_PYTHON_SRC_ROOT=/opt/hermes timeout 40 /opt/hermes/.venv/bin/python hermes_cli/tui_dist/scripts/gateway_bootstrap.py 2>&1' \
       | json '"ok" if d.get("url") else "no url"' 2>/dev/null || echo "inaccessible")"
 if [[ "$gb" == ok ]]; then pass "dashboard chat can attach to the gateway (HERMES_HOME owned by the Hermes user)"; else fail "dashboard chat cannot attach to the gateway ($gb): check HERMES_HOME ownership"; fi
+# 7b. OpenCode bridge (default model provider): pod Ready, /v1/models answers with the shared key (no chat call)
+if kubectl -n hermes rollout status deploy/opencode-bridge --timeout=120s >/dev/null 2>&1; then
+  pass "opencode-bridge rolled out (Ready)"
+else
+  fail "opencode-bridge not Ready"
+fi
+v="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'import json, os, urllib.request
+r = urllib.request.Request("http://opencode-bridge.hermes:18282/v1/models", headers={"Authorization": "Bearer " + os.environ["HERMES_MODEL_API_KEY"]})
+d = json.load(urllib.request.urlopen(r, timeout=20)); print(len(d["data"]), "free models, e.g.", d["data"][0]["id"])' 2>/dev/null)"
+if [[ "$v" =~ ^[1-9] ]]; then pass "Hermes -> bridge /v1/models: $v"; else fail "Hermes -> bridge /v1/models: ${v:-no answer} (MODEL_PROVIDER=opencode-bridge?)"; fi
+
 # 8. Read-only observability skill: loaded, reads work through the NetworkPolicies, writes are refused
 OBS=/opt/skills/observability/grafana-tempo-observability/scripts/obs.py
 gx() { kubectl -n hermes exec deploy/hermes-gateway -c gateway -- "$@" 2>/dev/null; }

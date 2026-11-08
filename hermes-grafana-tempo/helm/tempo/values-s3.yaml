@@ -1,6 +1,6 @@
-# LAB overlay on values.yaml: trace blocks in the in-cluster SeaweedFS S3 store
-# (helm/seaweedfs, OBJECT_STORE=seaweedfs) instead of the local PV. Production uses GCS
-# (helm/tempo-distributed). Chart grafana-community/tempo 3.2.1, Tempo 3.1.1:
+# OPTIONAL FALLBACK overlay on values.yaml, for clusters without cloud object storage: trace blocks in
+# the in-cluster SeaweedFS S3 store (helm/seaweedfs, OBJECT_STORE=seaweedfs) instead of the local PV.
+# The lab uses GCS (values-gcs.yaml). Chart grafana-community/tempo 3.2.1, Tempo 3.1.1:
 #   helm upgrade --install tempo grafana-community/tempo --version 3.2.1 \
 #     --namespace observability --create-namespace \
 #     -f helm/tempo/values.yaml -f helm/tempo/values-s3.yaml

@@ -1,21 +1,21 @@
 # 🔭 Grafana Tempo (single binary, lab profile)
 
-Tempo in monolithic (single-binary) mode: one pod, trace blocks in object storage (lab: in-cluster SeaweedFS S3), WAL
+Tempo in monolithic (single-binary) mode: one pod, trace blocks in object storage (lab: GCS via Workload Identity), WAL
 on a local PV. **Why:** stores every trace from the
 sample apps and Hermes Agent for TraceQL search, and its metrics-generator turns spans into request/error/latency
 metrics and a service graph in Prometheus, with one StatefulSet instead of a dozen components and a Kafka queue.
 
 This is the **lab / small-cluster profile** (`scripts/deploy.sh` with `PROFILE=lab`). **Production** uses the
 microservices chart in [`../tempo-distributed/`](../tempo-distributed/) (HA, GCS, Kafka). There is no
-`values-lab.yaml` here: [`values.yaml`](values.yaml) itself is the lab profile. The lab adds the S3
-overlay [`values-s3.yaml`](values-s3.yaml) (`TEMPO_STORAGE=s3`, the default with `OBJECT_STORE=seaweedfs`); the GCS
-overlay [`values-gcs.yaml`](values-gcs.yaml) is optional and not used in the lab.
+`values-lab.yaml` here: [`values.yaml`](values.yaml) itself is the lab profile. The lab adds the GCS overlay
+[`values-gcs.yaml`](values-gcs.yaml) (`TEMPO_STORAGE=gcs`, the default with `OBJECT_STORE=gcs`); the S3 overlay
+[`values-s3.yaml`](values-s3.yaml) is the optional SeaweedFS fallback for clusters without cloud object storage.
 
-**Status:** ✅ running on the lab cluster with the S3 overlay (chart 3.2.1, Tempo 3.1.1, `block_retention: 720h`, blocks
-in SeaweedFS bucket `tempo-traces`, WAL on the 50Gi PVC; S3 requests 2xx only, `PROFILE=lab scripts/verify.sh` 32 PASS,
-0 failures, 2026-11-08). The blocks written to the local PV before the switch (a few hours) were not migrated to S3.
+**Status:** ✅ lab live on GCS (2026-11-08): chart 3.2.1, Tempo 3.1.1, `block_retention: 720h`, blocks in bucket
+`tempo-traces-<suffix>` through Workload Identity (`ACCESS_MODE=conditional`), WAL on the 50Gi PVC;
+`PROFILE=lab scripts/verify.sh` VERIFY_COUNT PASS, 0 failures. Blocks in the earlier SeaweedFS bucket were not migrated.
 Renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kubernetes 1.36) with each overlay
-(2026-11-08). The GCS overlay has not been run on a cluster.
+(2026-11-08).
 
 ## 🧩 Components
 
@@ -27,8 +27,8 @@ Renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kube
 | Metrics-generator | `service-graphs` + `span-metrics` → remote write to Prometheus | `tempo.metricsGenerator`, `tempo.overrides.defaults` | Pushes only to the in-cluster Prometheus |
 | ServiceMonitor `tempo` | Prometheus scrapes Tempo's own metrics on 3200 (`job="tempo"`) | `serviceMonitor` | — |
 | PrometheusRule `tempo-mixin` | Official Tempo recording rules + the alerts that apply to monolithic mode | [`prometheusrule-tempo-mixin.yaml`](prometheusrule-tempo-mixin.yaml) | Read-only rules |
-| GCS bucket (optional overlay) | Trace blocks under `single-tenant/<block-id>/` | [`values-gcs.yaml`](values-gcs.yaml) | `roles/storage.objectUser` on the bucket for the Workload Identity principal, no keys |
-| SeaweedFS bucket `tempo-traces` (lab, live) | Trace blocks in the in-cluster S3 store | [`values-s3.yaml`](values-s3.yaml) | Bucket-scoped S3 identity `tempo`; keys only as env vars from Secret `tempo-s3` |
+| GCS bucket `tempo-traces-<suffix>` (lab, live) | Trace blocks under `single-tenant/<block-id>/` | [`values-gcs.yaml`](values-gcs.yaml) | `roles/storage.objectUser` + `roles/storage.bucketViewer` limited to the bucket for the Workload Identity principal, no keys |
+| SeaweedFS bucket `tempo-traces` (optional fallback) | Trace blocks in the in-cluster S3 store | [`values-s3.yaml`](values-s3.yaml) | Bucket-scoped S3 identity `tempo`; keys only as env vars from Secret `tempo-s3` |
 
 ## ⚙️ Key settings
 
@@ -37,7 +37,7 @@ Renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kube
 | `tempo.tag` | `3.1.1@sha256:64e2fbd5…5044` | Tag + multi-arch index digest; the digest wins at pull time |
 | `tempo.resources` | requests 250m / 1Gi, limit memory 2Gi | Memory capped; no CPU limit on purpose (throttling slows ingest and compaction) |
 | `tempo.retention` | `720h` | 30 days of traces for trend analysis; `block_retention` for the backend scheduler and worker |
-| `persistence` | 50Gi `standard-rwo`, RWO | Sized for ~31 GB of local blocks per 30 days; with the S3 overlay it holds mostly the WAL (a PVC cannot shrink); survives restarts within the zone |
+| `persistence` | 50Gi `standard-rwo`, RWO | Sized for ~31 GB of local blocks per 30 days; with an object-store overlay it holds mostly the WAL (a PVC cannot shrink); survives restarts within the zone |
 | `tempo.receivers.otlp` | gRPC `0.0.0.0:4317`, HTTP `0.0.0.0:4318` | The Collector (lab overlay) exports OTLP gRPC to `tempo.observability:4317` |
 | `tempo.streamOverHttpEnabled` | `true` | Grafana streaming search and TraceQL metrics over port 3200 |
 | `metricsGenerator.remoteWriteUrl` | `http://prometheus-kube-prometheus-prometheus.monitoring:9090/api/v1/write` | Needs `enableRemoteWriteReceiver` in kube-prometheus-stack |
@@ -60,10 +60,11 @@ Drilldown are served by the live-store in single-binary mode, so the processor i
 |---|---|---|
 | Retention | `720h` (30 days) | `tempo.retention` |
 | Measured ingest (lab, 2026-11-08) | 38.8 KB/s received, 131.5 spans/s | Tempo distributor metrics, 1h rate, synthetic load plus Hermes |
-| Block size | ~0.31 of received bytes | Blocks on the PV vs bytes received (measured before the switch to S3) |
+| Block size | ~0.31 of received bytes | Blocks on the PV vs bytes received (measured with the local backend) |
 | Blocks per 30 days | ~31 GB | 38.8 KB/s × 2,592,000 s × 0.31 |
-| Where blocks live (lab) | SeaweedFS bucket `tempo-traces` (shares the 100Gi SeaweedFS PVC with Thanos) | [`../seaweedfs/`](../seaweedfs/README.md#-sizing) |
-| PVC | 50Gi `standard-rwo`, now mostly WAL | Sized for local blocks before the switch to S3; a PVC cannot shrink |
+| Where blocks live (lab) | GCS bucket `tempo-traces-<suffix>`, lifecycle backstop 33 days | [`values-gcs.yaml`](values-gcs.yaml), [`../../infra/`](../../infra/README.md#-gcs-buckets-both-profiles) |
+| Bucket cost (estimate) | ~$0.62/month storage (~31 GB × $0.020/GB-month, GCS Standard) plus operations (not measured) | [`../thanos/`](../thanos/README.md#production-gcs) price list |
+| PVC | 50Gi `standard-rwo`, now mostly WAL | Sized for local blocks before the switch to object storage; a PVC cannot shrink |
 
 **How the lab PVC was expanded (10Gi → 50Gi, online):** `standard-rwo` allows volume expansion, but a StatefulSet's
 `volumeClaimTemplates` cannot be changed in place. So the StatefulSet object is deleted without its pod
@@ -85,30 +86,32 @@ kubectl apply -f helm/tempo/prometheusrule-tempo-mixin.yaml                # Tem
 ```
 
 Install after kube-prometheus-stack (ServiceMonitor and PrometheusRule CRDs). `scripts/deploy.sh` with `PROFILE=lab`
-and `TEMPO_STORAGE=local` runs exactly this; the lab default (`TEMPO_STORAGE=s3`) adds the S3 overlay below.
+and `TEMPO_STORAGE=local` runs exactly this; the lab default (`TEMPO_STORAGE=gcs`) adds the GCS overlay below.
 
-### ☁️ Optional: GCS backend (Workload Identity, scoped to the bucket)
+### ☁️ Lab: GCS backend (default, Workload Identity, scoped to the bucket)
 
-Not used in the lab. The overlay switches `storage.trace.backend` to `gcs`; WAL, live-store data and generator WAL stay
-on the PV.
+Live in the lab. The overlay switches `storage.trace.backend` to `gcs`; WAL, live-store data and generator WAL stay on
+the PV.
 
 | Step | Command | Why |
 |---|---|---|
-| 1 | `infra/create-tempo-bucket.sh` | Creates bucket `tempo-traces-<project>` (uniform access, public access prevention, versioning off, lifecycle delete after 33 days) and grants `roles/storage.objectUser` on this bucket to the Workload Identity principal of KSA `observability/tempo`; prints the bucket name |
+| 1 | `ACCESS_MODE=conditional TEMPO_BUCKET=tempo-traces-<suffix> infra/create-tempo-bucket.sh` | Creates the bucket (uniform access, public access prevention, versioning off, lifecycle delete after 33 days) and grants `roles/storage.objectUser` + `roles/storage.bucketViewer` limited to it to the Workload Identity principal of KSA `observability/tempo`; prints the bucket name |
 | 2 | `helm upgrade --install tempo grafana-community/tempo --version 3.2.1 -n observability -f helm/tempo/values.yaml -f helm/tempo/values-gcs.yaml --set tempo.storage.trace.gcs.bucket_name="$TEMPO_BUCKET"` | Deploy with the GCS backend (`TEMPO_STORAGE=gcs` in `scripts/deploy.sh` does both steps) |
 
-The default `ACCESS_MODE=bucket` needs no Google service account and no KSA annotation; the GKE metadata server
-issues the token. Alternatives in [`../../infra/create-gcs-bucket.sh`](../../infra/create-gcs-bucket.sh):
-`ACCESS_MODE=conditional` (project-level binding with an IAM condition limited to this bucket and its objects) and
-`ACCESS_MODE=gsa` (a dedicated Google service account `tempo-gcs`, never a default compute account; the KSA
-impersonates it via `roles/iam.workloadIdentityUser`, and `scripts/deploy.sh` adds the KSA annotation). See
-[`../../infra/`](../../infra/README.md#-gcs-buckets-production).
+Why two roles: `objectUser` covers the objects; Tempo's GCS backend also reads the bucket attributes at start
+(`storage.buckets.get`), which only `bucketViewer` adds. Without it Tempo crash-loops with `403` `storage.buckets.get`.
 
-### 🪣 Lab: SeaweedFS S3 backend (`OBJECT_STORE=seaweedfs`, live)
+The lab uses `ACCESS_MODE=conditional` (project-level binding with an IAM condition limited to this bucket and its
+objects). The script default `ACCESS_MODE=bucket` binds on the bucket itself; neither needs a Google service account or
+a KSA annotation (the GKE metadata server issues the token). `ACCESS_MODE=gsa` uses a dedicated Google service account
+`tempo-gcs`, never a default compute account; the KSA impersonates it via `roles/iam.workloadIdentityUser`, and
+`scripts/deploy.sh` adds the KSA annotation. See [`../../infra/`](../../infra/README.md#-gcs-buckets-both-profiles).
 
-The overlay [`values-s3.yaml`](values-s3.yaml) switches `storage.trace.backend` to `s3`: trace blocks go to bucket
-`tempo-traces` in the in-cluster SeaweedFS store ([`../seaweedfs/`](../seaweedfs/README.md)); WAL, live-store data and
-generator WAL stay on the PV. Live on the lab cluster since 2026-11-08 (S3 requests 2xx only, no 4xx/5xx).
+### 🪣 Optional fallback: SeaweedFS S3 backend (`OBJECT_STORE=seaweedfs`)
+
+For clusters without cloud object storage; not deployed in the lab. The overlay [`values-s3.yaml`](values-s3.yaml)
+switches `storage.trace.backend` to `s3`: trace blocks go to bucket `tempo-traces` in the in-cluster SeaweedFS store
+([`../seaweedfs/`](../seaweedfs/README.md)); WAL, live-store data and generator WAL stay on the PV.
 
 | Setting | Value | Why |
 |---|---|---|
@@ -138,8 +141,8 @@ Check: `kubectl -n observability logs tempo-0 | grep -i s3` shows no `AccessDeni
 | Generator writing | PromQL `traces_spanmetrics_calls_total`, `traces_service_graph_request_total` | Series per service |
 | Scraped | PromQL `up{job="tempo"}` | `1` |
 | Rules loaded | `kubectl -n observability get prometheusrule tempo-mixin` | Present; Prometheus → Alerts lists `tempo_alerts` |
-| S3 writes (lab) | PromQL `sum by (code) (rate(SeaweedFS_s3_request_total{bucket="tempo-traces"}[5m]))` | Only `2xx` codes once blocks are flushed |
-| GCS (overlay only) | `gcloud storage ls gs://$TEMPO_BUCKET/single-tenant/` | Block directories after the first flush |
+| GCS (lab) | `gcloud storage ls gs://$TEMPO_BUCKET/single-tenant/` | Block directories after the first flush |
+| S3 writes (SeaweedFS fallback) | PromQL `sum by (code) (rate(SeaweedFS_s3_request_total{bucket="tempo-traces"}[5m]))` | Only `2xx` codes once blocks are flushed |
 
 ## 🛡️ Security
 
@@ -150,16 +153,16 @@ Check: `kubectl -n observability logs tempo-0 | grep -i s3` shows no `AccessDeni
 | Sensitive data in spans | Apps and Hermes send content-free spans | See `apps/` and `hermes/` |
 | Container privilege | PSS restricted (see Key settings), no SA token | `securityContext`, `tempo.securityContext`, `serviceAccount` |
 | Image tampering | Pinned by multi-arch index digest | `tempo.tag` |
-| Leaked storage credentials (GCS overlay) | No keys; `roles/storage.objectUser` on one bucket for one KSA principal | `infra/create-tempo-bucket.sh`, deploy-time `--set` |
-| Leaked S3 key (lab) | Identity `tempo` limited to bucket `tempo-traces`; key only in Secret `tempo-s3` as env vars, not in the ConfigMap | [`values-s3.yaml`](values-s3.yaml), `scripts/deploy.sh` |
+| Leaked storage credentials (GCS) | No keys; `roles/storage.objectUser` + `roles/storage.bucketViewer` limited to one bucket for one KSA principal | `infra/create-tempo-bucket.sh`, deploy-time `--set` |
+| Leaked S3 key (SeaweedFS fallback) | Identity `tempo` limited to bucket `tempo-traces`; key only in Secret `tempo-s3` as env vars, not in the ConfigMap | [`values-s3.yaml`](values-s3.yaml), `scripts/deploy.sh` |
 
 ## 🩺 Operations
 
 | Topic | Single binary |
 |---|---|
 | HA | None: one replica; a restart is a short ingest gap that the Collector's retry queue (up to 5 min) covers |
-| Capacity | Watch PV usage (`kubelet_volume_stats_used_bytes{persistentvolumeclaim="storage-tempo-0"}`) and the SeaweedFS disk ([`../seaweedfs/`](../seaweedfs/README.md#-operations)); lower `retention` or grow the PVC online ([Retention and sizing](#-retention-and-sizing)) |
-| Backup | None in the lab (traces are rebuildable demo data; blocks in in-cluster SeaweedFS); production keeps blocks in GCS ([`../tempo-distributed/`](../tempo-distributed/)) |
+| Capacity | Watch PV usage (`kubelet_volume_stats_used_bytes{persistentvolumeclaim="storage-tempo-0"}`) and the bucket size (`gcloud storage du -s gs://$TEMPO_BUCKET`); lower `retention` or grow the PVC online ([Retention and sizing](#-retention-and-sizing)) |
+| Backup | Blocks live in GCS (survive losing the cluster); versioning off, GCS soft delete (7-day default) covers accidental deletes; traces are rebuildable demo data |
 | Upgrade | Bump chart, tag and digest together, `helm diff`, apply, check `tempo-0` ready and `/api/search`; roll back with `helm rollback tempo` |
 
 ## 🛠️ Troubleshooting
@@ -172,8 +175,9 @@ Check: `kubectl -n observability logs tempo-0 | grep -i s3` shows no `AccessDeni
 | PV full | Retention vs. traffic | Lower `retention` or grow the PVC ([Retention and sizing](#-retention-and-sizing)) |
 | `helm upgrade` fails: `spec: Forbidden: updates to statefulset spec ... volumeClaimTemplates` | `persistence.size` changed on an existing StatefulSet | `kubectl -n observability delete sts tempo --cascade=orphan`, re-run `helm upgrade`, patch the PVC size |
 | Wrong image after an upgrade | Tag bumped, digest not | Resolve the new multi-arch index digest; set `tag: "<tag>@sha256:<digest>"` |
-| S3 `AccessDenied` / `403` (S3 overlay) | Key in Secret `tempo-s3` differs from identity `tempo` in SeaweedFS `s3.json` | Fix the Secrets; restart `seaweedfs-0`, then `tempo-0` |
-| GCS `403` (overlay) | `roles/storage.objectUser` binding missing | Re-run `infra/create-tempo-bucket.sh`; check the KSA is `observability/tempo` |
+| Tempo crash-loops, `403` `storage.buckets.get` | `roles/storage.bucketViewer` missing (the GCS backend reads the bucket attributes at start; `objectUser` lacks it) | Re-run `infra/create-tempo-bucket.sh` with the same `ACCESS_MODE` (it grants both roles); restart `tempo-0` |
+| GCS `403` on objects | `roles/storage.objectUser` binding missing | Re-run `infra/create-tempo-bucket.sh`; check the KSA is `observability/tempo` |
+| S3 `AccessDenied` / `403` (SeaweedFS fallback) | Key in Secret `tempo-s3` differs from identity `tempo` in SeaweedFS `s3.json` | Fix the Secrets; restart `seaweedfs-0`, then `tempo-0` |
 | GCS `bucket_name` empty, Tempo exits | Overlay used without `--set tempo.storage.trace.gcs.bucket_name` | Pass the bucket name |
 | Too many span-metric series | High-cardinality dimension | Remove it from `span_metrics.dimensions` |
 
@@ -187,8 +191,8 @@ Check: `kubectl -n observability logs tempo-0 | grep -i s3` shows no `AccessDeni
 ## 🧹 Teardown
 
 `helm uninstall tempo -n observability`, then `kubectl -n observability delete pvc storage-tempo-0` (WAL and local data)
-and `kubectl delete -f helm/tempo/prometheusrule-tempo-mixin.yaml`. Lab trace blocks stay in the SeaweedFS bucket until
-the SeaweedFS PVC is deleted ([`../seaweedfs/`](../seaweedfs/README.md#-teardown)).
+and `kubectl delete -f helm/tempo/prometheusrule-tempo-mixin.yaml`. Trace blocks stay in the GCS bucket until
+`scripts/teardown.sh --cluster` (asks first) or `gcloud storage rm -r gs://$TEMPO_BUCKET` (irreversible).
 
 ## 🔗 References
 

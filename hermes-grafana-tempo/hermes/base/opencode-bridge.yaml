@@ -1,0 +1,188 @@
+# OpenCode bridge: OpenCode's FREE models behind an OpenAI-compatible endpoint, no API key, no cost.
+# Reuses the bridge from this repository (../../../opencode/kubernetes/bridge/opencode_bridge.py, mounted from the
+# ConfigMap opencode-bridge-script that hermes/deploy.sh creates from that file; nothing is copied here).
+#
+#   Hermes (custom provider) --HTTP :18282 + bearer key--> opencode_bridge.py --> `opencode run --format json`
+#                                                                                 --> OpenCode free models (HTTPS)
+#
+# The bridge does not pass OpenAI tool calls through: it flattens the chat into one prompt and OpenCode's own agent
+# runs its tools (bash, read, skill) in THIS pod. That is why the read-only observability skill is mounted here too
+# and why this pod may reach Thanos, Tempo and Grafana. File edits are denied by OpenCode's policy (opencode.json),
+# the pod has no Kubernetes API token, runs non-root with a read-only root filesystem (Pod Security restricted), and
+# installs the pinned OpenCode CLI into an emptyDir at start (init container, no root).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opencode-bridge
+  namespace: hermes
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencode-bridge-config
+  namespace: hermes
+data:
+  # OpenCode permission policy (same posture as ../../../opencode/kubernetes/configmaps/configmap-opencode-config.yaml):
+  # a "deny" removes the tool from the model's tool list. bash stays allowed (the skill runs obs.py through it);
+  # what bash can reach is bounded by the NetworkPolicies and the absent service-account token.
+  opencode.json: |
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "permission": {
+        "read": "allow", "list": "allow", "glob": "allow", "grep": "allow",
+        "bash": "allow", "task": "allow", "todowrite": "allow", "skill": "allow",
+        "webfetch": "allow", "websearch": "allow",
+        "edit": "deny", "write": "deny", "patch": "deny",
+        "external_directory": "deny", "doom_loop": "deny"
+      },
+      "autoupdate": false,
+      "share": "disabled",
+      "instructions": ["/opt/skills/observability/grafana-tempo-observability/SKILL.md"],
+      "skills": {"paths": ["/opt/skills"]},
+      "logLevel": "INFO"
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencode-bridge
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: opencode-bridge
+    app.kubernetes.io/part-of: hermes-grafana-tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencode-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opencode-bridge
+        app.kubernetes.io/part-of: hermes-grafana-tempo
+    spec:
+      serviceAccountName: opencode-bridge
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Install the pinned OpenCode CLI with the image's own Node/npm into an emptyDir (non-root, needs only HTTPS
+        # to the npm registry). Bump OPENCODE_VERSION to upgrade.
+        - name: install-opencode
+          image: nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
+          command: ["/bin/sh", "-c"]
+          args:
+            - npm install -g --prefix /opt/opencode --no-audit --no-fund "opencode-ai@${OPENCODE_VERSION}" && /opt/opencode/bin/opencode --version
+          env:
+            - {name: OPENCODE_VERSION, value: "1.19.5"}
+            - {name: HOME, value: /tmp}
+            - {name: npm_config_cache, value: /tmp/npm-cache}
+            - {name: PATH, value: "/opt/hermes/tools/node-26.12.1-linux-x64/bin:/usr/local/bin:/usr/bin:/bin"}
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: opencode, mountPath: /opt/opencode}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: bridge
+          image: nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
+          command: ["/opt/hermes/.venv/bin/python3", "/app/opencode_bridge.py"]
+          args:
+            - --host=0.0.0.0
+            - --port=18282
+            - --opencode-bin=/opt/opencode/bin/opencode
+            - --cwd=/workspace
+            - --model=$(OPENCODE_BRIDGE_MODEL)
+            - --model-providers=opencode
+            - --free-only                    # serve only models whose input AND output cost is 0
+            - --agent=build
+            - --show-tools                   # tool notes (e.g. the obs.py runs) appear in the reply
+            - --delete-sessions
+            - --max-concurrency=2            # free tiers rate-limit; a burst gets a fast 429
+            - --queue-wait=30
+            - --timeout=600
+            - --model-refresh-interval=3600
+            - --model-cache=/home/opencode/opencode-models.json
+          ports:
+            - {name: bridge, containerPort: 18282, protocol: TCP}
+          env:
+            # Default free model; zero-retention provider per the OpenCode Zen docs (see hermes/README.md).
+            - {name: OPENCODE_BRIDGE_MODEL, value: opencode/deepseek-v4.1-flash-free}
+            - name: OPENCODE_BRIDGE_API_KEY            # read by the bridge from the environment (not on argv)
+              valueFrom:
+                secretKeyRef: {name: hermes-opencode-bridge, key: OPENCODE_BRIDGE_API_KEY}
+            - {name: OPENCODE_CONFIG, value: /etc/opencode/opencode.json}
+            - {name: HOME, value: /home/opencode}
+            - {name: PATH, value: "/opt/opencode/bin:/opt/hermes/tools/node-26.12.1-linux-x64/bin:/opt/hermes/.venv/bin:/usr/local/bin:/usr/bin:/bin"}
+          envFrom:
+            - secretRef: {name: hermes-grafana-token, optional: true}   # GRAFANA_TOKEN (Viewer) for the skill
+          securityContext: *restricted
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1536Mi}    # one `opencode run` per in-flight request (max 2)
+          readinessProbe: &bridgeprobe
+            exec:
+              command:
+                - /opt/hermes/.venv/bin/python3
+                - -c
+                - "import os, urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:18282/health', headers={'Authorization': 'Bearer ' + os.environ['OPENCODE_BRIDGE_API_KEY']}), timeout=4)"
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 8
+          livenessProbe:
+            <<: *bridgeprobe
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 4
+          volumeMounts:
+            - {name: bridge-script, mountPath: /app/opencode_bridge.py, subPath: opencode_bridge.py, readOnly: true}
+            - {name: opencode-config, mountPath: /etc/opencode, readOnly: true}
+            - {name: skill-observability, mountPath: /opt/skills/observability/grafana-tempo-observability, readOnly: true}
+            - {name: opencode, mountPath: /opt/opencode, readOnly: true}
+            - {name: home, mountPath: /home/opencode}
+            - {name: workspace, mountPath: /workspace}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: bridge-script
+          configMap:
+            name: opencode-bridge-script      # created by hermes/deploy.sh from ../opencode/kubernetes/bridge/
+        - name: opencode-config
+          configMap:
+            name: opencode-bridge-config
+        - name: skill-observability
+          configMap:
+            name: hermes-skill-observability
+            items:
+              - {key: SKILL.md, path: SKILL.md}
+              - {key: obs.py, path: scripts/obs.py}
+        - {name: opencode, emptyDir: {sizeLimit: 1Gi}}
+        - {name: home, emptyDir: {sizeLimit: 1Gi}}
+        - {name: workspace, emptyDir: {sizeLimit: 256Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opencode-bridge
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: opencode-bridge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: opencode-bridge
+  ports:
+    - {name: bridge, port: 18282, targetPort: bridge, protocol: TCP}

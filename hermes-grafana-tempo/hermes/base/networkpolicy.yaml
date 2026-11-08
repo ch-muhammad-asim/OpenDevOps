@@ -73,7 +73,14 @@ spec:
               app.kubernetes.io/instance: grafana
       ports:
         - {protocol: TCP, port: 3000}
-    # Model API (Cloudflare Workers AI, api.cloudflare.com:443). NetworkPolicy cannot match DNS names, so this allows HTTPS
+    # OpenCode bridge (default model provider, same namespace).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opencode-bridge
+      ports:
+        - {protocol: TCP, port: 18282}
+    # Model API (Cloudflare Workers AI, api.cloudflare.com:443; only used with MODEL_PROVIDER=cloudflare/opencode). NetworkPolicy cannot match DNS names, so this allows HTTPS
     # to public addresses only: private (RFC 1918), CGNAT, link-local (incl. the metadata server
     # 169.254.169.254) and the GKE default Service range are excluded. Pod-to-pod traffic is not matched
     # by ipBlock on Dataplane V2. For a single-host allow list use an egress proxy or FQDN policy.
@@ -107,3 +114,74 @@ spec:
               kubernetes.io/metadata.name: traefik
       ports:
         - {protocol: TCP, port: 9119}
+---
+# OpenCode bridge: only the Hermes gateway may call it; it may reach DNS, public HTTPS (OpenCode's model endpoints and
+# the npm registry for the CLI install; private, link-local/metadata and Service ranges excluded, as NetworkPolicy
+# cannot name hosts) and the read-only observability endpoints its agent uses through the skill.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opencode-bridge
+  namespace: hermes
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opencode-bridge
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: hermes-gateway
+      ports:
+        - {protocol: TCP, port: 18282}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - {key: k8s-app, operator: In, values: [kube-dns, node-local-dns]}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 34.118.224.0/20   # GKE default Service (ClusterIP) range; change if your cluster uses another
+      ports:
+        - {protocol: TCP, port: 443}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: thanos-query
+      ports:
+        - {protocol: TCP, port: 10902}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tempo
+      ports:
+        - {protocol: TCP, port: 3200}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: grafana
+      ports:
+        - {protocol: TCP, port: 3000}

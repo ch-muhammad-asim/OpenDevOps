@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Compare Workers AI models for Hermes on 5 prompts that force tool calls plus a follow-up answer
+# Compare models (OpenCode bridge, Workers AI or OpenCode Zen/Go, via MODEL_PROVIDER as in deploy.sh) for Hermes on 5 prompts that force tool calls plus a follow-up answer
 # (skills list, skill view, diagnose, PromQL, TraceQL). For each model: store it with deploy.sh, restart the
 # pod, ask the 5 prompts one by one through the gateway's API server (kubectl port-forward), and score:
 #   clean    no leaked chat-template tokens (<|...|>), no degenerate repetition, non-empty
 #   correct  the answer contains the expected real data (skill name, script name, issue names, value, trace ID)
-# Usage: CLOUDFLARE_AI_CREDS_FILE=<file> hermes/model-eval.sh @cf/qwen/qwen3.8-27b @cf/meta/llama-4-scout-17b-16e-instruct ...
+# Usage: hermes/model-eval.sh opencode/deepseek-v4.1-flash-free                (OpenCode free models via the bridge)
+#        MODEL_PROVIDER=cloudflare CLOUDFLARE_AI_CREDS_FILE=<file> hermes/model-eval.sh @cf/qwen/qwen3.8-27b @cf/meta/llama-4-scout-17b-16e-instruct ...
+#        MODEL_PROVIDER=opencode OPENCODE_API_KEY_FILE=<file> hermes/model-eval.sh gpt-5-nano glm-5.3-flash
 # Model calls run sequentially (rate limits). The last model listed stays deployed: list the winner last.
 set -uo pipefail
 cd "$(dirname "$0")"
-[[ -n "${CLOUDFLARE_AI_CREDS_FILE:-}" && $# -ge 1 ]] || { echo "usage: CLOUDFLARE_AI_CREDS_FILE=<file> $0 <model>..." >&2; exit 2; }
+[[ $# -ge 1 ]] || { echo "usage: [MODEL_PROVIDER=opencode-bridge|cloudflare|opencode + its credentials file env] $0 <model>..." >&2; exit 2; }
 tmp="$(mktemp -d)"; trap 'kill "$(cat "$tmp/pf" 2>/dev/null)" 2>/dev/null; rm -rf "$tmp"' EXIT; umask 077
 
 PROMPTS=(
@@ -56,7 +58,7 @@ for model in "$@"; do
   kubectl -n hermes rollout restart deploy/hermes-gateway >/dev/null
   kubectl -n hermes rollout status deploy/hermes-gateway --timeout=300s >/dev/null
   sleep 15
-  pod="$(kubectl -n hermes get pod -l app.kubernetes.io/name=hermes-gateway --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
+  pod="$(kubectl -n hermes get pod -l app.kubernetes.io/name=hermes-gateway --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')"
   port="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
   kubectl -n hermes port-forward "pod/$pod" "$port:8642" >/dev/null 2>&1 & echo $! >"$tmp/pf"
   for _ in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:$port/health" && break; sleep 1; done

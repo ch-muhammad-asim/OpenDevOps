@@ -1,6 +1,6 @@
-# OPTIONAL overlay on values.yaml: trace blocks in a Google Cloud Storage bucket.
-# Not used by the lab (the lab stores blocks in SeaweedFS S3 via values-s3.yaml); production uses
-# helm/tempo-distributed.
+# LAB DEFAULT overlay on values.yaml: trace blocks in a Google Cloud Storage bucket
+# (TEMPO_STORAGE=gcs, the default with OBJECT_STORE=gcs); lab bucket tempo-traces-<suffix> (TEMPO_BUCKET).
+# Production uses helm/tempo-distributed.
 # Chart grafana-community/tempo 3.2.1, Tempo 3.1.1. Use it together with values.yaml:
 #   helm upgrade --install tempo grafana-community/tempo --version 3.2.1 \
 #     --namespace observability --create-namespace \
@@ -9,11 +9,13 @@
 #
 # Auth: GKE Workload Identity Federation, no key files. infra/create-tempo-bucket.sh (wrapper around
 # infra/create-gcs-bucket.sh) creates a dedicated bucket (uniform access, public access prevention,
-# versioning off, 33-day lifecycle backstop) and grants roles/storage.objectUser for the Kubernetes
-# ServiceAccount observability/tempo:
+# versioning off, 33-day lifecycle backstop) and grants roles/storage.objectUser AND
+# roles/storage.bucketViewer for the Kubernetes ServiceAccount observability/tempo. bucketViewer is
+# needed because Tempo's GCS backend reads the bucket attributes at start (storage.buckets.get), which
+# objectUser lacks; without it Tempo crash-loops with 403 "storage.buckets.get".
 #   ACCESS_MODE=bucket (default)  on THIS bucket to the principal
 #     principal://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<PROJECT_ID>.svc.id.goog/subject/ns/observability/sa/tempo
-#   ACCESS_MODE=conditional       project-level binding with an IAM condition limited to this bucket
+#   ACCESS_MODE=conditional       project-level binding with an IAM condition limited to this bucket (lab)
 #   ACCESS_MODE=gsa               a DEDICATED Google service account (never a default compute account)
 #                                 that the KSA impersonates; scripts/deploy.sh adds the annotation.
 # The WAL, live-store data and generator WAL stay on the PV from values.yaml.

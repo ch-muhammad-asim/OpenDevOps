@@ -22,7 +22,7 @@ spec:
             severity: critical
           annotations:
             summary: Thanos sidecar bucket operations are failing.
-            description: Sidecar in {{ $labels.pod }} fails bucket operations; new blocks are not reaching the bucket (check Secret thanos-objstore, then the Workload Identity grant on GCS or the SeaweedFS S3 service in the lab).
+            description: Sidecar in {{ $labels.pod }} fails bucket operations; new blocks are not reaching the bucket (check Secret thanos-objstore, then the Workload Identity grant on GCS, or the SeaweedFS S3 service with the optional fallback).
             runbook_url: https://github.com/thanos-io/thanos/tree/main/mixin/runbook.md#alert-name-thanossidecarbucketoperationsfailed
         - alert: ThanosSidecarUploadFailures
           expr: |

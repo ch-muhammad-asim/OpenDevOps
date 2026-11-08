@@ -1,19 +1,21 @@
-# 🪣 SeaweedFS (lab S3 object store)
+# 🪣 SeaweedFS (optional S3 object store, for clusters without cloud object storage)
 
 SeaweedFS as one `weed server` process (master, volume server, filer and S3 gateway together) in namespace
-`object-storage`. **Why:** the lab profile needs an S3 bucket for Tempo trace blocks (`tempo-traces`) and Thanos
-metric blocks (`thanos-metrics`), but the lab account cannot grant bucket IAM on GCS. SeaweedFS keeps both buckets on
-one in-cluster persistent disk, free and open source (Apache-2.0), in a single small pod.
+`object-storage`. **Why:** a cluster without cloud object storage still needs an S3 bucket for Tempo trace blocks
+(`tempo-traces`) and Thanos metric blocks (`thanos-metrics`). SeaweedFS keeps both buckets on one in-cluster persistent
+disk, free and open source (Apache-2.0), in a single small pod.
 
-**Lab only.** Production uses GCS buckets with Workload Identity (`OBJECT_STORE=gcs`, see
-[`../thanos/`](../thanos/README.md) and [`../tempo-distributed/`](../tempo-distributed/)); nothing in this directory
-runs in production.
+**Optional fallback (`OBJECT_STORE=seaweedfs`).** Both profiles default to GCS buckets with Workload Identity
+(`OBJECT_STORE=gcs`, see [`../thanos/`](../thanos/README.md), [`../tempo/`](../tempo/README.md) and
+[`../../infra/`](../../infra/README.md)); nothing in this directory runs by default.
 
-**Status (2026-11-08, SeaweedFS 4.52):** ✅ live tested on the lab cluster: `seaweedfs-0` Ready on its 100Gi PVC, both
-buckets created by the bootstrap Job, Tempo writing blocks to `tempo-traces` (S3 requests 2xx only), Thanos sidecar
-uploads to `thanos-metrics` succeeding and the store gateway loading them; `PROFILE=lab scripts/verify.sh` 32 PASS,
-0 failures (includes "pods Ready in object-storage"). Also validated offline: `kubectl kustomize` + kubeconform strict
-(Kubernetes 1.36, 12 resources valid), `promtool check rules` (6 rules) and Pod Security Standards `restricted`.
+**Status:** no longer deployed in the lab (the lab moved to GCS on 2026-11-08; namespace `object-storage` removed).
+Earlier test record (2026-11-08, SeaweedFS 4.52): ✅ live on the lab cluster: `seaweedfs-0` Ready on its 100Gi PVC,
+both buckets created by the bootstrap Job, Tempo writing blocks to `tempo-traces` (S3 requests 2xx only), Thanos
+sidecar uploads to `thanos-metrics` succeeding and the store gateway loading them; `PROFILE=lab scripts/verify.sh`
+32 PASS, 0 failures at that time (includes "pods Ready in object-storage"). Also validated offline: `kubectl kustomize`
++ kubeconform strict (Kubernetes 1.36, 12 resources valid), `promtool check rules` (6 rules) and Pod Security Standards
+`restricted`.
 
 ## 🏗️ Architecture
 
@@ -43,7 +45,7 @@ uploads to `thanos-metrics` succeeding and the store gateway loading them; `PROF
 
 ## 🤔 Why SeaweedFS
 
-| Option | Licence / status | Fit for this lab | Decision |
+| Option | Licence / status | Fit for a small cluster | Decision |
 |---|---|---|---|
 | **SeaweedFS** | Apache-2.0, active releases | One process serves S3; small memory; per-bucket identities in a JSON file; Prometheus metrics | ✅ Chosen |
 | Garage | AGPL-3.0, active | Also light, but layout and keys are set with admin CLI calls after start, and it needs its own RPC secret | Not chosen |
@@ -68,7 +70,7 @@ once 30% of a volume is garbage), so usage lags deletes.
 
 ## 🚀 Install
 
-`scripts/deploy.sh` with `OBJECT_STORE=seaweedfs` (the lab default) does this in order: the `objectstore` step creates
+`scripts/deploy.sh` with `OBJECT_STORE=seaweedfs` (not the default; both profiles default to `gcs`) does this in order: the `objectstore` step creates
 the namespace and the three Secrets, the `prometheus` step applies the server and waits for the bucket Job (after the
 CRDs), then installs Thanos. By hand:
 
@@ -153,7 +155,7 @@ add an `object-storage` egress policy if you enforce egress cluster-wide.
 
 ## 🩺 Operations
 
-| Topic | Lab |
+| Topic | Fallback deployment |
 |---|---|
 | HA | None: one pod, one zonal disk. A restart pauses uploads; Tempo and the Thanos sidecar retry, data waits on their own disks |
 | Health | Probes on S3 `/healthz` and `/readyz` (8333); alert `SeaweedFSDown` |
@@ -162,7 +164,7 @@ add an `object-storage` egress policy if you enforce egress cluster-wide.
 | Grow the PV | `kubectl -n object-storage patch pvc data-seaweedfs-0 -p '{"spec":{"resources":{"requests":{"storage":"200Gi"}}}}'` (online), then raise `-volume.max` and the template size (`delete sts seaweedfs --cascade=orphan`, re-apply) |
 | Re-runs | `scripts/deploy.sh` generates the keys once and reuses the three Secrets on every re-run (never printed); it regenerates all three together only if one is missing |
 | Rotate keys | Update all three Secrets, then `kubectl -n object-storage rollout restart sts/seaweedfs` (s3.json is read at start), then restart Tempo and the Thanos components |
-| Backup | **None in the lab:** traces and metrics are regenerable demo data. Option: a `VolumeSnapshot` of `data-seaweedfs-0` (GKE PD CSI snapshot class) before risky changes |
+| Backup | **None by default:** traces and metrics are regenerable demo data. Option: a `VolumeSnapshot` of `data-seaweedfs-0` (GKE PD CSI snapshot class) before risky changes |
 | Restore | From a snapshot: new PVC from the snapshot named `data-seaweedfs-0`, then start the StatefulSet |
 | Upgrade | Bump tag and digest together in both files, apply, check `seaweedfs-0` ready and `s3.bucket.list`; roll back by re-applying the previous image |
 
@@ -217,7 +219,7 @@ and the client.
 
 ## 🏁 Production checklist
 
-Production does not use SeaweedFS (GCS with Workload Identity). If an in-cluster S3 store were ever needed beyond the lab:
+Production and the lab do not use SeaweedFS (GCS with Workload Identity). If an in-cluster S3 store is needed in production:
 
 - [ ] TLS on the S3 port (`-s3.cert.file`, `-s3.key.file`) and mTLS/`security.toml` for gRPC between components.
 - [ ] HA: 3 masters, several volume servers across zones, replication `010` or higher, a shared filer store.
