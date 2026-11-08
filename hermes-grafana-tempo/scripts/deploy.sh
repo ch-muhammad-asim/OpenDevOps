@@ -42,7 +42,7 @@ export LIFECYCLE_DAYS="${LIFECYCLE_DAYS:-33}"   # GCS backstop after the 30-day 
 # TLS_MODE=letsencrypt: cert-manager + Let's Encrypt DNS-01 certificates on Traefik ("Full (strict)").
 TLS_MODE="${TLS_MODE:-cloudflare}"
 PROJECT_ID_FOR_BUCKETS="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"   # bucket names: tempo-traces-<project>, thanos-metrics-<project>
-HOSTS=(grafana-tempo tempo-nextjs tempo-python tempo-nodejs)
+HOSTS=(grafana-tempo tempo-nextjs tempo-python tempo-nodejs hermes-gke)   # hermes-gke: Hermes dashboard route (hermes/)
 
 # Pinned chart versions (see helm/README.md and k8s/README.md).
 CERT_MANAGER_VERSION=v1.21.3

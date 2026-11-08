@@ -8,6 +8,10 @@ Tempo; Grafana shows each bug as spans, errors, latency and a service graph, and
 pipeline; its chat sends prompts only to the configured model provider, never into telemetry. **Why:** one place to see where time goes and where errors start, built only from official Helm charts and
 official OpenTelemetry SDKs, with production-grade defaults and a small lab profile.
 
+> 📘 **New to these tools?** Start with [**Every technology explained**](docs/technologies/README.md): one request's
+> journey through the whole stack, a glossary, and a card per technology (what it is, why it is here, alternatives,
+> version). Then [every Grafana dashboard explained](docs/dashboards/README.md).
+
 **Status:** ✅ lab profile live on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity,
 2026-11-08: `scripts/verify.sh` 0 failures on three
 consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 31/31 (2026-11-08; Hermes runs
@@ -319,7 +323,7 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 | Hermes Agent | Lab overlay `hermes/lab/` (`emptyDir` home, 50m / 256Mi): validated, not the one running | **Runs live on the lab cluster:** `hermes/base/` (10Gi PVC home, 100m / 384Mi, PDB, runbooks) | [`hermes/lab/`](hermes/lab/README.md), [`hermes/base/`](hermes/base/README.md) |
 | Edge TLS | Cloudflare edge TLS on every host (proxied records, SSL mode Full); Traefik serves its default certificate to Cloudflare; no cert-manager (`TLS_MODE=cloudflare`) | Cloudflare **Full (strict)** with validated origin certificates (`TLS_MODE=letsencrypt` or a Cloudflare Origin CA certificate) | [`k8s/`](k8s/README.md), [`scripts/`](scripts/README.md) |
 | Costs | All software is free and open source (no licences); billed: persistent disks, GCS storage and operations for the trace and metrics buckets, and the GKE nodes and load balancer | Same, at production size | [`helm/thanos/`](helm/thanos/README.md) |
-| Everywhere | Pinned chart versions. By digest: platform chart images, Hermes, the deployed sample-app images (`apps/deploy-apps.sh` resolves each tag to `@sha256`) and the Python base image; by tag only: the Node.js base image of the Next.js and Node.js apps. Requests/limits, Pod Security `restricted` where the workload allows, default-deny NetworkPolicies, PrometheusRules with runbooks | Same | each folder |
+| Everywhere | Pinned chart versions. By digest: platform chart images, Hermes, the deployed sample-app images (`apps/deploy-apps.sh` resolves each tag to `@sha256`) and the apps' Node.js and Python base images. Requests/limits, Pod Security `restricted` where the workload allows, default-deny NetworkPolicies, PrometheusRules with runbooks | Same | each folder |
 
 ## 🚀 Quickstart
 
@@ -389,7 +393,7 @@ access uses the Viewer role. Prometheus `:9090` is deliberately not reachable fr
 | [`apps/`](apps/README.md) | Sample apps: [`nextjs/`](apps/nextjs/README.md), [`nodejs/`](apps/nodejs/README.md), [`python/`](apps/python/README.md), [`monitoring/`](apps/monitoring/README.md), [`lab/`](apps/lab/README.md), [`local/`](apps/local/README.md) |
 | [`hermes/`](hermes/README.md) | Hermes Agent telemetry and dashboard: [`base/`](hermes/base/README.md) (production), [`lab/`](hermes/lab/README.md) |
 | [`scripts/`](scripts/README.md) | `deploy.sh`, `verify.sh`, `load.sh`, `teardown.sh` |
-| [`docs/`](docs/README.md) | [Every Grafana dashboard explained](docs/dashboards/README.md) and the diagram sources ([`docs/diagrams/`](docs/diagrams/README.md)) |
+| [`docs/`](docs/README.md) | [Every technology explained](docs/technologies/README.md), [every Grafana dashboard explained](docs/dashboards/README.md) and the diagram sources ([`docs/diagrams/`](docs/diagrams/README.md)) |
 
 ## 🔧 Instrumentation standards
 
