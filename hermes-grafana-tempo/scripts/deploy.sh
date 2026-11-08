@@ -14,6 +14,9 @@
 #                   `dns` step (and `certmanager` with TLS_MODE=letsencrypt); no default.
 # The Grafana admin password is generated once into Secret observability/grafana-admin.
 set -euo pipefail
+# chart <repo>/<name> <version>: use a pre-downloaded chart from CHART_CACHE when present (helm pull
+# into that directory first if the chart host is slow or unreachable), otherwise the repo reference.
+chart() { local f="${CHART_CACHE:-}/${1#*/}-$2.tgz"; if [ -n "${CHART_CACHE:-}" ] && [ -f "$f" ]; then echo "$f"; else echo "$1"; fi; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 K8S="$ROOT/k8s"; HELM="$ROOT/helm"
@@ -75,7 +78,7 @@ step_certmanager() {
   log "cert-manager $CERT_MANAGER_VERSION"
   [ -n "$CF_TOKEN_FILE" ] || { echo "error: TLS_MODE=letsencrypt needs CF_TOKEN_FILE" >&2; exit 2; }
   kubectl apply -f "$K8S/cert-manager.yaml"   # namespace (PSS restricted) + NetworkPolicies
-  helm upgrade --install cert-manager jetstack/cert-manager --version "$CERT_MANAGER_VERSION" \
+  helm upgrade --install cert-manager "$(chart jetstack/cert-manager "$CERT_MANAGER_VERSION")" --version "$CERT_MANAGER_VERSION" \
     -n cert-manager "${CM_VALS[@]}" --wait --timeout 10m
   [ -r "$CF_TOKEN_FILE" ] || { echo "error: CF_TOKEN_FILE not readable" >&2; exit 2; }
   # Token from the file only (first cfat_... or bare token line); never printed.
@@ -92,7 +95,7 @@ step_certmanager() {
 
 step_traefik() {
   log "traefik $TRAEFIK_VERSION"
-  helm upgrade --install traefik traefik/traefik --version "$TRAEFIK_VERSION" \
+  helm upgrade --install traefik "$(chart traefik/traefik "$TRAEFIK_VERSION")" --version "$TRAEFIK_VERSION" \
     -n traefik "${TRAEFIK_VALS[@]}" --wait --timeout 10m
 }
 
@@ -167,7 +170,7 @@ step_prometheus() {
     [ -z "$old" ] || [ "$old" = "$(base64 -w0 < "$d/objstore.yml")" ] || OBJSTORE_CHANGED=1
     rm -rf "$d"
   fi
-  helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version "$KPS_VERSION" \
+  helm upgrade --install prometheus "$(chart prometheus-community/kube-prometheus-stack "$KPS_VERSION")" --version "$KPS_VERSION" \
     -n monitoring "${V[@]}" --wait --timeout 15m
   [ "$OBJECT_STORE" = seaweedfs ] && apply_seaweedfs
   # Thanos query, store-gateway, compactor: prod base or the lab overlay (1 replica); objstore from the Secret.
@@ -199,7 +202,7 @@ step_tempo() {
     log "tempo-distributed $TEMPO_DISTRIBUTED_VERSION (storage: $TEMPO_STORAGE)"
     [ -n "${KAFKA_BOOTSTRAP:-}" ] || { echo "error: PROFILE=prod needs KAFKA_BOOTSTRAP (Kafka-compatible queue, see helm/tempo-distributed/README.md)" >&2; exit 2; }
     [ "$TEMPO_STORAGE" = gcs ] && extra=(--set "storage.trace.gcs.bucket_name=$bucket")
-    helm upgrade --install tempo grafana-community/tempo-distributed --version "$TEMPO_DISTRIBUTED_VERSION" \
+    helm upgrade --install tempo "$(chart grafana-community/tempo-distributed "$TEMPO_DISTRIBUTED_VERSION")" --version "$TEMPO_DISTRIBUTED_VERSION" \
       -n observability -f "$HELM/tempo-distributed/values.yaml" "${extra[@]}" "${wi[@]}" \
       --set "ingest.kafka.address=$KAFKA_BOOTSTRAP" --wait --timeout 15m
     kubectl apply -f "$HELM/tempo-distributed/prometheusrule-rollout-operator.yaml"
@@ -207,7 +210,7 @@ step_tempo() {
     log "tempo $TEMPO_VERSION single binary (storage: $TEMPO_STORAGE)"
     [ "$TEMPO_STORAGE" = gcs ] && extra=(-f "$HELM/tempo/values-gcs.yaml" --set "tempo.storage.trace.gcs.bucket_name=$bucket")
     [ "$TEMPO_STORAGE" = s3 ] && extra=(-f "$HELM/tempo/values-s3.yaml")   # SeaweedFS, Secret tempo-s3
-    helm upgrade --install tempo grafana-community/tempo --version "$TEMPO_VERSION" \
+    helm upgrade --install tempo "$(chart grafana-community/tempo "$TEMPO_VERSION")" --version "$TEMPO_VERSION" \
       -n observability -f "$HELM/tempo/values.yaml" "${extra[@]}" "${wi[@]}" --wait --timeout 10m
   fi
 }
@@ -215,7 +218,7 @@ step_tempo() {
 step_collector() {
   local V; mapfile -t V < <(vals "$HELM/otel-collector")
   log "opentelemetry-collector $OTEL_COLLECTOR_VERSION"
-  helm upgrade --install otel-collector open-telemetry/opentelemetry-collector --version "$OTEL_COLLECTOR_VERSION" \
+  helm upgrade --install otel-collector "$(chart open-telemetry/opentelemetry-collector "$OTEL_COLLECTOR_VERSION")" --version "$OTEL_COLLECTOR_VERSION" \
     -n observability "${V[@]}" --wait --timeout 10m
 }
 
@@ -232,7 +235,7 @@ step_grafana() {
     rm -rf "$d"
     echo "secret observability/grafana-admin created (read it with kubectl, it is not printed)"
   fi
-  helm upgrade --install grafana grafana-community/grafana --version "$GRAFANA_VERSION" \
+  helm upgrade --install grafana "$(chart grafana-community/grafana "$GRAFANA_VERSION")" --version "$GRAFANA_VERSION" \
     -n observability "${V[@]}" --wait --timeout 10m
 }
 
