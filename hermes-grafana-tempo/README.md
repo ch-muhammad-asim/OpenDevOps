@@ -8,6 +8,8 @@ Tempo; Grafana shows each bug as spans, errors, latency and a service graph, and
 pipeline; its chat sends prompts only to the configured model provider, never into telemetry. **Why:** one place to see where time goes and where errors start, built only from official Helm charts and
 official OpenTelemetry SDKs, with production-grade defaults and a small lab profile.
 
+> 🗺️ **Start with the visual learning map:** [**Architecture explained step by step**](docs/diagrams/learning-map.md) — a simplified component map, the complete request/telemetry journey, lab vs production, troubleshooting examples, and a suggested learning order.
+>
 > 📘 **New to these tools?** Start with [**Every technology explained**](docs/technologies/README.md): one request's
 > journey through the whole stack, a glossary, and a card per technology (what it is, why it is here, alternatives,
 > version). Then [every Grafana dashboard explained](docs/dashboards/README.md).
