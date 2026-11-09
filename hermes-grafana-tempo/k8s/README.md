@@ -6,7 +6,7 @@ and the sample apps, and Pod Security admission plus quotas bound what can run. 
 is optional. **Why:** only Grafana and the sample apps are public, only through Cloudflare, and the telemetry backends
 stay internal.
 
-**Status:** ✅ lab profile running on GKE 1.36 (3 x e2-standard-2, one zone) with `TLS_MODE=cloudflare`: routes
+**Status:** ✅ lab profile running on GKE 1.36 (3 x e2-standard-2, one zone) with `TLS_MODE=cloudflare` and the Cloudflare zone in **Full** mode: routes
 `tls: {}`, Traefik's default certificate, Cloudflare SSL mode "Full", cert-manager not installed; tested end to end on
 2026-11-08. `TLS_MODE=letsencrypt` is optional; it was tested on the same cluster earlier on 2026-11-08 (4 certificates
 issued and `READY`, Cloudflare "Full (strict)"). 🚧 The production profile (HA values, PDBs, quota, opt-in egress
