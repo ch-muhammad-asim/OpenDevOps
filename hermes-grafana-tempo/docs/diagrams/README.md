@@ -5,6 +5,7 @@ Mermaid sources for the diagrams in the [top-level README](../../README.md). The
 
 | File | Shows (one line) | Embedded in |
 |---|---|---|
+| [`learning-map.md`](learning-map.md) | Beginner-first learning map: component groups, application vs telemetry paths, lab vs production, troubleshooting, and reading order | Standalone [visual guide](learning-map.md), linked from the top-level README |
 | [`architecture.mmd`](architecture.mmd) | Namespaces and workloads on the GKE lab cluster: edge, sample apps, Hermes, observability, monitoring with Thanos, external GCS buckets with Workload Identity | [README](../../README.md), section Architecture |
 | [`telemetry-flow.mmd`](telemetry-flow.mmd) | How traces, metrics, logs, queries and alerts move from the apps and Hermes to Grafana | [Telemetry flow](../../README.md#-telemetry-flow) |
 | [`lab-vs-production.mmd`](lab-vs-production.mmd) | The two profiles: single-binary Tempo and Thanos (lab) vs tempo-distributed with Kafka, and Thanos (production); both use GCS buckets with Workload Identity and 30-day retention | [README](../../README.md), section Lab vs production |
