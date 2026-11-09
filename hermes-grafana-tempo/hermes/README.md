@@ -124,7 +124,7 @@ account ID, URL or key is in Git. After a switch: `kubectl -n hermes rollout res
 | Cloudflare Workers AI free (alternative) | `MODEL_PROVIDER=cloudflare CLOUDFLARE_AI_CREDS_FILE=<file> hermes/deploy.sh` | `@cf/qwen/qwen3.8-27b` | 10,000 Neurons/day free | File (outside the repo, mode 600): `Account ID: <cloudflare-account-id>` and `API: <workers-ai-api-token>` |
 | OpenCode Zen / Go (paid, not used here) | `MODEL_PROVIDER=opencode OPENCODE_API_KEY_FILE=<file> hermes/deploy.sh` | `glm-5.3-flash` | Zen credits / Go subscription | OpenCode API key file |
 
-Override the model with `HERMES_MODEL=<id>` (for the bridge: any id from its `/v1/models`). This setup is free-only:
+Override Hermes's default model with `HERMES_MODEL=<id>` (for the bridge: any id from its `/v1/models`). The bridge also accepts any advertised model ID in an individual OpenAI-compatible chat request; Hermes's configured `HERMES_MODEL` is only its default. The Hermes dashboard's configured model is not a model picker, so changing that default requires updating the Secret and restarting the gateway. This setup is free-only:
 the paid rows exist so the same scripts work if that changes.
 
 #### OpenCode free via bridge (first choice; default)
@@ -132,7 +132,7 @@ the paid rows exist so the same scripts work if that changes.
 The first-choice model is `opencode/deepseek-v4.1-flash-free` through the in-cluster OpenCode bridge. It uses the
 free OpenCode model tier and requires no provider API key. `hermes/deploy.sh` configures this provider by default;
 verify model availability and chat with `hermes/verify.sh` after deployment. If that model's free allowance is
-unavailable, the bridge may return a provider quota error; use another ID returned by the bridge's `/v1/models`.
+unavailable, the bridge may return a provider quota error; choose another ID returned by the bridge's `/v1/models` and set it as `HERMES_MODEL` when deploying. Listing a model confirms it is advertised, not that its upstream free quota is currently accepting requests. Requests may return provider quota errors, 429 (bridge busy), or time out while upstream inference is stalled. Verify catalog selection without making a model call with `./verify.sh`; optionally exercise one real alternate-model call with `VERIFY_BRIDGE_CHAT_MODEL=opencode/beam-free ./verify.sh` (this consumes shared free-tier capacity and has a 180-second timeout).
 
 OpenCode's free models only work through the OpenCode client ([Zen docs](https://opencode.ai/docs/zen/): "Free-tier
 chat models require OpenCode"). The bridge from this repository,
