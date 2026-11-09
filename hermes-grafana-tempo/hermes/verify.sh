@@ -131,6 +131,22 @@ v="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'impo
 r = urllib.request.Request("http://opencode-bridge.hermes:18282/v1/models", headers={"Authorization": "Bearer " + os.environ["HERMES_MODEL_API_KEY"]})
 d = json.load(urllib.request.urlopen(r, timeout=20)); ids = [m["id"] for m in d["data"]]; non_default = [m for m in ids if m != os.environ.get("HERMES_MODEL")]; print(json.dumps({"count": len(ids), "non_default_count": len(non_default), "sample": non_default[:3]}))' 2>/dev/null)"
 if [[ -n "$v" ]] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d["count"] >= 2 and d["non_default_count"] >= 1 else 1)' "$v"; then pass "Hermes -> bridge /v1/models exposes multiple free models including alternatives: $v"; else fail "Hermes -> bridge /v1/models lacks model alternatives: ${v:-no answer} (MODEL_PROVIDER=opencode-bridge?)"; fi
+v="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'import json, os, urllib.request
+req = urllib.request.Request("http://127.0.0.1:8642/api/model/options", headers={"Authorization": "Bearer " + os.environ["API_SERVER_KEY"]})
+d = json.load(urllib.request.urlopen(req, timeout=20))
+expected = {"opencode/deepseek-v4.1-flash-free", "opencode/beam-free", "opencode/big-pickle", "opencode/crouton-alpha-free", "opencode/flint-40b-free", "opencode/glm-5.3-flash-free", "opencode/iceman-free", "opencode/inkling-2-small-free", "opencode/longcat-2.5-free", "opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-lightning-free", "opencode/nemotron-3.5-super-vl-free"}
+found = set()
+def walk(x):
+ if isinstance(x, dict):
+  if isinstance(x.get("models"), list):
+   for m in x["models"]:
+    found.add(m if isinstance(m, str) else str(m.get("id", "")) if isinstance(m, dict) else "")
+  for y in x.values(): walk(y)
+ elif isinstance(x, list):
+  for y in x: walk(y)
+walk(d)
+print(json.dumps({"count": len(found & expected), "missing": sorted(expected - found)}))' 2>/dev/null)"
+if [[ -n "$v" ]] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d["count"] == 12 else 1)' "$v"; then pass "Hermes model picker contains all 12 configured OpenCode free models: $v"; else fail "Hermes model picker is missing OpenCode free models: ${v:-no answer} (see custom_providers in base/config.yaml)"; fi
 if [[ -n "${VERIFY_BRIDGE_CHAT_MODEL:-}" ]]; then
   b="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'import json, os, sys, urllib.request
 model = sys.argv[1]
