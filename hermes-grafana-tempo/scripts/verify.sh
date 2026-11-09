@@ -89,8 +89,8 @@ if kubectl -n monitoring get svc thanos-query >/dev/null 2>&1; then
 fi
 
 # Grafana datasources (admin creds read into variables from the Secret, never printed)
-gu="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d)"
-gp="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d)"
+gu="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d | tr -d '\n')"
+gp="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d | tr -d '\n')"
 netrc="$(mktemp)"; chmod 600 "$netrc"; printf 'machine 127.0.0.1 login %s password %s\n' "$gu" "$gp" > "$netrc"; unset gu gp
 for uid in prometheus tempo; do
   check "grafana datasource $uid healthy" sh -c "curl -fsS -m 20 --netrc-file '$netrc' http://127.0.0.1:$GRAFANA_PORT/api/datasources/uid/$uid/health | grep -q '\"OK\"'"

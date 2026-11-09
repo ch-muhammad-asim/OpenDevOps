@@ -127,7 +127,12 @@ account ID, URL or key is in Git. After a switch: `kubectl -n hermes rollout res
 Override the model with `HERMES_MODEL=<id>` (for the bridge: any id from its `/v1/models`). This setup is free-only:
 the paid rows exist so the same scripts work if that changes.
 
-#### OpenCode free via bridge (default)
+#### OpenCode free via bridge (first choice; default)
+
+The first-choice model is `opencode/deepseek-v4.1-flash-free` through the in-cluster OpenCode bridge. It uses the
+free OpenCode model tier and requires no provider API key. `hermes/deploy.sh` configures this provider by default;
+verify model availability and chat with `hermes/verify.sh` after deployment. If that model's free allowance is
+unavailable, the bridge may return a provider quota error; use another ID returned by the bridge's `/v1/models`.
 
 OpenCode's free models only work through the OpenCode client ([Zen docs](https://opencode.ai/docs/zen/): "Free-tier
 chat models require OpenCode"). The bridge from this repository,

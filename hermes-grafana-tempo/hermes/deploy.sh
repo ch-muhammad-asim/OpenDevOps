@@ -123,8 +123,8 @@ if kubectl -n observability get secret grafana-admin >/dev/null 2>&1; then
   gport="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
   kubectl -n observability port-forward svc/grafana "$gport:80" >/dev/null 2>&1 & gpf=$!
   for _ in $(seq 1 30); do curl -fs "http://127.0.0.1:$gport/api/health" >/dev/null 2>&1 && break; sleep 1; done
-  printf 'user = "%s:%s"\n' "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' | base64 -d)" \
-    "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d)" >"$tmp/gadmin"
+  printf 'user = "%s:%s"\n' "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' | base64 -d | tr -d '\n')" \
+    "$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d | tr -d '\n')" >"$tmp/gadmin"
   gapi() { curl -fsS -K "$tmp/gadmin" -H 'Content-Type: application/json' "$@"; }
   said="$(gapi "http://127.0.0.1:$gport/api/serviceaccounts/search?query=hermes-readonly" \
           | python3 -I -c 'import json, sys; a = [x for x in json.load(sys.stdin)["serviceAccounts"] if x["name"] == "hermes-readonly"]; print(a[0]["id"] if a else "")')"
