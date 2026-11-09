@@ -12,10 +12,12 @@ official OpenTelemetry SDKs, with production-grade defaults and a small lab prof
 > journey through the whole stack, a glossary, and a card per technology (what it is, why it is here, alternatives,
 > version). Then [every Grafana dashboard explained](docs/dashboards/README.md).
 
-**Status:** ✅ lab profile live on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity,
-2026-11-08: `scripts/verify.sh` 0 failures on three
-consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 31/31 (2026-11-08; Hermes runs
-its production overlay). The production profile
+**Status:** Lab profile deployed on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity.
+On 2026-11-09, in-cluster `scripts/verify.sh` checks pass, including app health, datasource access, trace ingestion
+and lookup, metrics and NetworkPolicy isolation. Hermes gateway telemetry, dashboard, read-only observability skill
+and the OpenCode free DeepSeek model listing also pass. Public HTTPS checks currently fail from the verification
+environment (Cloudflare/origin timeout); do not treat the live URLs below as externally verified. The earlier
+2026-11-08 lab run passed `scripts/verify.sh` three consecutive times and `hermes/verify.sh` 31/31. The production profile
 (tempo-distributed with GCS and Kafka, HA Prometheus, Collector HPA) renders and passes `helm lint` and
 `kubeconform -strict`; it has **not** been run on a cluster. See [Tests](#-tests).
 
