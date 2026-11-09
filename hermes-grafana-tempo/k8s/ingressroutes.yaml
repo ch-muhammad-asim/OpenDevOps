@@ -1,9 +1,9 @@
 # Traefik CRDs for the four public hosts.
 #
-#   grafana-tempo.saqlainmushtaq.com  -> observability/grafana:80
-#   tempo-nextjs.saqlainmushtaq.com   -> tempo-apps/nextjs:3000
-#   tempo-python.saqlainmushtaq.com   -> tempo-apps/python:8000
-#   tempo-nodejs.saqlainmushtaq.com   -> tempo-apps/nodejs:3000
+#   grafana-tempo.example.com  -> observability/grafana:80
+#   tempo-nextjs.example.com   -> tempo-apps/nextjs:3000
+#   tempo-python.example.com   -> tempo-apps/python:8000
+#   tempo-nodejs.example.com   -> tempo-apps/nodejs:3000
 #
 # websecure (:443): always served. Certificate per TLS_MODE (scripts/deploy.sh):
 # cloudflare = Traefik's default certificate; letsencrypt = the <host>-tls Secret
@@ -172,7 +172,7 @@ spec:
       Server: ""
       X-Powered-By: ""
 ---
-# ==================== grafana-tempo.saqlainmushtaq.com ============
+# ==================== grafana-tempo.example.com ============
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -182,7 +182,7 @@ spec:
   entryPoints: [websecure]
   routes:
     - kind: Rule
-      match: Host(`grafana-tempo.saqlainmushtaq.com`)
+      match: Host(`grafana-tempo.example.com`)
       middlewares:
         - name: cloudflare-only
         - name: security-headers
@@ -204,7 +204,7 @@ spec:
   routes:
     # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
     - kind: Rule
-      match: Host(`grafana-tempo.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      match: Host(`grafana-tempo.example.com`) && Header(`X-Forwarded-Proto`, `https`)
       priority: 100
       middlewares:
         - name: cloudflare-only
@@ -215,7 +215,7 @@ spec:
     # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
     # redirect answers first); a real service keeps the router valid.
     - kind: Rule
-      match: Host(`grafana-tempo.saqlainmushtaq.com`)
+      match: Host(`grafana-tempo.example.com`)
       priority: 10
       middlewares:
         - name: cloudflare-only
@@ -224,7 +224,7 @@ spec:
         - name: grafana
           port: 80
 ---
-# ==================== tempo-nextjs.saqlainmushtaq.com =============
+# ==================== tempo-nextjs.example.com =============
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -234,7 +234,7 @@ spec:
   entryPoints: [websecure]
   routes:
     - kind: Rule
-      match: Host(`tempo-nextjs.saqlainmushtaq.com`)
+      match: Host(`tempo-nextjs.example.com`)
       middlewares:
         - name: cloudflare-only
         - name: security-headers
@@ -256,7 +256,7 @@ spec:
   routes:
     # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
     - kind: Rule
-      match: Host(`tempo-nextjs.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      match: Host(`tempo-nextjs.example.com`) && Header(`X-Forwarded-Proto`, `https`)
       priority: 100
       middlewares:
         - name: cloudflare-only
@@ -267,7 +267,7 @@ spec:
     # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
     # redirect answers first); a real service keeps the router valid.
     - kind: Rule
-      match: Host(`tempo-nextjs.saqlainmushtaq.com`)
+      match: Host(`tempo-nextjs.example.com`)
       priority: 10
       middlewares:
         - name: cloudflare-only
@@ -276,7 +276,7 @@ spec:
         - name: nextjs
           port: 3000  # port confirmed by apps/
 ---
-# ==================== tempo-python.saqlainmushtaq.com =============
+# ==================== tempo-python.example.com =============
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -286,7 +286,7 @@ spec:
   entryPoints: [websecure]
   routes:
     - kind: Rule
-      match: Host(`tempo-python.saqlainmushtaq.com`)
+      match: Host(`tempo-python.example.com`)
       middlewares:
         - name: cloudflare-only
         - name: security-headers
@@ -308,7 +308,7 @@ spec:
   routes:
     # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
     - kind: Rule
-      match: Host(`tempo-python.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      match: Host(`tempo-python.example.com`) && Header(`X-Forwarded-Proto`, `https`)
       priority: 100
       middlewares:
         - name: cloudflare-only
@@ -319,7 +319,7 @@ spec:
     # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
     # redirect answers first); a real service keeps the router valid.
     - kind: Rule
-      match: Host(`tempo-python.saqlainmushtaq.com`)
+      match: Host(`tempo-python.example.com`)
       priority: 10
       middlewares:
         - name: cloudflare-only
@@ -328,7 +328,7 @@ spec:
         - name: python
           port: 8000  # port confirmed by apps/
 ---
-# ==================== tempo-nodejs.saqlainmushtaq.com =============
+# ==================== tempo-nodejs.example.com =============
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -338,7 +338,7 @@ spec:
   entryPoints: [websecure]
   routes:
     - kind: Rule
-      match: Host(`tempo-nodejs.saqlainmushtaq.com`)
+      match: Host(`tempo-nodejs.example.com`)
       middlewares:
         - name: cloudflare-only
         - name: security-headers
@@ -360,7 +360,7 @@ spec:
   routes:
     # Visitor used HTTPS at Cloudflare (SSL mode "Flexible"): serve.
     - kind: Rule
-      match: Host(`tempo-nodejs.saqlainmushtaq.com`) && Header(`X-Forwarded-Proto`, `https`)
+      match: Host(`tempo-nodejs.example.com`) && Header(`X-Forwarded-Proto`, `https`)
       priority: 100
       middlewares:
         - name: cloudflare-only
@@ -371,7 +371,7 @@ spec:
     # Plain HTTP: permanent redirect to HTTPS. The service is never called (the
     # redirect answers first); a real service keeps the router valid.
     - kind: Rule
-      match: Host(`tempo-nodejs.saqlainmushtaq.com`)
+      match: Host(`tempo-nodejs.example.com`)
       priority: 10
       middlewares:
         - name: cloudflare-only

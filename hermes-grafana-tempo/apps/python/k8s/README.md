@@ -1,9 +1,5 @@
 # ☸️ python-inventory: Kubernetes manifests
 
-Kustomize manifests that run [`python-inventory`](../) in namespace `tempo-apps` as Deployment `python` behind
-ClusterIP Service `python` on port 8000. **Status:** ✅ renders with `kubectl kustomize` and passes
-`kubectl apply --dry-run=server` on GKE 1.36; running live on GKE since 2026-11-08 (lab profile, 1 replica, image by digest).
-
 ## 🧩 Files
 
 | File | What it defines (one line) |

@@ -4,13 +4,6 @@ Scripts that create the Google Cloud resources for hermes-grafana-tempo: the GKE
 (both profiles) that keep 30 days of Tempo trace blocks and Thanos metric blocks. All scripts are idempotent and read
 settings from environment variables.
 
-**Status:** `create-cluster.sh` `PROFILE=lab` tested 2026-11-08 (zonal, 3 × e2-standard-2, GKE 1.36, Dataplane V2).
-`PROFILE=prod` (regional, autoscaling, private nodes + Cloud NAT, maintenance window) is checked offline only: `bash -n`,
-the generated `gcloud` commands, and every flag against `gcloud ... --help`; no production cluster has been created.
-`create-gcs-bucket.sh` / `create-tempo-bucket.sh` run live in the lab (2026-11-08, `ACCESS_MODE=conditional`): buckets
-`tempo-traces-<suffix>` and `thanos-metrics-<suffix>` serve Tempo and Thanos through Workload Identity.
-`ACCESS_MODE=bucket` and `gsa` are checked offline only (`bash -n`, generated commands).
-
 ## 🧩 Files
 
 | File | What it does (one line) | Security role |

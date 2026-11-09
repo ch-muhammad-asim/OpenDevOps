@@ -4,15 +4,6 @@ Three small services in three languages that call each other and carry deliberat
 OpenTelemetry traces over OTLP to the Collector, so Grafana Tempo shows every bug as slow spans, error spans, exception
 events or fan-out, and TraceQL finds it. **Why:** a reproducible way to learn what each class of bug looks like in a trace.
 
-**Status:** ✅ all three tested together locally on 2026-11-08 with the [local stack](local/) (Tempo 3.1.1,
-Collector contrib 0.165.0): every planted issue was found by its TraceQL query, the full
-`nextjs-web → nodejs-orders → python-inventory` chain is one trace, and the service graph edges reached Prometheus.
-✅ Live on GKE 1.36 the same day (lab profile, images by digest): the three public hostnames answer over HTTPS,
-`scripts/load.sh public` gives the same status mix (200/500/502/504), every TraceQL query finds its issue in the
-cluster's Tempo, and the 12 alert/recording rules load (`ErrorBudgetFastBurn` goes pending under load by design).
-Production profile (2 replicas) validated with a server-side dry run, not run live. Details in the
-[top-level README](../README.md#-tests).
-
 ## 🏗️ Architecture
 
 The project [architecture diagram](../docs/diagrams/architecture.mmd) shows the sample apps and their calls; it renders in the [top-level README](../README.md). The table below lists the parts.
@@ -64,10 +55,6 @@ Exact TraceQL, what each looks like in Tempo and the fix are in each app's READM
 Quick finds across all apps: `{ status = error }`, `{ event:name = "exception" }`, `{ span:duration > 1s }`.
 
 ## 📈 The same issues in PromQL (span metrics)
-
-Tempo's metrics-generator turns every span into `traces_spanmetrics_*` and `traces_service_graph_*` series in
-Prometheus. Tempo-generated series use the label `service` (not `service_name`, which the Collector's spanmetrics
-connector uses). Wrap counters in `rate()` and keep `le` for `histogram_quantile`. Verified on the local stack, 2026-11-08.
 
 | Signal | PromQL | What it showed after `load.sh` |
 |---|---|---|

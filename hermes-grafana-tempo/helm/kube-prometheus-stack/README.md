@@ -5,16 +5,6 @@ rules for the Collector, Traefik, cert-manager and Grafana. **Why:** stores the 
 that Tempo's metrics-generator remote-writes, the OTLP metrics from the Collector and cluster metrics, with exemplars
 so a latency spike links to the trace behind it, and routes alerts by severity.
 
-**Status (2026-11-08, chart 93.1.0):** the **lab** profile (`values.yaml` + `values-lab.yaml`) matches the release
-running on the lab cluster (same values; it adds image digests, the route tree, anti-affinity, config-reloader
-requests of 5m / 16Mi per pod and no service account token in the Alertmanager pod).
-Both profiles keep 2 days locally plus the Thanos sidecar (30 days via [`../thanos/`](../thanos/README.md)) uploading to
-a GCS bucket through Workload Identity. The lab is live on GCS (2026-11-08: bucket `thanos-metrics-<suffix>`;
-`PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures). The **production** profile (`values.yaml`
-alone: 2 days locally plus the Thanos sidecar uploading to GCS) passes
-`helm lint`, `helm template`, kubeconform (Kubernetes 1.36, strict) and `promtool`; it has not been installed on a
-multi-zone cluster yet.
-
 ## 🧩 Components
 
 | Name | What it does (one line) | Where defined | Security role |
@@ -63,18 +53,6 @@ sidecars (Thanos query, store and compactor: [`../thanos/`](../thanos/README.md)
 
 ## 🗓️ Retention
 
-| Profile | Local TSDB | Long-term | Tested? |
-|---|---|---|---|
-| Lab | `retention: 2d`, `retentionSize: 8GiB` on a 40Gi PVC | Thanos: raw, 5m and 1h kept 30 days in GCS; bucket lifecycle 35 days | ✅ Live (2026-11-08) |
-| Production | `retention: 2d`, `retentionSize: 85GiB` on a 100Gi PVC | Thanos: raw, 5m and 1h kept 30 days in GCS; bucket lifecycle 35 days | Rendered and validated only |
-
-Measured lab ingest (2026-11-08): 3,429 samples/s, 150,952 head series, so 8.89 billion samples and ~12–18 GB raw per
-replica in 30 days (in the bucket); 2 days locally is ~1–2 GB plus the WAL, so `8GiB` is a safety cap only. The lab
-PVC stays 40Gi because a PVC cannot shrink; a smaller disk needs a new PVC on a fresh install. When the lab switched to
-the sidecar, blocks that Prometheus had already compacted locally were not uploaded (the sidecar ships only 2h blocks), so
-history older than the switch (a few hours in the lab) is gone after 2 days. History started on 2026-11-08, so 30-day
-trends fill in over time.
-
 **How the lab PVC was expanded (10Gi → 40Gi, online):** `standard-rwo` allows volume expansion. The PVC request was
 raised to 40Gi, the new size set in `values-lab.yaml` (`storageSpec`) and applied with `helm upgrade`; the operator
 then recreated its StatefulSet with the new `volumeClaimTemplates` (the pod and its data stay). Check with
@@ -82,9 +60,6 @@ then recreated its StatefulSet with the new `volumeClaimTemplates` (the pod and 
 [storage](https://prometheus-operator.dev/docs/platform/storage/).
 
 ## 📌 Pinned images
-
-Multi-arch index digests read from each registry's v2 API (`HEAD /v2/<repo>/manifests/<tag>`) on 2026-11-08; the
-digests of the images running in the lab match.
 
 | Image | Tag | Digest | Runs |
 |---|---|---|---|
@@ -315,8 +290,6 @@ kubectl apply --server-side --force-conflicts \
 ```
 
 ## 🧪 Tests
-
-Run on 2026-11-08 with chart 93.1.0, helm v3.17.3, kubeconform v0.8.0, promtool 3.16.0, amtool 0.34.2.
 
 | Test | Command (from the repo dir) | Result |
 |---|---|---|

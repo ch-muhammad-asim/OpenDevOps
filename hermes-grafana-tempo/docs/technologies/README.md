@@ -10,7 +10,7 @@ Follow one click on the Next.js demo's **Report** link from the browser to an an
 
 | # | Step | What happens | Technology |
 |---|---|---|---|
-| 1 | You click **Report** | The browser asks `tempo-nextjs.saqlainmushtaq.com` for `/api/report` | Browser |
+| 1 | You click **Report** | The browser asks `tempo-nextjs.example.com` for `/api/report` | Browser |
 | 2 | DNS and HTTPS | The name points to Cloudflare, which terminates HTTPS and forwards the request to the cluster's public IP | [Cloudflare](#cloudflare-dns--proxied-tls) |
 | 3 | Into the cluster | Traefik accepts only Cloudflare's addresses and routes by hostname to the `nextjs` Service | [Traefik](#traefik), [GKE](#google-kubernetes-engine-gke) |
 | 4 | The apps work | `nextjs-web` calls `nodejs-orders`, which calls `python-inventory`; each passes a `traceparent` header so all three join one trace | [Next.js](#nextjs), [Node.js](#nodejs--express), [Python](#python--fastapi), [OpenTelemetry](#opentelemetry) |

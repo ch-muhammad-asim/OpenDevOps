@@ -17,7 +17,7 @@ CM_RELEASE=""; CM_NS=""
 [ "$TLS_MODE" = letsencrypt ] && { CM_RELEASE="cert-manager:cert-manager"; CM_NS="cert-manager"; }
 # Tempo query API: single binary "tempo" (lab) or the query-frontend (prod, tempo-distributed).
 if [ "$PROFILE" = lab ]; then TEMPO_QUERY_SVC="${TEMPO_QUERY_SVC:-tempo}"; else TEMPO_QUERY_SVC="${TEMPO_QUERY_SVC:-tempo-query-frontend}"; fi
-ZONE="${ZONE:-saqlainmushtaq.com}"
+ZONE="${ZONE:-example.com}"
 GRAFANA_HOST="${GRAFANA_HOST:-grafana-tempo.$ZONE}"
 CURL_IMAGE="${CURL_IMAGE:-curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93}"
 # Probe pods must pass Pod Security "restricted" (observability, tempo-apps, hermes enforce it).
@@ -89,8 +89,8 @@ if kubectl -n monitoring get svc thanos-query >/dev/null 2>&1; then
 fi
 
 # Grafana datasources (admin creds read into variables from the Secret, never printed)
-gu="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d)"
-gp="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d)"
+gu="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d | tr -d '\n')"
+gp="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d | tr -d '\n')"
 netrc="$(mktemp)"; chmod 600 "$netrc"; printf 'machine 127.0.0.1 login %s password %s\n' "$gu" "$gp" > "$netrc"; unset gu gp
 for uid in prometheus tempo; do
   check "grafana datasource $uid healthy" sh -c "curl -fsS -m 20 --netrc-file '$netrc' http://127.0.0.1:$GRAFANA_PORT/api/datasources/uid/$uid/health | grep -q '\"OK\"'"

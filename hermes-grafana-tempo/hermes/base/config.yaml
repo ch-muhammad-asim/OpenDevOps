@@ -39,6 +39,28 @@ model:
   key_env: HERMES_MODEL_API_KEY
   context_length: 128000             # the endpoints do not report it; both default models have 128k+
 
+# Keep the bridge's current free catalog visible in Hermes's model picker even before its first
+# successful live /v1/models probe. Discovery remains enabled, so the picker refreshes this list
+# from the bridge and persists newer IDs in its provider model cache.
+custom_providers:
+  - name: OpenCode Free
+    base_url: ${env:HERMES_MODEL_BASE_URL}
+    key_env: HERMES_MODEL_API_KEY
+    discover_models: true
+    models:
+      opencode/deepseek-v4.1-flash-free: {}
+      opencode/beam-free: {}
+      opencode/big-pickle: {}
+      opencode/crouton-alpha-free: {}
+      opencode/flint-40b-free: {}
+      opencode/glm-5.3-flash-free: {}
+      opencode/iceman-free: {}
+      opencode/inkling-2-small-free: {}
+      opencode/longcat-2.5-free: {}
+      opencode/mimo-v2.6-flash-free: {}
+      opencode/nemotron-3.5-lightning-free: {}
+      opencode/nemotron-3.5-super-vl-free: {}
+
 # Guardrails for an agent that can now act: a human approves every flagged command (API-server runs are
 # never auto-approved), secrets are masked in output and logs, no URL fetches to private addresses, no
 # package installs, bounded runs, no connectors, MCP servers or update checks.

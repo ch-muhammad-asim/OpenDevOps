@@ -92,7 +92,7 @@ failure behind a 200.
   `span_name`, `span_kind`, `status_code`) and the service graph `traces_service_graph_request_total` /
   `..._failed_total` (labels `client`, `server`).
 - **Prometheus** (kube-prometheus-stack) stores metrics and evaluates alert rules (`HermesGatewayDown`, ...).
-- **Grafana** (public: https://grafana-tempo.saqlainmushtaq.com) has the `prometheus` and `tempo` data sources,
+- **Grafana** (public: https://grafana-tempo.example.com) has the `prometheus` and `tempo` data sources,
   Explore with TraceQL, and dashboards (e.g. "Hermes Agent gateway", uid `hermes-gateway`).
 
 ## Useful queries

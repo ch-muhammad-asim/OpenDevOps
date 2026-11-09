@@ -28,7 +28,7 @@ PROMPTS=(
 # Expected content (Python regex): the skill name; at least 3 planted-issue markers and a Grafana link.
 EXPECT=(
   'grafana-tempo-observability'
-  '(?s)(?=.*https://grafana-tempo\.saqlainmushtaq\.com/)(?:.*?(KeyError|N\+1|timeout|CPU|memory leak|TypeError|fan-out|supplier)){3}'
+  '(?s)(?=.*https://grafana-tempo\.example\.com/)(?:.*?(KeyError|N\+1|timeout|CPU|memory leak|TypeError|fan-out|supplier)){3}'
 )
 
 fails=0

@@ -3,9 +3,6 @@
 Kustomize manifests that run `nodejs-orders` in namespace `tempo-apps` as Service `nodejs` on port 3000.
 They follow the Pod Security `restricted` profile, which namespace `tempo-apps` enforces (and warns/audits). App details, planted issues and TraceQL are in the [app README](../README.md).
 
-**Status:** `kubectl kustomize apps/nodejs/k8s` renders a Service, a Deployment and a PodDisruptionBudget; running
-live on GKE 1.36 since 2026-11-08 (lab profile, image by digest), read-only root filesystem as UID 10001.
-
 ## 🧩 Files
 
 | File | What it does | Security role |

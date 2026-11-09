@@ -1,14 +1,8 @@
 # 📊 Grafana dashboards, explained
 
-Every dashboard in this project's Grafana (<https://grafana-tempo.saqlainmushtaq.com>), in plain language: what it is
+Every dashboard in this project's Grafana (<https://grafana-tempo.example.com>), in plain language: what it is
 for, who looks at it and when, what each key panel measures, where the number comes from, the query behind it, what
 good and bad look like, and a "try it" step with the demo apps.
-
-**Inventory:** 34 dashboards in 4 folders, listed live from the Grafana API on 2026-11-08 (lab profile). Log in with
-the Grafana admin user (Secret `observability/grafana-admin`, see [`helm/grafana/`](../../helm/grafana/README.md)).
-Dashboards are provisioned as ConfigMaps labelled `grafana_dashboard`, so edits made in the UI are lost on the next
-restart. Change the source file listed in the Inventory below instead; the General dashboards have no file in
-this repository (they come from the kube-prometheus-stack chart).
 
 ## 📏 How metrics are measured
 
@@ -149,7 +143,7 @@ double-count. Details: [`hermes/`](../../hermes/README.md).
 | Gateway up and active agents | History of the above | same queries over time | Flat line at 1 |
 | Hermes gateway spans | Trace table from Tempo | TraceQL `{ resource.service.name = "hermes-gateway" }` | A `gateway.health_snapshot` span every ~15 s, a `gateway.lifecycle` span per start |
 
-**Try it:** log in at <https://hermes-gke.saqlainmushtaq.com>, open **Chat** and ask a question; watch *Active
+**Try it:** log in at <https://hermes-gke.example.com>, open **Chat** and ask a question; watch *Active
 agents* and *Busy* go to 1 and back. Click a trace ID in the table to see a health span's attributes.
 
 ## 🧪 Tests folder
@@ -201,7 +195,7 @@ system, or during an incident to see which hop fails.
 **How to read it:** you should see `nextjs-web → nodejs-orders → python-inventory`. A missing edge means one service
 stopped sending spans or stopped propagating `traceparent`. For call rates and failures per edge, use Explore → Tempo →
 **Service Graph**, which colours failing edges red.
-**Try it:** open <https://tempo-nextjs.saqlainmushtaq.com/api/dashboard> a few times and refresh the dashboard after
+**Try it:** open <https://tempo-nextjs.example.com/api/dashboard> a few times and refresh the dashboard after
 ~1 minute.
 
 ### Tempo Operational
@@ -239,7 +233,7 @@ data source.
 | Kafka produced records, Kafka writes | Distributor → Kafka (production only) | `rate(tempo_distributor_produce_records_total)`, `..._produce_failures_total` | Empty in the lab; production: failures 0 |
 | Envoy, Memcached, Backend - Compactor | Proxy, cache and storage writes | `envoy_*`, `tempo_memcache_*`, `tempodb_backend_*{operation=~"PUT\|POST"}` | Envoy/Memcached empty in this stack |
 
-**Try it:** open <https://tempo-python.saqlainmushtaq.com/inventory/report> a few times; the distributor
+**Try it:** open <https://tempo-python.example.com/inventory/report> a few times; the distributor
 spans/s line steps up (each request creates one SQL span per row).
 
 ### Tempo / Reads
@@ -387,7 +381,7 @@ requests commitment means pods cannot all be scheduled).
 | Persistent Volumes | PVC space and inode use (`kubelet_volume_stats_*`); alert before 100 % |
 
 **Try it:** open *Compute Resources / Namespace (Pods)* for `tempo-apps`, then open
-<https://tempo-nodejs.saqlainmushtaq.com/orders/report> a few times: the `nodejs` pod's CPU spikes (the report is a
+<https://tempo-nodejs.example.com/orders/report> a few times: the `nodejs` pod's CPU spikes (the report is a
 planted CPU hog).
 
 ### Node Exporter dashboards
@@ -409,7 +403,7 @@ runs the `nextjs` pod.
 
 ## 🧪 Try it: a 5-minute tour
 
-1. Open <https://tempo-nextjs.saqlainmushtaq.com> and click **Report** 5–10 times (a CPU-bound report in
+1. Open <https://tempo-nextjs.example.com> and click **Report** 5–10 times (a CPU-bound report in
    `nodejs-orders`).
 2. After ~1 minute, Explore → Prometheus:
    `histogram_quantile(0.95, sum by (le, service) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[5m])))`;

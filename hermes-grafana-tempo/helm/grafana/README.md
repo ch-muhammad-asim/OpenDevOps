@@ -1,17 +1,8 @@
 # 📊 Grafana
 
-Grafana as its own release, the only public UI of the stack, served at `https://grafana-tempo.saqlainmushtaq.com`.
+Grafana as its own release, the only public UI of the stack, served at `https://grafana-tempo.example.com`.
 **Why:** one place to search traces with TraceQL, jump from a latency spike (exemplar) to its trace, from a span to its
 service's RED metrics, and to see the service graph.
-
-**Status (2026-11-08, chart 14.4.0, Grafana 13.3.0):** the **lab** profile (`values.yaml` + `values-lab.yaml`) matches
-the release running on the lab cluster (same settings and requests; it adds image digests, stricter security headers,
-spread constraints and the Prometheus and Tempo URLs through environment variables). Both profiles point the
-Prometheus data source at the Thanos querier; the lab switch from Prometheus `:9090` to Thanos is live (2026-11-08:
-data source healthy; Thanos on GCS, `PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures), and the lab keeps its SQLite database on a
-1Gi PVC. The **production** profile (`values.yaml`
-alone: 2 replicas on an external database) passes `helm lint`, `helm template` and kubeconform (Kubernetes 1.36,
-strict); it has not been installed yet.
 
 ## 🧩 Components
 
@@ -50,8 +41,6 @@ running lab release).
 
 ## 📌 Pinned images
 
-Multi-arch index digests read from each registry's v2 API on 2026-11-08; the lab's running digests match.
-
 | Image | Tag | Digest | Runs |
 |---|---|---|---|
 | `docker.io/grafana/grafana` | `13.3.0-distroless` | `sha256:540b8afb775bf34aefce417e4329039daa5d44b6f2fbda6881397b1b247ca7df` | Grafana (production) |
@@ -74,7 +63,7 @@ The chart's `sha:` fields take the hex only (the chart adds `@sha256:`).
 | `grafana.ini` `security.strict_transport_security` (+ `max_age_seconds: 31536000`) | `true` | HSTS for one year |
 | `grafana.ini` `security.content_security_policy`, `x_content_type_options`, `x_xss_protection`, `allow_embedding: false` | on | CSP, `nosniff`, XSS header, no framing |
 | `grafana.ini` `snapshots.external_enabled` | `false` | No publishing to an external snapshot service |
-| `grafana.ini` `server.root_url` | `https://grafana-tempo.saqlainmushtaq.com` | Correct redirects and links behind the proxy |
+| `grafana.ini` `server.root_url` | `https://grafana-tempo.example.com` | Correct redirects and links behind the proxy |
 | `grafana.ini` `unified_alerting.ha_*` | `${POD_IP}:9094`, peers `grafana-headless...:9094` | Official Kubernetes HA settings |
 | `env.PROMETHEUS_QUERY_URL` | per profile (table above) | Grafana expands `${PROMETHEUS_QUERY_URL}` in the provisioned Prometheus data source |
 | `env.TEMPO_QUERY_URL` | per profile (table above) | Grafana expands `${TEMPO_QUERY_URL}` in the provisioned Tempo data source |
@@ -226,8 +215,6 @@ ClusterRole (`rbac.useExistingClusterRole`).
 | Tempo dashboards | The 8 dashboards in [`dashboards/`](dashboards/) are rewritten for single-binary Tempo (`job="tempo"`); with tempo-distributed use the upstream mixin selectors (`job="<namespace>/<component>"`) |
 
 ## 🧪 Tests
-
-Run on 2026-11-08 with chart 14.4.0, helm v3.17.3, kubeconform v0.8.0.
 
 | Test | Command (from the repo dir) | Result |
 |---|---|---|

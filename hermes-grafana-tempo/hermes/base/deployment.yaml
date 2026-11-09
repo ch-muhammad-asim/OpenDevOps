@@ -129,7 +129,7 @@ spec:
             - {name: HOME, value: /opt/data/home}
             # The only Host / WebSocket Origin the dashboard accepts. Dashboard container only (see
             # config.yaml): in the shared config it would also gate the gateway, which then exits.
-            - {name: HERMES_DASHBOARD_PUBLIC_URL, value: "https://hermes-gke.saqlainmushtaq.com"}
+            - {name: HERMES_DASHBOARD_PUBLIC_URL, value: "https://hermes-gke.example.com"}
             - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
               valueFrom:
                 secretKeyRef: {name: hermes-dashboard-auth, key: username}

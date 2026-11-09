@@ -4,11 +4,6 @@ The OpenTelemetry Collector (contrib distribution) as a Deployment. **Why:** one
 Hermes Agent; it adds Kubernetes metadata to every signal, batches it and routes traces to Tempo and metrics to
 Prometheus, so no app talks to a backend directly.
 
-**Status:** ✅ the lab profile runs on the lab cluster (chart 0.178.2, contrib 0.165.0, 1 replica). The production
-profile renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kubernetes 1.36); the rendered
-prod, lab and tail-sampling configs pass `otelcol-contrib validate` 0.165.0 (2026-11-08). The production profile has
-not been run on a cluster.
-
 ## 🎚️ Profiles
 
 | | Production ([`values.yaml`](values.yaml)) | Lab (`+` [`values-lab.yaml`](values-lab.yaml)) |

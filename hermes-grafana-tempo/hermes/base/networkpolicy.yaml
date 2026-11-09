@@ -116,7 +116,7 @@ spec:
         - {protocol: TCP, port: 9119}
 ---
 # OpenCode bridge: only the Hermes gateway may call it; it may reach DNS, public HTTPS (OpenCode's model endpoints and
-# the npm registry for the CLI install; private, link-local/metadata and Service ranges excluded, as NetworkPolicy
+# GitHub release assets for the CLI install; private, link-local/metadata and Service ranges excluded, as NetworkPolicy
 # cannot name hosts) and the read-only observability endpoints its agent uses through the skill.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

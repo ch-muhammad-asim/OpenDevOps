@@ -110,7 +110,7 @@ DEFAULT_QUEUE_WAIT = 30  # seconds a request waits for a concurrency slot before
 
 _REDACT_MARKERS = ("sk-ant-", "sk-", "Bearer ", "Authorization:", "api_key", "apiKey")
 # Substrings that mark an upstream error as "retry later" rather than "bad request".
-_RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "too many requests", "quota", "overloaded")
+_RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "too many requests", "quota", "overloaded", "free usage limit")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -500,7 +500,7 @@ def classify_error(message: str) -> int:
 
 
 def build_command(cfg: "BridgeConfig", model: str, image_files: Optional[list[str]] = None) -> list[str]:
-    cmd = [cfg.opencode_bin, "run", "--format", "json", "--model", model]
+    cmd = [cfg.opencode_bin, "run", "--format", "json", "--print-logs", "--log-level", "ERROR", "--model", model]
     if cfg.auto_approve_flag:
         cmd.append(cfg.auto_approve_flag)
     if cfg.show_reasoning:
@@ -602,6 +602,11 @@ def run_events(cfg: "BridgeConfig", model: str, prompt: str,
             assert proc.stderr is not None
             for raw in iter(proc.stderr.readline, ""):
                 stderr_chunks.append(raw)
+                # Some CLI versions log an exhausted free tier but leave the run
+                # alive indefinitely. Stop this failed request instead of holding
+                # a concurrency slot until the full agent timeout expires.
+                if "stream error" in raw.lower() and "free usage limit" in raw.lower():
+                    _kill(proc)
         except (OSError, ValueError):
             pass
 
@@ -1277,6 +1282,26 @@ def _selfcheck() -> None:
     assert [m for m, _ in parsed] == ["opencode/mimo-v2.5-free", "paid/some-model"], parsed
     assert _is_free(parsed[0][1]) and not _is_free(parsed[1][1])
 
+    # A provider quota error must not occupy a bridge slot for the agent timeout.
+    if not _IS_WINDOWS:
+        with tempfile.TemporaryDirectory() as directory:
+            fake = os.path.join(directory, "opencode")
+            with open(fake, "w") as handle:
+                handle.write("#!/usr/bin/env python3\nimport sys,time\n"
+                             "sys.stderr.write('level=ERROR message=stream error: Free usage limit reached\\n')\n"
+                             "sys.stderr.flush()\ntime.sleep(30)\n")
+            os.chmod(fake, 0o755)
+            config = BridgeConfig(build_parser().parse_args([
+                "--opencode-bin", fake, "--models", "opencode/mimo-v2.5-free",
+                "--timeout", "10", "--no-auto-approve", "--keep-sessions"]))
+            started = time.monotonic()
+            try:
+                list(run_events(config, "opencode/mimo-v2.5-free", "test"))
+            except OpenCodeError as exc:
+                assert exc.exit_code == 429, exc
+            else:
+                raise AssertionError("free-usage limit was not reported")
+            assert time.monotonic() - started < 10
     cfg = BridgeConfig(build_parser().parse_args(["--models", "opencode/mimo-v2.5-free,opencode/big-pickle"]))
     assert cfg.models == ["opencode/mimo-v2.5-free", "opencode/big-pickle"], cfg.models  # default first, de-duped
     assert cfg.resolve_model("big-pickle")[0] == "opencode/big-pickle"        # bare-id alias
@@ -1303,7 +1328,6 @@ def _selfcheck() -> None:
     # Model cache round-trip: what discovery produces must survive a write/read cycle
     # with context lengths and the free flag intact, since the deployment builds the
     # dashboard's model picker from this file.
-    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
         cache_path = os.path.join(tmpdir, "sub", "models.json")
         discovered = ["opencode/new-shiny-free", "opencode/mimo-v2.5-free"]

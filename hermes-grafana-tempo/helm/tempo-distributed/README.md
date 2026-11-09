@@ -7,11 +7,6 @@ zone-redundant recent-data queries and isolated failure domains. This is the **p
 (`scripts/deploy.sh` with `PROFILE=prod`); the lab uses the single-binary chart in [`../tempo/`](../tempo/) with a
 local PV. There is no `values-lab.yaml` here: this profile does not fit a small lab cluster (see Sizing).
 
-**Status:** 🚧 renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kubernetes 1.36 schemas;
-the `ZoneAwarePodDisruptionBudget` custom resource has no public schema and is skipped) on chart 3.27.0 / Tempo 3.1.1
-(2026-11-08); [`prometheusrule-rollout-operator.yaml`](prometheusrule-rollout-operator.yaml) passes `promtool check
-rules`. Not installed on a cluster; runtime behaviour is to be verified on deploy.
-
 ## 📨 Kafka: required in Tempo 3.x microservices mode
 
 | Question | Answer | Source |
@@ -53,14 +48,6 @@ factor 3, `min.insync.replicas=2`, `cleanup.policy=delete`, retention 24h (never
 | GCS bucket `tempo-traces-<project>` | Trace blocks, retention enforced by Tempo; lifecycle delete after 33 days as backstop | `storage.trace.gcs`, [`../../infra/create-tempo-bucket.sh`](../../infra/create-tempo-bucket.sh) | `roles/storage.objectUser` + `roles/storage.bucketViewer` on the bucket for the WIF principal `observability/tempo`, no keys |
 
 ## 🗓️ Retention and cost
-
-| Item | Value | Source |
-|---|---|---|
-| Trace retention | `block_retention: 720h` (30 days); `compacted_block_retention: 1h` | [`values.yaml`](values.yaml) `backendScheduler.config.provider.compaction` |
-| Bucket lifecycle | `Delete` after 33 days (backstop, never before Tempo's own deletion) | [`../../infra/create-tempo-bucket.sh`](../../infra/create-tempo-bucket.sh) |
-| Measured ingest (lab, 2026-11-08) | 38.8 KB/s received, 131.5 spans/s; blocks ~0.31 of received bytes | Single-binary lab, synthetic load plus Hermes |
-| Bucket size at 30 days | ~31 GB | 38.8 KB/s × 2,592,000 s × 0.31 |
-| Storage cost | ~$0.62/month plus operations | GCS Standard, us-central1, $0.020 per GB-month list price |
 
 Production ingest will differ; re-measure with `sum(rate(tempo_distributor_bytes_received_total[1h]))` and
 `gcloud storage du -s gs://$TEMPO_BUCKET`.
@@ -229,15 +216,6 @@ maintenance, then revert, because without the webhooks live-store zones are not 
 | Node drain hangs, `failed calling webhook "pod-eviction-observability.grafana.com"` | Rollout-operator down | Runbook [TempoRolloutOperatorDown](#temporolloutoperatordown) |
 
 ## 📌 Pinned versions
-
-| Item | Version | Digest (multi-arch index) |
-|---|---|---|
-| Chart `grafana-community/tempo-distributed` | 3.27.0 (latest, 2026-11-08) | — |
-| `grafana/tempo` | 3.1.1 (latest release) | `sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044` |
-| `memcached` | 1.6.45-alpine | `sha256:bfc2ee42c4edb65f436dafc6a61cbc6938c30118e11ddea2f968e1a2c90bb12a` |
-| `prom/memcached-exporter` | v0.18.0 | `sha256:1458b31d4cae1a6618e85c8d31ecc49c4ebdcee3c8530be8d80d93e8792c4a58` |
-| `grafana/rollout-operator` (subchart 0.53.1) | v0.41.1 | `sha256:49e0d230669d261cec44e7b33188c72dde02fa29bfa9ec1e14274a9965bda740` |
-| `apache/kafka` (test only) | 4.4.0 | `sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f` |
 
 ## 🧹 Teardown
 

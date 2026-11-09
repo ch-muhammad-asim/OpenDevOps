@@ -11,12 +11,6 @@ microservices chart in [`../tempo-distributed/`](../tempo-distributed/) (HA, GCS
 [`values-gcs.yaml`](values-gcs.yaml) (`TEMPO_STORAGE=gcs`, the default with `OBJECT_STORE=gcs`); the S3 overlay
 [`values-s3.yaml`](values-s3.yaml) is the optional SeaweedFS fallback for clusters without cloud object storage.
 
-**Status:** ✅ lab live on GCS (2026-11-08): chart 3.2.1, Tempo 3.1.1, `block_retention: 720h`, blocks in bucket
-`tempo-traces-<suffix>` through Workload Identity (`ACCESS_MODE=conditional`), WAL on the 50Gi PVC;
-`PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures. Blocks in the earlier SeaweedFS bucket were not migrated.
-Renders with `helm template`, passes `helm lint` and `kubeconform -strict` (Kubernetes 1.36) with each overlay
-(2026-11-08).
-
 ## 🧩 Components
 
 | Name | What it does (one line) | Where defined | Security role |
@@ -55,16 +49,6 @@ Drilldown are served by the live-store in single-binary mode, so the processor i
 (ports 14250/14268/6831/6832, cluster-internal, unused).
 
 ## 📏 Retention and sizing
-
-| Item | Value | Source |
-|---|---|---|
-| Retention | `720h` (30 days) | `tempo.retention` |
-| Measured ingest (lab, 2026-11-08) | 38.8 KB/s received, 131.5 spans/s | Tempo distributor metrics, 1h rate, synthetic load plus Hermes |
-| Block size | ~0.31 of received bytes | Blocks on the PV vs bytes received (measured with the local backend) |
-| Blocks per 30 days | ~31 GB | 38.8 KB/s × 2,592,000 s × 0.31 |
-| Where blocks live (lab) | GCS bucket `tempo-traces-<suffix>`, lifecycle backstop 33 days | [`values-gcs.yaml`](values-gcs.yaml), [`../../infra/`](../../infra/README.md#-gcs-buckets-both-profiles) |
-| Bucket cost (estimate) | ~$0.62/month storage (~31 GB × $0.020/GB-month, GCS Standard) plus operations (not measured) | [`../thanos/`](../thanos/README.md#production-gcs) price list |
-| PVC | 50Gi `standard-rwo`, now mostly WAL | Sized for local blocks before the switch to object storage; a PVC cannot shrink |
 
 **How the lab PVC was expanded (10Gi → 50Gi, online):** `standard-rwo` allows volume expansion, but a StatefulSet's
 `volumeClaimTemplates` cannot be changed in place. So the StatefulSet object is deleted without its pod
