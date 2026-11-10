@@ -153,13 +153,61 @@ This is **HTTP carried inside encrypted SSH**, so use `http://` locally, not `ht
 
 See [official OpenCode server documentation](https://opencode.ai/docs/server/) and [web UI documentation](https://opencode.ai/docs/cli/web).
 
-## 5. If you intentionally need a public OpenTunnel route
+## 5. Connect OpenCode on your Mac to the remote GCP OpenCode server
+
+**Verified against [official OpenCode CLI docs](https://opencode.ai/docs/cli) and [Web/server docs](https://opencode.ai/docs/cli/web/):** the OpenCode client can connect to a remote OpenCode backend. **Do not configure the remote server as a custom model provider.** A custom provider is for OpenAI-compatible *inference* endpoints; OpenCode's native server is for OpenCode clients and has its own session APIs. It does not automatically implement `/v1/models` or `/v1/chat/completions`.
+
+**On your GCP VM:** keep the authenticated OpenCode server listening on loopback, for example:
+
+```bash
+opencode web --hostname 127.0.0.1 --port 8443
+```
+
+The server password must be configured securely on the VM; refer to [OpenCode's Web documentation](https://opencode.ai/docs/cli/web/). **On your Mac**, keep this SSH forward active:
+
+```bash
+gcloud compute ssh INSTANCE_NAME \
+  --project YOUR_GCP_PROJECT_ID --zone us-central1-c \
+  -- -N -L 127.0.0.1:8443:127.0.0.1:8443
+```
+
+**Test from your Mac**, using the remote-server URL (no `/v1` suffix):
+
+```bash
+# Confirm the remote OpenCode Web server responds (HTML is expected here).
+curl -sS -u opencode \
+  -o /dev/null -w 'HTTP %{http_code} / %{content_type}\n' \
+  http://127.0.0.1:8443/
+
+# Connect an OpenCode CLI client to that remote backend.
+# Supported in current OpenCode CLI; consult 'opencode --help' if using an older release.
+read -rs "OPENCODE_PASSWORD?OpenCode server password: "; echo
+export OPENCODE_PASSWORD
+opencode --server http://127.0.0.1:8443
+```
+
+In the connected client, enter `/models` to see the models configured on the **GCP backend**. To run a noninteractive prompt using the backend, if your CLI supports it:
+
+```bash
+opencode run --help  # check --server / --attach support in your version
+opencode run --server http://127.0.0.1:8443 "Reply OK only"
+```
+
+**Older OpenCode CLI versions:** some documented versions use `opencode attach http://127.0.0.1:8443` or `opencode run --attach http://127.0.0.1:8443`; check `opencode --help` and `opencode run --help` for your exact version.
+
+**Desktop app:** consult its built-in remote server/pairing flow if offered in your installed version; do not assume the desktop application's **Custom Provider** field supports native server connections. You can always use the CLI remote connection above to test the backend.
+
+**What executes where?** The GCP OpenCode server owns the selected providers, credentials, sessions, workspace, and tool execution. The Mac client displays/controls that remote backend. This does **not** turn it into an OpenAI-compatible model endpoint for Hermes.
+
+**Troubleshooting:** `jq` errors and HTML at `/provider` indicate a non-JSON response, not a working model API. Check the CLI connection and model selection first; model catalog visibility alone is not proof of usable inference.
+
+## 6. If you intentionally need a public OpenTunnel route
 
 The installer publishes **only the disposable demo** to OpenTunnel. Do **not** publish an unauthenticated OpenCode server or a service with cloud credentials, internal dashboards, or admin endpoints. The safe default for OpenCode access is **SSH forwarding above**, not a public URL.
 
 If you choose to expose a protected service publicly, first confirm its authentication, authorization, TLS configuration and restrictions. An OpenTunnel URL is not an authentication mechanism.
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Check |
 |---|---|
