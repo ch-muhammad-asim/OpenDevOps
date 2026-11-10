@@ -533,7 +533,8 @@ def classify_error(message: str) -> int:
 
 
 def build_command(cfg: "BridgeConfig", model: str, image_files: Optional[list[str]] = None) -> list[str]:
-    cmd = [cfg.opencode_bin, "run", "--format", "json", "--print-logs", "--log-level", "error", "--model", model]
+    cmd = [cfg.opencode_bin, "run", "--format", "json", "--print-logs",
+           "--log-level", cfg.log_level, "--model", model]
     if cfg.auto_approve_flag:
         cmd.append(cfg.auto_approve_flag)
     if cfg.show_reasoning:
@@ -756,6 +757,10 @@ class BridgeConfig:
         # opencode v2 dropped `run --dir`; the startup probe turns this off when
         # the CLI would reject it (the child already runs in cfg.cwd).
         self.dir_flag = True
+        # `--log-level` is case-sensitive and its enum flipped between releases
+        # (1.x: ERROR, v2: error); main() probes the CLI and this stays the
+        # lowercase default so selfcheck needs no opencode binary.
+        self.log_level = "error"
         self.show_tools = args.show_tools
         self.show_reasoning = args.show_reasoning
         self.pure = args.pure
@@ -1172,6 +1177,26 @@ def _detect_dir_flag(opencode_bin: str) -> bool:
     return "--dir" in text
 
 
+def _detect_log_level(opencode_bin: str) -> str:
+    """Return the ``--log-level`` spelling this opencode accepts.
+
+    The flag's enum is case-sensitive and flipped between releases: 1.x lists
+    ``[choices: "DEBUG", "INFO", "WARN", "ERROR"]`` (uppercase), while v2 lists
+    the lowercase spelling. Sending the wrong one fails every request with
+    "Invalid value for flag --log-level". Probe ``run --help`` and mirror
+    whatever case the CLI advertises; default to lowercase (v2 and newer).
+    """
+    try:
+        proc = subprocess.run([opencode_bin, "run", "--help"],
+                              capture_output=True, text=True, timeout=15)
+        text = (proc.stdout or "") + (proc.stderr or "")
+    except Exception:  # noqa: BLE001 — best-effort probe
+        return "error"
+    if "ERROR" in text:
+        return "ERROR"
+    return "error"
+
+
 def _detect_opencode_version(opencode_bin: str) -> str:
     try:
         out = subprocess.run([opencode_bin, "--version"], capture_output=True, text=True, timeout=15)
@@ -1259,6 +1284,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     cfg = BridgeConfig(args)
     opencode_version = _detect_opencode_version(args.opencode_bin)
     cfg.dir_flag = _detect_dir_flag(args.opencode_bin)
+    cfg.log_level = _detect_log_level(args.opencode_bin)
     if cfg.auto_approve:
         flag = _detect_auto_approve_flag(args.opencode_bin)
         cfg.auto_approve_flag = flag or ""
