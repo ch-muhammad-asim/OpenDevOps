@@ -17,7 +17,7 @@ fail() { echo "FAIL  $*"; fails=$((fails + 1)); }
 enc() { python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
 json() { python3 -I -c "import json, sys; d = json.load(sys.stdin); print($1)"; }
 
-URL="${HERMES_URL:-https://hermes-gke.example.com}"
+URL="${HERMES_URL:-https://hermes-gke.${DOMAIN:-${ZONE:-example.com}}}"
 tmp="$(mktemp -d)"
 cleanup() { [[ -f "$tmp/pids" ]] && xargs kill <"$tmp/pids" 2>/dev/null; rm -rf "$tmp"; }
 trap cleanup EXIT

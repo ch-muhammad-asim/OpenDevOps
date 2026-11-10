@@ -26,6 +26,16 @@ done
 kubectl apply -f base/namespace.yaml
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 umask 077
+
+# Public hostname. The manifests keep the reusable example.com placeholder, so a private copy is rendered with
+# DOMAIN (or the older ZONE) and applied instead of the tracked files.
+DOMAIN="${DOMAIN:-${ZONE:-example.com}}"
+if [ "$DOMAIN" != example.com ]; then
+  mkdir -p "$tmp/rendered"
+  cp -a "$dir" "$tmp/rendered/$dir"
+  grep -rlZ 'example\.com' "$tmp/rendered/$dir" 2>/dev/null | xargs -0 -r sed -i "s/example\.com/${DOMAIN}/g"
+  dir="$tmp/rendered/$dir"
+fi
 rand() { head -c "$1" /dev/urandom | base64 | tr -d '\n/+='; }
 
 # 1. Gateway API server key (the API server listens on localhost only).
@@ -57,8 +67,11 @@ fi
 # 3. OpenCode bridge (default model provider: OpenCode's free models, no key, no cost). Reuses the bridge script from
 #    this repository (../../opencode/kubernetes/bridge/opencode_bridge.py) as ConfigMap opencode-bridge-script, and a
 #    random shared key (Secret hermes-opencode-bridge) that Hermes sends to it.
-BRIDGE_SRC="${OPENCODE_BRIDGE_SRC:-../../opencode/kubernetes/bridge/opencode_bridge.py}"
-[[ -r "$BRIDGE_SRC" ]] || { echo "OpenCode bridge script not found at $BRIDGE_SRC (set OPENCODE_BRIDGE_SRC)" >&2; exit 1; }
+REPO_ROOT="$(cd ../.. && pwd)"   # this script cd's into hermes/, so the repository root is two levels up
+BRIDGE_SRC="${OPENCODE_BRIDGE_SRC:-$REPO_ROOT/opencode/kubernetes/bridge/opencode_bridge.py}"
+[[ -r "$BRIDGE_SRC" ]] || { echo "error: OpenCode bridge script not found at $BRIDGE_SRC" >&2
+  echo "       clone the full repository or set OPENCODE_BRIDGE_SRC to its opencode/kubernetes/bridge/opencode_bridge.py" >&2
+  exit 1; }
 if kubectl -n hermes create configmap opencode-bridge-script --from-file=opencode_bridge.py="$BRIDGE_SRC" \
      --dry-run=client -o yaml | kubectl apply -f - | grep -q configured; then
   bridge_changed=1
@@ -168,4 +181,4 @@ kubectl apply -k "$dir"
 [[ -n "${bridge_changed:-}" ]] && kubectl -n hermes rollout restart deploy/opencode-bridge >/dev/null      # new bridge script
 kubectl -n hermes rollout status deploy/opencode-bridge --timeout=300s
 kubectl -n hermes rollout status deploy/hermes-gateway --timeout=300s
-echo "Dashboard: https://hermes-gke.example.com  (user and password: see hermes/README.md, 'Log in')"
+echo "Dashboard: https://hermes-gke.$DOMAIN  (user and password: see hermes/README.md, 'Log in')"

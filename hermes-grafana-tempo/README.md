@@ -325,20 +325,38 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 
 ## 🚀 Quickstart
 
-Run from this folder (`hermes-grafana-tempo/`). Each step is idempotent.
+One command deploys everything and verifies it (idempotent: re-run to converge):
 
 ```bash
-# Confirm the intended sandbox project; create-cluster.sh replaces the kubectl context.
-gcloud config get-value project
-export CF_TOKEN_FILE=/path/to/cloudflare-dns-token   # chmod 600; Zone:DNS:Edit + Zone:Zone:Read
+PROJECT_ID=<gcp-project> DOMAIN=<domain-you-control> CF_TOKEN_FILE=/path/to/cloudflare-dns-token scripts/up.sh
+```
+
+`scripts/up.sh` runs, in order: the GKE cluster (`PROFILE=lab` by default: zonal, 3 × `e2-standard-2`,
+Dataplane V2), the platform (Prometheus, Traefik, Tempo, Collector, Grafana, dashboards, routes), the Cloudflare
+DNS records for the five hostnames, the sample apps built and deployed by digest from Artifact Registry, Hermes
+(gateway, dashboard, OpenCode bridge), demo traffic, and both verify scripts. It exits non-zero if any check fails.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `PROJECT_ID` | active gcloud project | target project |
+| `DOMAIN` | `example.com` | public domain for the five hosts; DNS is skipped for `example.com` |
+| `CF_TOKEN_FILE` | none | Cloudflare token file (chmod 600, Zone:DNS:Edit + Zone:Zone:Read); required with a real `DOMAIN` |
+| `PROFILE` | `lab` | `lab` (3 × e2-standard-2) or `prod` (with `REGION`) |
+| `GCP_ZONE` / `REGION` | `us-central1-a` / none | lab zonal cluster / prod regional cluster |
+| `TLS_MODE` | `cloudflare` | `cloudflare` (zone SSL "Full", Traefik default certificate) or `letsencrypt` |
+| `ACCESS_MODE` | `bucket` | GCS Workload Identity grant; restricted training projects usually need `conditional` |
+| `SKIP_CLUSTER`, `SKIP_APPS`, `SKIP_HERMES`, `SKIP_LOAD`, `SKIP_VERIFY` | unset | set to `1` to re-run only the later layers |
+
+The manifests keep `example.com` placeholders; `scripts/up.sh`, `scripts/deploy.sh` and `hermes/deploy.sh` render a
+private copy with `DOMAIN` before applying, so no tracked file changes. Each layer can also be run on its own:
+
+```bash
 infra/create-cluster.sh                     # 1. GKE cluster (lab: zonal, 3 x e2-standard-2, Dataplane V2)
-PROFILE=lab scripts/deploy.sh               # 2. Prometheus, edge, Tempo, Collector, Grafana, dashboards, routes, DNS
-gcloud artifacts repositories describe tempo-apps --location=us-central1 >/dev/null 2>&1 || \
-  gcloud artifacts repositories create tempo-apps --repository-format=docker --location=us-central1 --immutable-tags
-apps/build-push.sh && apps/deploy-apps.sh lab   # 3. build + push the sample apps, deploy them by digest (repo setup: apps/README.md)
-hermes/deploy.sh                            # 4. Hermes gateway, dashboard, OpenCode bridge; providers: hermes/README.md
+PROFILE=lab DOMAIN=<domain> scripts/deploy.sh   # 2. platform + DNS
+apps/build-push.sh && apps/deploy-apps.sh lab   # 3. sample apps by digest (repo setup: apps/README.md)
+DOMAIN=<domain> hermes/deploy.sh            # 4. Hermes; providers: hermes/README.md
 scripts/load.sh public                      # 5. traffic that triggers every planted issue
-PROFILE=lab scripts/verify.sh && hermes/verify.sh   # 6. PASS/FAIL checks; exit code = failures
+PROFILE=lab DOMAIN=<domain> scripts/verify.sh && DOMAIN=<domain> hermes/verify.sh   # 6. PASS/FAIL checks
 ```
 
 Restricted training projects may require `ACCESS_MODE=conditional` for the platform deployment; this still scopes
@@ -443,7 +461,10 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 
 ## 🧪 Tests
 
-Run `PROFILE=lab scripts/verify.sh` for platform checks, `hermes/verify.sh` for Hermes checks,
+Run `PROJECT_ID=... DOMAIN=... CF_TOKEN_FILE=... scripts/up.sh` for a complete deploy plus every check below.
+`PROFILE=lab scripts/verify.sh` covers platform checks, `hermes/verify.sh` Hermes checks,
+`DOMAIN=<domain> scripts/e2e.sh` walks the public path (Cloudflare -> Traefik -> apps) and proves the telemetry
+path end to end (collector span counters, a sample-app trace read back from Tempo, Prometheus, Grafana),
 and `hermes/model-smoke.sh` to test the current free model catalogue in your own deployment.
 See [`tests/`](tests/README.md) for demo load and resilience scenarios.
 
