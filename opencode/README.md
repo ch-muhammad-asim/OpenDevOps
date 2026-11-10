@@ -6,6 +6,7 @@ The remote Desktop/server connection uses the **native OpenCode server protocol*
 
 | Folder | Target | Endpoint |
 |--------|--------|----------|
+| [`opencode-bridge/`](opencode-bridge/README.md) | 📘 **Start here:** unified OpenAI-compatible bridge guide with existing macOS/Linux scripts, GCP VM, Kubernetes, Hermes and support caveats | Default `:18383/v1`; VM/K8s examples `:18282/v1` |
 | [`hermes-desktop/`](hermes-desktop) | 🖥️ Hermes desktop app on macOS / Linux (custom endpoint) | `http://127.0.0.1:18282/v1` |
 | [`opentunnel/`](opentunnel) | ✅ [Verified Mac OpenCode Desktop → GCP OpenCode server](opentunnel/remote-desktop-gcp.md), with SSH forwarding, architecture diagrams; optional OpenTunnel/Herdr install | Private SSH `http://127.0.0.1:8443` |
 | [`kubernetes/`](kubernetes) | ☸️ Production: Hermes + bridge sidecar on GKE, read-only SRE agent, Traefik dashboard | in-pod loopback `:18282` |
@@ -17,6 +18,8 @@ cd hermes-desktop && ./install-opencode-bridge.sh
 # cluster (self-contained Kustomize root)
 cd kubernetes && kubectl apply -k .
 ```
+
+**For all bridge platforms and commands:** begin at the [central OpenCode Bridge README](opencode-bridge/README.md). The scripts remain in their existing directories without duplication.
 
 **For Hermes using a VM bridge:** see the [complete OpenAI-compatible bridge → Hermes guide](opentunnel/hermes-bridge-gcp.md) (separate, not yet verified). This does not change the already working Mac Desktop server connection.
 
