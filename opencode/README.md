@@ -7,6 +7,7 @@ Same wire protocol as the Claude Code bridges in this repo — different backend
 | Folder | Target | Endpoint |
 |--------|--------|----------|
 | [`hermes-desktop/`](hermes-desktop) | 🖥️ Hermes desktop app on macOS / Linux (custom endpoint) | `http://127.0.0.1:18282/v1` |
+| [`opentunnel/`](opentunnel) | 🌐 Ubuntu/GCP OpenCode + OpenTunnel demo, secure gcloud/SSH forwarding | Demo `:3000` / private SSH `:8443` |
 | [`kubernetes/`](kubernetes) | ☸️ Production: Hermes + bridge sidecar on GKE, read-only SRE agent, Traefik dashboard | in-pod loopback `:18282` |
 
 ```bash
