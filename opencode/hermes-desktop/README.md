@@ -37,7 +37,16 @@ It's the same wire protocol as the [Claude Code bridge](../../mac) on a differen
 |---|---|---|
 | 🧠 Hermes Agent | `v0.23.1` | Desktop app built by `install.sh --include-desktop` |
 | ⚙️ OpenCode CLI | `v2.2.6` | Zen free tier: 11 live `opencode/*-free` models |
+| ⚙️ OpenCode CLI | `v1.19.5` | Also verified — remote Ubuntu 24.04 VM, 12 free models (see below) |
 | 🐧 Host | Ubuntu 26.04 (x86_64) | X11 and Wayland (GNOME) both verified |
+| ☁️ Host | Ubuntu 24.04.5 (GCE `e2-medium`) | Headless VM, systemd unit, loopback + SSH tunnel |
+
+> ☁️ **Remote/headless deployments work too.** The same file runs as a systemd service on a
+> Google Compute Engine VM (`bridge` user, `127.0.0.1:18383`, reached through
+> `gcloud compute ssh -- -N -L`). Verified there: model listing, completions, bearer-auth
+> rejection (`401`), and **real filesystem access** — the model listed the working
+> directory, read the fixture files, ran `ps`, and wrote a new file that was confirmed
+> on the VM.
 
 ---
 
@@ -48,7 +57,7 @@ opencode **v2.2.6** dropped three things the bridge relied on. All three are now
 | What changed upstream | Symptom without the fix | What the bridge does now |
 |---|---|---|
 | 🚫 `opencode run --dir` removed | `502` — `Unrecognized flag: --dir in command opencode run` | Probes `opencode run --help` once at startup and only passes `--dir` when the CLI lists it (the child already runs in `--cwd`) |
-| 🔠 `--log-level` is case-sensitive | `502` — `Invalid value for flag --log-level: "ERROR"` | Sends the documented lowercase `error` |
+| 🔠 `--log-level` is case-sensitive **and its enum flipped** (1.x wanted `ERROR`, v2 wants `error`) | `502` — `Invalid value for flag --log-level: "ERROR"` (or `"error"` on 1.x) | 🧪 Probes `opencode run --help` and mirrors whichever case the CLI advertises (`ERROR` on 1.x, `error` on v2) |
 | 📉 `models --verbose` (and `models <provider>`) removed | Catalogue falls back to a stale seed list, then `400 model … is not available` | Falls back to plain `opencode models` and infers the free tier from the id (`…-free`, `…:free`) |
 
 > 🧠 **Why the id heuristic is safe:** with `--verbose` gone there is no cost metadata to filter on, so the free guard keys off opencode's own naming. Anything that does not end in `-free`/`:free` is still refused, so a typo cannot quietly start billing a paid provider. 💸

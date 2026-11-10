@@ -4,6 +4,30 @@
 
 **Status as of 2026-11-10:** OpenCode v2.2.6 on the VM, the private SSH forward, the Mac Desktop's `gcp-vm` server selection and successful DeepSeek V4.1 Flash Free replies have been **observed working**. The *additional Python bridge on this VM*, Hermes integration with that bridge, and GKE-to-VM networking have **not yet been deployed or verified**. All bridge commands in this document are instructions to test, not claims of completed setup.
 
+> ✅ **Update — a standalone bridge VM has since been built and verified.** 🎉
+> A separate GCE instance (`hermes-bridge-vm`, `us-central1-a`, Ubuntu 24.04.5, `e2-medium`)
+> now runs `opencode/hermes-desktop/opencode_bridge.py` as the systemd unit
+> `opencode-bridge.service` under an unprivileged `bridge` user, on `127.0.0.1:18383`,
+> with bearer auth from `/etc/opencode-bridge.env`. Verified from a workstation over an
+> SSH tunnel: 🩺 `/health` → `ok`, 📚 `/v1/models` → 12 free models, 🔐 missing/wrong key →
+> `401`, 💬 `/v1/chat/completions` → live reply, and 🗂️ **real filesystem access** — the
+> model listed `/srv/bridge/workspace`, read the fixture files (marker matched the
+> provisioner's), ran `ps`, and wrote a file that was confirmed on the VM with `ls`/`cat`.
+> That VM's opencode is **v1.19.5**, which caught a case-sensitivity regression the v2 work
+> introduced: 1.x wants `--log-level ERROR`, v2 wants `error`. The bridge now probes
+> `opencode run --help` and mirrors whichever spelling the CLI advertises. 🧪
+>
+> 🔁 **Reproduce it:** [`vm-bridge-provision.sh`](vm-bridge-provision.sh) does the whole VM
+> (packages, `bridge` user, OpenCode CLI, fixtures, API key, systemd unit, health check):
+>
+> ```bash
+> gcloud compute scp opencode/opentunnel/vm-bridge-provision.sh hermes-bridge-vm:/tmp/
+> gcloud compute ssh hermes-bridge-vm --command='sudo bash /tmp/vm-bridge-provision.sh'
+> # 🔌 then tunnel it to the workstation (18383 is the local desktop bridge, so use 28383):
+> gcloud compute ssh hermes-bridge-vm -- -N -L 127.0.0.1:28383:127.0.0.1:18383
+> curl -s -H "Authorization: Bearer $OPENCODE_BRIDGE_API_KEY" http://127.0.0.1:28383/health
+> ```
+
 For the working, bridge-free Mac Desktop solution, see [remote-desktop-gcp.md](remote-desktop-gcp.md).
 
 ## 1. The three different things (avoid mixing them up)
