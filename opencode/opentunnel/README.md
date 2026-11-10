@@ -15,6 +15,7 @@ This folder documents the working Ubuntu/Debian **OpenCode + [OpenTunnel](https:
 ## Files
 
 - [`setup.sh`](setup.sh) — install OpenCode, OpenTunnel and Herdr, run a local-only HTTP demo, create a public demo route, and test an optional free model.
+- [`hermes-bridge-gcp.md`](hermes-bridge-gcp.md) — full separate OpenAI-compatible bridge → Hermes setup on GCP (VM commands, auth, curl tests, optional Mac tunnel, GKE connectivity and security), **not yet deployed/verified**.
 - [`remote-desktop-gcp.md`](remote-desktop-gcp.md) — the verified Mac OpenCode Desktop → GCP OpenCode backend solution, with three Mermaid diagrams, commands, test results, and security boundaries.
 - This README — installer, GCP connectivity, SSH forwarding, OpenCode remote access, and troubleshooting.
 
