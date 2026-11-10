@@ -54,6 +54,23 @@ flowchart LR
 
 **Where tools execute:** The bridge invokes OpenCode **on the machine/container hosting the bridge**. Its filesystem, shell and cloud permissions govern tool execution. A bridge on GCP does **not** automatically edit your Mac's local directories or reuse the conversation open in Mac OpenCode Desktop.
 
+### 🔀 Two modes — pick deliberately
+
+There are **two different topologies**, and choosing the wrong one is the most common failure:
+
+| Mode | Path | Where tools run | Use when |
+|---|---|---|---|
+| **Agent bridge** (this guide) | Hermes → VM bridge `:18282` | **On the VM** | You want the agent to work on VM files |
+| **VM model + LOCAL tools** | Hermes → local adapter `:18383` → SSH forward `:18283` → VM bridge | **On your desktop** | You want VM inference but local files/commands |
+
+The second mode uses [`local_tools_proxy.py`](../hermes-desktop/local_tools_proxy.py); see the
+[desktop guide](../hermes-desktop/README.md#vm-inference-with-local-hermes-tools). The adapter **never executes
+tools** — it returns native `tool_calls` that Hermes runs locally.
+
+⚠️ **Symptom of picking the wrong one:** you ask the agent to list a local directory and it reports the path
+"does not exist", then lists the **VM's** home instead. That is the agent bridge doing exactly what it is
+designed to do — it is not a broken local path.
+
 ## 🚀  3. macOS / Linux — use the existing tested scripts
 
 ```bash
@@ -163,8 +180,8 @@ For the default local installer when no API key is configured, the [existing `./
 **On GCP** run the protected bridge at `127.0.0.1:18282`. **On the Mac** forward the port, independently of the existing OpenCode Web tunnel:
 
 ```bash
-gcloud compute ssh instance-20261110-043424 \
-  --project=playground-s-11-fffe4a40 \
+gcloud compute ssh $VM_NAME \
+  --project=$GCP_PROJECT \
   --zone=us-central1-c \
   -- -N -L 127.0.0.1:18282:127.0.0.1:18282
 ```
@@ -223,6 +240,10 @@ The Python `opencode_bridge.py` is written mostly with the standard library and 
 | GKE Hermes cannot reach `127.0.0.1:18282` on a VM | Pod loopback is different; use in-cluster bridge or private GKE-to-VM network route |
 | Tools can modify unexpected files | Restrict agent permissions, service OS user, filesystem, cloud IAM; `--cwd` alone is insufficient |
 | Persistent service is unexpectedly permissive | Check runner configuration; it may auto-approve; use a hardened launcher/isolated runtime |
+| Agent lists the **VM's** files and says your local path does not exist | Wrong mode/provider: you are on the agent bridge, not the local-tools adapter. See *Two modes* above |
+| After replacing the VM, tunnels retry forever | Old `gcp-*-tunnel.service` units stay **enabled** and loop against the deleted instance. `systemctl --user disable --now <unit>`; prune `~/.ssh/google_compute_known_hosts` |
+| Hermes CLI suddenly uses a different provider after changing the model in the GUI | The desktop app can rewrite `~/.hermes/config.yaml` and drop `model.provider`, `model.base_url` and the whole `providers:` block. Back the file up before switching providers |
+| Bridge can read the whole home directory | The generated service may use `--cwd $HOME`. Point it at an isolated workspace and deny write/shell/external_directory in the OpenCode config |
 
 **Security baseline:** Keep the bridge on loopback for local testing, require a strong key for remote/shared clients, restrict filesystem and cloud credentials, and use private networking (prefer in-cluster deployment for a GKE client). Bridge free-only mode filters catalog prices; it is **not a billing guarantee** or proof of upstream availability.
 
@@ -233,7 +254,8 @@ The Python `opencode_bridge.py` is written mostly with the standard library and 
 | Existing macOS/Linux bridge scripts and tests | Present in repository; use `./run-bridge.sh selfcheck/test` to validate your installed environment |
 | Existing Kubernetes deployment | Present in repository; requires environment-specific configuration/verification |
 | Mac OpenCode Desktop → GCP native OpenCode Web on `:8443` | **Observed successful** in the November 2026 session |
-| New GCP bridge on `:18282` → Hermes | **Not yet observed as deployed or tested** |
+| GCP VM bridge → Hermes (agent mode) | **Observed working**: provisioned on a fresh e2-standard-2 VM, loopback-only, Bearer-protected (401 without key / 200 with) |
+| VM model + **local** Hermes tools (`:18383` adapter → `:18283` forward) | **Observed working**: independently QA-verified end to end, including a random-token local file read and `tool_calls` round trip |
 | Windows OpenCode bridge native installer | **Not verified / not present** |
 
 **Authoritative implementation and detailed runbooks:** [macOS/Linux bridge and launcher](../hermes-desktop/README.md) · [Python bridge source](../kubernetes/bridge/opencode_bridge.py) · [Kubernetes deployment](../kubernetes/README.md) · [GCP VM / Hermes runbook](../opentunnel/hermes-bridge-gcp.md) · [verified Mac Desktop remote server](../opentunnel/remote-desktop-gcp.md).

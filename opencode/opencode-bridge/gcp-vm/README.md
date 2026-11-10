@@ -26,8 +26,8 @@ From another GCP terminal: `curl -H "Authorization: Bearer $OPENCODE_BRIDGE_API_
 **On Mac**, forward a *separate* local 18282 port (leave the Desktop 8443 forward untouched):
 
 ```bash
-gcloud compute ssh instance-20261110-043424 \
-  --project=playground-s-11-fffe4a40 --zone=us-central1-c \
+gcloud compute ssh $VM_NAME \
+  --project=$GCP_PROJECT --zone=us-central1-c \
   -- -N -L 127.0.0.1:18282:127.0.0.1:18282
 ```
 
