@@ -18,6 +18,8 @@ cd hermes-desktop && ./install-opencode-bridge.sh
 cd kubernetes && kubectl apply -k .
 ```
 
+**For Hermes using a VM bridge:** see the [complete OpenAI-compatible bridge → Hermes guide](opentunnel/hermes-bridge-gcp.md) (separate, not yet verified). This does not change the already working Mac Desktop server connection.
+
 **For the verified Mac workflow:** OpenCode Desktop → **Settings → Servers → Add server** → `http://127.0.0.1:8443` while a local SSH tunnel to the VM is running. [Full illustrated guide](opentunnel/remote-desktop-gcp.md).
 
 **For a separate OpenAI-compatible bridge client:** configure that client's custom provider with its deployed bridge endpoint (for example `http://127.0.0.1:18282/v1`) and matching model and API key.
