@@ -1,6 +1,8 @@
 # 🆓 OpenCode Bridge → Hermes Desktop
 
-Run the **OpenCode Bridge** natively on your machine — no Docker. It exposes an **OpenAI-compatible** HTTP endpoint backed by your already-authenticated **OpenCode** CLI, so the **Hermes desktop app** (or any OpenAI SDK/tool) can drive OpenCode's **free** models — MiMo, DeepSeek, Nemotron, Ling, Laguna, Big Pickle — as a **Custom endpoint**. 🚀
+Run the **OpenCode Bridge** natively on your machine — no Docker. It exposes an **OpenAI-compatible** HTTP endpoint backed by your already-authenticated **OpenCode** CLI, so the **Hermes desktop app** (or any OpenAI SDK/tool) can drive OpenCode's **free** models — DeepSeek V4.1 Flash, MiMo, GLM, Nemotron, MiniMax, LongCat, Big Pickle — as a **Custom endpoint**. 🚀
+
+> ✅ **Verified end-to-end** on Ubuntu 26.04 with **Hermes Agent v0.23.1** + **opencode v2.2.6**: `hermes -z "Reply with exactly: end-to-end ok"` → `end-to-end ok`.
 
 It's the same wire protocol as the [Claude Code bridge](../../mac) on a different port, so both can run side by side and you can flip between them in Hermes' model picker.
 
@@ -21,11 +23,37 @@ It's the same wire protocol as the [Claude Code bridge](../../mac) on a differen
 - 🐍 `python3` (macOS ships it with the Xcode CLT; any distro python3 works)
 - 🧑‍💻 The [OpenCode](https://opencode.ai) CLI, logged in far enough to list models:
   ```bash
-  opencode models opencode      # should print the opencode/*-free models
+  opencode models | grep -E -- '-free$|:free$'   # the free tier, one id per line
   ```
+  > ⚠️ On **opencode v2** the `models` command takes **no provider argument** and has **no `--verbose`** — `opencode models opencode` prints the help text instead of a catalogue. The bridge handles both CLIs (see 🧬 below).
 - 🖥️ Hermes desktop (the app whose Settings → Model page has **Custom endpoint**)
+  - Linux/Ubuntu: install it with [`../../ubuntu-desktop`](../../ubuntu-desktop) — launcher, icons, Electron sandbox setuid fix, and the app-id desktop entry that keeps the dock icon correct 🐧
 
 > 🛡️ **No `sudo`.** Everything installs per-user and the service runs as **you**, so it inherits your OpenCode credentials (`~/.local/share/opencode/auth.json`).
+
+### 🧭 Tested against
+
+| Component | Version | Notes |
+|---|---|---|
+| 🧠 Hermes Agent | `v0.23.1` | Desktop app built by `install.sh --include-desktop` |
+| ⚙️ OpenCode CLI | `v2.2.6` | Zen free tier: 11 live `opencode/*-free` models |
+| 🐧 Host | Ubuntu 26.04 (x86_64) | X11 and Wayland (GNOME) both verified |
+
+---
+
+## 🧬 opencode v2 compatibility
+
+opencode **v2.2.6** dropped three things the bridge relied on. All three are now handled automatically — nothing to configure. 🪄
+
+| What changed upstream | Symptom without the fix | What the bridge does now |
+|---|---|---|
+| 🚫 `opencode run --dir` removed | `502` — `Unrecognized flag: --dir in command opencode run` | Probes `opencode run --help` once at startup and only passes `--dir` when the CLI lists it (the child already runs in `--cwd`) |
+| 🔠 `--log-level` is case-sensitive | `502` — `Invalid value for flag --log-level: "ERROR"` | Sends the documented lowercase `error` |
+| 📉 `models --verbose` (and `models <provider>`) removed | Catalogue falls back to a stale seed list, then `400 model … is not available` | Falls back to plain `opencode models` and infers the free tier from the id (`…-free`, `…:free`) |
+
+> 🧠 **Why the id heuristic is safe:** with `--verbose` gone there is no cost metadata to filter on, so the free guard keys off opencode's own naming. Anything that does not end in `-free`/`:free` is still refused, so a typo cannot quietly start billing a paid provider. 💸
+
+> 🔁 `./run-bridge.sh selfcheck` runs these code paths offline (fake CLIs, no network) — it is the fastest way to confirm a future opencode release did not break the bridge again.
 
 ---
 
@@ -47,6 +75,51 @@ OPENCODE_BRIDGE_CWD=~/code ./run-bridge.sh   # point OpenCode's tools at a proje
 
 ---
 
+## 🖥️ Hermes Desktop on Ubuntu (the host app)
+
+The bridge is only half the story — the app needs a proper launcher, icon, and Electron
+sandbox. That lives in [`../../ubuntu-desktop`](../../ubuntu-desktop): 🐧
+
+```bash
+cd ubuntu-desktop && ./install.sh     # idempotent — safe to re-run after a Hermes update
+```
+
+It writes `~/.local/share/applications/com.nousresearch.hermes.desktop` (basename = the
+Electron app id, which is what makes the **dock show the Hermes icon instead of a gear** 🎯),
+installs icons at 32→512 px, and sets `chrome-sandbox` to `root:root 4755` so the app runs
+**with** the sandbox rather than `--no-sandbox` 🔐.
+
+Launch it from the Applications grid, or:
+
+```bash
+gtk-launch com.nousresearch.hermes
+```
+
+---
+
+## 📁 Local files versus a VM bridge
+
+OpenCode's tools run on the machine hosting the bridge. A local bridge can read local project folders and
+screenshots; a bridge on a VM sees the VM's filesystem. An SSH tunnel forwards API requests, not local files.
+Setting Hermes's `terminal.backend` to `local` does not relocate the OpenCode agent's tools.
+
+For desktop file access, start the bridge on the same computer as Hermes:
+
+```bash
+OPENCODE_BRIDGE_CWD="$HOME" ./run-bridge.sh install-service
+./run-bridge.sh models
+```
+
+Select that local endpoint in Hermes, using the port configured for the local service (default
+`http://127.0.0.1:18383/v1`). Keep a VM bridge as a separate custom endpoint for work on the VM.
+After changing endpoints, start a new chat or reselect the provider in the existing chat: a conversation can
+retain its previous endpoint override and remote working-directory context.
+
+Verify with an actual file read, not only `/health` or `/v1/models`: create a temporary local text file with
+unique contents and ask Hermes to read its absolute path without including those contents in the prompt.
+Confirm the returned contents and remove the test file afterwards. Listing a local screenshot folder should
+likewise return the filenames actually present on the desktop computer.
+
 ## 🔌 Test it directly
 
 ```bash
@@ -60,7 +133,7 @@ Raw curl:
 ```bash
 curl -s http://127.0.0.1:18383/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"model":"opencode/mimo-v2.5-free","messages":[{"role":"user","content":"Say hello from OpenCode"}]}'
+  -d '{"model":"opencode/deepseek-v4.1-flash-free","messages":[{"role":"user","content":"Say hello from OpenCode"}]}'
 ```
 
 Python (OpenAI SDK):
@@ -69,7 +142,7 @@ Python (OpenAI SDK):
 from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:18383/v1", api_key="not-needed")
 print(client.chat.completions.create(
-    model="opencode/mimo-v2.5-free",
+    model="opencode/deepseek-v4.1-flash-free",
     messages=[{"role": "user", "content": "Say hello from OpenCode"}],
 ).choices[0].message.content)
 ```
@@ -85,7 +158,7 @@ Use **Settings → Providers → Custom Endpoints → `+ New endpoint`** — *no
 | Name | `opencode` (anything) |
 | Provider ID | `opencode` — or `opencode-bridge`; see ⚠️ below |
 | Endpoint URL | `http://127.0.0.1:18383/v1` |
-| Default Model | `opencode/mimo-v2.5-free` |
+| Default Model | `opencode/deepseek-v4.1-flash-free` |
 | API Key | *(leave blank — unless you set `OPENCODE_BRIDGE_API_KEY`)* |
 | Context | `Auto` |
 | ☑️ Use for new chats | on |
@@ -106,29 +179,55 @@ Then — **in this order** — click **⚡ Test**, *then* **💾 Save**. Reopen 
 > ```
 > Only a *canonical* built-in name (e.g. `openrouter`, `nous`) gets shadowed. `opencode-bridge` is unambiguous if you'd rather not think about it.
 
+### 🖱️ Or wire it from the CLI (no UI clicking)
+
+The verified path on a fresh Hermes install — copy/paste, ~10 seconds:
+
+```bash
+cp ~/.hermes/config.yaml ~/.hermes/config.yaml.bak-$(date +%Y%m%d-%H%M%S)   # 🛟 safety net
+hermes config set model.provider opencode
+hermes config set model.base_url http://127.0.0.1:18383/v1
+hermes config set model.default opencode/deepseek-v4.1-flash-free
+hermes config set providers.opencode.name "OpenCode (free)"
+hermes config set providers.opencode.base_url http://127.0.0.1:18383/v1
+hermes config set providers.opencode.model opencode/deepseek-v4.1-flash-free
+hermes config set providers.opencode.discover_models true
+```
+
+> 💡 Setting `model.provider` first makes Hermes **clear** the inherited `model.base_url` (`https://openrouter.ai/api/v1`) — that is expected; set `base_url` right after, as above.
+
+Then prove the whole chain works:
+
+```bash
+hermes -z "Reply with exactly: end-to-end ok"      # -> end-to-end ok 🎉
+```
+
+Reopen the desktop app (or start a new chat) so the composer's model picker reloads the catalogue. 🖥️
+
 ### Or configure it by file
 
 Saving through the UI produces this in `~/.hermes/config.yaml` (back it up first) — write it by hand if you prefer:
 
 ```yaml
 model:
-  default: opencode/mimo-v2.5-free
+  default: opencode/deepseek-v4.1-flash-free
   provider: opencode                        # must match the providers key below
   base_url: http://127.0.0.1:18383/v1
 providers:
   opencode:
     name: OpenCode (free)
     base_url: http://127.0.0.1:18383/v1
-    model: opencode/mimo-v2.5-free
+    model: opencode/deepseek-v4.1-flash-free
     discover_models: true
     models:                                 # this map is what fills the picker
-      opencode/mimo-v2.5-free: {context_length: 200000}
+      opencode/deepseek-v4.1-flash-free: {context_length: 200000}
+      opencode/mimo-v2.6-flash-free: {context_length: 200000}
+      opencode/glm-5.3-flash-free: {context_length: 200000}
+      opencode/nemotron-3.5-lightning-free: {context_length: 200000}
+      opencode/nemotron-3.5-super-vl-free: {context_length: 200000}
+      opencode/minimax-m3.1-flash-free: {context_length: 200000}
+      opencode/longcat-2.5-free: {context_length: 200000}
       opencode/big-pickle: {context_length: 200000}
-      opencode/deepseek-v4-flash-free: {context_length: 200000}
-      opencode/laguna-s-2.1-free: {context_length: 256000}
-      opencode/ling-3.0-flash-free: {context_length: 262144}
-      opencode/nemotron-3-ultra-free: {context_length: 1000000}
-      opencode/north-mini-code-free: {context_length: 256000}
 ```
 
 The bridge needs no credentials. If you *do* set `OPENCODE_BRIDGE_API_KEY`, add `key_env: OPENAI_API_KEY` to both blocks and put the value in `~/.hermes/.env`:
@@ -178,6 +277,17 @@ Hermes ──HTTP(OpenAI chat-completions)──▶ opencode_bridge.py ──▶
 
 macOS uses a per-user **launchd LaunchAgent** (`com.hermes.opencode-bridge` in `~/Library/LaunchAgents`); Linux uses **systemd `--user`** with lingering. Both have `RunAtLoad`/`Restart=always`, so the bridge starts at login and restarts on crash.
 
+After editing `opencode_bridge.py`, the service reloads the new code by restarting — on Linux:
+
+```bash
+kill $(pgrep -f opencode_bridge.py)          # systemd restarts it (Restart=always) 🔁
+curl -s http://127.0.0.1:18383/health | head -c 120
+```
+
+> 🧷 `systemctl --user ...` only works from a shell that has the session bus:
+> `export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus`.
+> Over SSH/xrdp the bus socket can differ (`/tmp/dbus-*`) — the restart-by-`kill` above sidesteps it.
+
 ---
 
 ## ⚙️ Configuration
@@ -188,7 +298,7 @@ Set these in the environment or in a `.env` next to `run-bridge.sh` (they're bak
 |----------|---------|-------------|
 | `BRIDGE_HOST` | `127.0.0.1` | Bind address (keep it loopback) |
 | `BRIDGE_PORT` | `18383` | Listen port (the Claude bridge uses `18181`) |
-| `OPENCODE_BRIDGE_MODEL` | `opencode/mimo-v2.5-free` | Default model |
+| `OPENCODE_BRIDGE_MODEL` | `opencode/deepseek-v4.1-flash-free` | Default model |
 | `OPENCODE_BRIDGE_MODELS` | *(auto-discovered)* | Comma-separated override for the advertised catalogue |
 | `OPENCODE_BRIDGE_CWD` | `$HOME` | Working directory OpenCode's tools operate in |
 | `OPENCODE_BRIDGE_FREE_ONLY` | `1` | `0` also allows paid models your OpenCode credentials can reach |
@@ -229,7 +339,10 @@ Every flag has a CLI equivalent — `python3 opencode_bridge.py --help`.
 | Symptom | Fix |
 |---------|-----|
 | `opencode not found` | Install from [opencode.ai](https://opencode.ai), open a new shell, or set `OPENCODE_BIN` |
-| `400 model '…' is not available on this bridge` | Use an id from `./run-bridge.sh models` (bare ids like `mimo-v2.5-free` also work), or allow paid models with `OPENCODE_BRIDGE_FREE_ONLY=0` |
+| `400 model '…' is not available on this bridge` | Use an id from `./run-bridge.sh models` (bare ids like `deepseek-v4.1-flash-free` also work), or allow paid models with `OPENCODE_BRIDGE_FREE_ONLY=0` |
+| `502 Unrecognized flag: --dir` / `Invalid value for flag --log-level` | Older bridge against opencode v2 — update this folder; the CLI probes handle it (see 🧬 compatibility) |
+| `502 Model unavailable: opencode/…` | The model id was retired by opencode zen. Pick a live one from `./run-bridge.sh models`; the bridge refreshes its catalogue hourly |
+| `/v1/models` shows old, dead ids | Stale catalogue cache. Restart the bridge (`kill $(pgrep -f opencode_bridge.py)` — systemd restarts it) or set `OPENCODE_BRIDGE_MODEL` to a live id |
 | Model list is the built-in fallback (`/config` → `models_source: fallback`) | `opencode models opencode` failed — check network/credentials, then restart the bridge |
 | `429 bridge busy` | More concurrent chats than `OPENCODE_BRIDGE_MAX_CONCURRENCY` — raise it (free tiers rate-limit, so go gently) |
 | `429` with a rate-limit message from upstream | The free tier is throttling; retry shortly or switch model |
@@ -241,6 +354,7 @@ Every flag has a CLI equivalent — `python3 opencode_bridge.py --help`.
 | `/v1/models` works in the browser but Hermes sees nothing | Hermes probes `<base_url>/models` — the Endpoint URL must end in `/v1` (no trailing slash) |
 | Hermes shows `Unknown provider 'openai'` | Use a **Custom endpoint** entry, not `openai`/`auto` — those can't infer a localhost URL |
 | `Address already in use` | Something owns the port: `BRIDGE_PORT=18283 ./install-opencode-bridge.sh`, then update the Base URL in Hermes |
+| A local path is reported missing, or `pwd` shows a VM workspace | Select a bridge running on the desktop computer. A tunnel to a VM still runs OpenCode's tools on the VM. Start a new chat or reselect the provider to clear an old endpoint override; see [local files versus a VM bridge](#-local-files-versus-a-vm-bridge) |
 | Vision/image requests fail | The free models are text-only — set Hermes' **Vision** auxiliary model to an image-capable one |
 | Sessions piling up in `opencode session list` | You ran with `--keep-sessions`; drop it (cleanup is on by default) |
 

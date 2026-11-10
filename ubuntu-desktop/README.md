@@ -19,7 +19,8 @@ ubuntu-desktop/
 `install.sh` is idempotent, so it is safe to re-run any time. It:
 
 - 🧩 creates a `.desktop` launcher for **Hermes Desktop**
-- 🖼️ installs icons under the XDG hicolor icon theme
+- 🆔 names it after the Electron app id (`com.nousresearch.hermes.desktop`) so GNOME/the dock match the running window and show the **Hermes icon, not a generic gear** 🎯
+- 🖼️ installs icons under the XDG hicolor icon theme (32→512 px + scalable)
 - 🚀 installs a launch wrapper at `~/.local/share/hermes-desktop/launch-hermes-desktop.sh`
 - 🔐 configures Electron's `chrome-sandbox` helper as `root:root 4755` when available
 - 🧯 optionally resets stale Electron renderer/cache state
@@ -30,7 +31,7 @@ ubuntu-desktop/
 Run from this directory:
 
 ```bash
-cd hermes-claude-code-bridge/ubuntu-desktop
+cd OpenDevOps/ubuntu-desktop
 chmod +x ./install.sh
 ./install.sh
 ```
@@ -46,7 +47,7 @@ Activities / Applications → search "Hermes Desktop" 🧠
 If Hermes was updated, re-run the installer to refresh the launcher, icons, wrapper, and Electron sandbox permissions:
 
 ```bash
-cd hermes-claude-code-bridge/ubuntu-desktop
+cd OpenDevOps/ubuntu-desktop
 ./install.sh
 ```
 
@@ -55,7 +56,7 @@ cd hermes-claude-code-bridge/ubuntu-desktop
 If the GUI opens blank, crashes, or keeps stale renderer state, use:
 
 ```bash
-cd hermes-claude-code-bridge/ubuntu-desktop
+cd OpenDevOps/ubuntu-desktop
 ./install.sh --reset-state
 ```
 
@@ -76,11 +77,12 @@ to a timestamped backup directory such as:
 Remove the desktop launcher, installed icons, and wrapper:
 
 ```bash
-cd hermes-claude-code-bridge/ubuntu-desktop
+cd OpenDevOps/ubuntu-desktop
 ./install.sh --uninstall
 ```
 
 > ℹ️ The installer intentionally leaves the Electron `chrome-sandbox` setuid bit as-is during uninstall.
+> It also removes both the current `com.nousresearch.hermes.desktop` entry and the legacy `hermes-desktop.desktop`. 🧽
 
 ## ⚡ Performance — GPU & Fast Startup
 
@@ -98,21 +100,22 @@ Default Electron flags applied to the packaged Hermes app: 🧰
 --enable-zero-copy
 --ignore-gpu-blocklist
 --enable-gpu-rasterization
---enable-features=UseOzonePlatform,VaapiVideoDecodeLinuxGL
---js-flags=--max-old-space-size=4096
+--enable-features=VaapiVideoDecoder,VaapiVideoEncoder,VaapiIgnoreDriverChecks,CanvasOopRasterization
+--disable-features=CalculateNativeWinOcclusion
+--js-flags=--max-old-space-size=4096      # override with HERMES_DESKTOP_MAX_OLD_SPACE
 ```
 
 ### 🛠️ Override Per-Launch
 
 ```bash
 # Pull the latest fork build this one launch
-HERMES_DESKTOP_DISABLE_SELF_UPDATE=0 gtk-launch hermes-desktop
+HERMES_DESKTOP_DISABLE_SELF_UPDATE=0 gtk-launch com.nousresearch.hermes
 
 # Debug a GPU bug by forcing software rendering
-HERMES_DESKTOP_DISABLE_GPU=1 gtk-launch hermes-desktop
+HERMES_DESKTOP_DISABLE_GPU=1 gtk-launch com.nousresearch.hermes
 
 # Replace the entire flag list (don't merge — total override)
-HERMES_DESKTOP_ELECTRON_FLAGS="--disable-frame-rate-limit" gtk-launch hermes-desktop
+HERMES_DESKTOP_ELECTRON_FLAGS="--disable-frame-rate-limit" gtk-launch com.nousresearch.hermes
 ```
 
 ### 🩺 Verify GPU Acceleration Is Live
@@ -196,7 +199,9 @@ sed -n '1,220p' "${XDG_STATE_HOME:-$HOME/.local/state}/hermes-desktop.log"
 | 🔐 Sandbox permission warning | Run `./install.sh` from a terminal so `sudo` can repair `chrome-sandbox` |
 | 🧊 Blank/stale window | Run `./install.sh --reset-state` |
 | 🖼️ Icon looks wrong | Install ImageMagick (`magick` or `convert`) and re-run `./install.sh` |
+| ⚙️ Dock shows a **generic gear** and/or a second unnamed entry | The window's Electron app id (`com.nousresearch.hermes`) had no matching desktop file. Re-run `./install.sh` (it now installs `com.nousresearch.hermes.desktop` and removes the old `hermes-desktop.desktop`), then quit ✕ and relaunch the app — a running window keeps its old association until restarted |
 | 🧭 Hermes binary is elsewhere | Set `HERMES_BIN=/path/to/hermes ./install.sh` |
+| 🛡️ App starts with `--no-sandbox` | `chrome-sandbox` is not `root:root 4755` — run `./install.sh` from a terminal, or `sudo chown root:root …/linux-unpacked/chrome-sandbox && sudo chmod 4755 …/chrome-sandbox` |
 
 ## 🔐 Safety Notes
 

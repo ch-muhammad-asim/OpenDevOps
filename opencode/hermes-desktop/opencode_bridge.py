@@ -74,7 +74,7 @@ def resolve_opencode_bin(value: str) -> Optional[str]:
 
 DEFAULT_OPENCODE_BIN = default_opencode_bin()
 # opencode zen's free tier — what the OpenCode desktop model picker labels "… Free".
-DEFAULT_MODEL = "opencode/mimo-v2.5-free"
+DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free"
 # Providers scanned for the advertised catalogue. `opencode` is opencode zen, which
 # hosts the free models; add more (comma-separated) to surface your own keys' models.
 DEFAULT_MODEL_PROVIDERS = "opencode"
@@ -84,12 +84,13 @@ DEFAULT_MODEL_PROVIDERS = "opencode"
 # reached on a cold start with no network AND no cache — they are a seed, not the source
 # of truth, and are expected to drift as opencode zen's free tier changes.
 FALLBACK_FREE_MODELS = [
-    "opencode/mimo-v2.5-free",
-    "opencode/deepseek-v4-flash-free",
-    "opencode/nemotron-3-ultra-free",
-    "opencode/ling-3.0-flash-free",
-    "opencode/laguna-s-2.1-free",
-    "opencode/north-mini-code-free",
+    "opencode/deepseek-v4.1-flash-free",
+    "opencode/mimo-v2.6-flash-free",
+    "opencode/glm-5.3-flash-free",
+    "opencode/nemotron-3.5-lightning-free",
+    "opencode/nemotron-3.5-super-vl-free",
+    "opencode/minimax-m3.1-flash-free",
+    "opencode/longcat-2.5-free",
     "opencode/big-pickle",
 ]
 # How often to re-run discovery so a long-lived process picks up models opencode zen
@@ -392,6 +393,15 @@ def _is_free(meta: dict[str, Any]) -> bool:
         return False
 
 
+# Free tiers are named, not priced, once `models --verbose` is gone (opencode v2
+# dropped the flag): ids end in ``-free`` (Zen) or ``:free`` (OpenRouter).
+_FREE_ID_MARKERS = ("-free", ":free")
+
+
+def _looks_free(model_id: str) -> bool:
+    return any(marker in model_id for marker in _FREE_ID_MARKERS)
+
+
 def discover_models(opencode_bin: str, providers: list[str], free_only: bool,
                     timeout: int = 60, refresh: bool = True) -> tuple[list[str], dict[str, dict[str, Any]]]:
     """Return (model_ids, metadata_by_id) from the OpenCode model catalogue.
@@ -414,6 +424,29 @@ def discover_models(opencode_bin: str, providers: list[str], free_only: bool,
             if proc.returncode == 0 and proc.stdout.strip():
                 stdout = proc.stdout
                 break
+        if not stdout:
+            # opencode v2: `models --verbose` is gone and the plain list carries ids
+            # only, so infer "free" from the id instead of from cost metadata. It also
+            # takes no provider positional, hence the prefix filter below.
+            plain = [opencode_bin, "models"]
+            try:
+                proc = subprocess.run(plain, capture_output=True, text=True, timeout=timeout)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if proc.returncode != 0:
+                continue
+            for line in (proc.stdout or "").splitlines():
+                model_id = line.strip()
+                if not model_id or "/" not in model_id or model_id in meta_by_id:
+                    continue
+                if provider and not model_id.startswith(provider + "/"):
+                    continue
+                if free_only and not _looks_free(model_id):
+                    continue
+                ids.append(model_id)
+                meta_by_id[model_id] = ({"cost": {"input": 0, "output": 0}}
+                                        if _looks_free(model_id) else {})
+            continue
         for model_id, meta in _parse_verbose_models(stdout):
             if model_id in meta_by_id:
                 continue
@@ -500,7 +533,7 @@ def classify_error(message: str) -> int:
 
 
 def build_command(cfg: "BridgeConfig", model: str, image_files: Optional[list[str]] = None) -> list[str]:
-    cmd = [cfg.opencode_bin, "run", "--format", "json", "--print-logs", "--log-level", "ERROR", "--model", model]
+    cmd = [cfg.opencode_bin, "run", "--format", "json", "--print-logs", "--log-level", "error", "--model", model]
     if cfg.auto_approve_flag:
         cmd.append(cfg.auto_approve_flag)
     if cfg.show_reasoning:
@@ -515,7 +548,8 @@ def build_command(cfg: "BridgeConfig", model: str, image_files: Optional[list[st
     # otherwise eat the following positional as a second file name.
     for path in image_files or []:
         cmd.append(f"--file={path}")
-    cmd += ["--dir", cfg.cwd]
+    if cfg.dir_flag:
+        cmd += ["--dir", cfg.cwd]
     return cmd
 
 
@@ -719,6 +753,9 @@ class BridgeConfig:
         # re-resolves this against `opencode run --help`; the modern spelling is the
         # offline default so selfcheck needs no opencode binary.
         self.auto_approve_flag = "--dangerously-skip-permissions" if args.auto_approve else ""
+        # opencode v2 dropped `run --dir`; the startup probe turns this off when
+        # the CLI would reject it (the child already runs in cfg.cwd).
+        self.dir_flag = True
         self.show_tools = args.show_tools
         self.show_reasoning = args.show_reasoning
         self.pure = args.pure
@@ -1119,6 +1156,22 @@ def _detect_auto_approve_flag(opencode_bin: str) -> Optional[str]:
     return None
 
 
+def _detect_dir_flag(opencode_bin: str) -> bool:
+    """Return whether ``opencode run`` still accepts ``--dir``.
+
+    opencode v2 removed the flag (the child's cwd is used instead); passing it
+    unconditionally makes every request fail with "Unrecognized flag: --dir".
+    Defaults to True when the probe cannot answer, so older CLIs keep working.
+    """
+    try:
+        proc = subprocess.run([opencode_bin, "run", "--help"],
+                              capture_output=True, text=True, timeout=15)
+        text = (proc.stdout or "") + (proc.stderr or "")
+    except Exception:  # noqa: BLE001 — best-effort probe
+        return True
+    return "--dir" in text
+
+
 def _detect_opencode_version(opencode_bin: str) -> str:
     try:
         out = subprocess.run([opencode_bin, "--version"], capture_output=True, text=True, timeout=15)
@@ -1205,6 +1258,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     cfg = BridgeConfig(args)
     opencode_version = _detect_opencode_version(args.opencode_bin)
+    cfg.dir_flag = _detect_dir_flag(args.opencode_bin)
     if cfg.auto_approve:
         flag = _detect_auto_approve_flag(args.opencode_bin)
         cfg.auto_approve_flag = flag or ""
@@ -1303,7 +1357,7 @@ def _selfcheck() -> None:
                 raise AssertionError("free-usage limit was not reported")
             assert time.monotonic() - started < 10
     cfg = BridgeConfig(build_parser().parse_args(["--models", "opencode/mimo-v2.5-free,opencode/big-pickle"]))
-    assert cfg.models == ["opencode/mimo-v2.5-free", "opencode/big-pickle"], cfg.models  # default first, de-duped
+    assert cfg.models == [DEFAULT_MODEL, "opencode/mimo-v2.5-free", "opencode/big-pickle"], cfg.models  # default first, de-duped
     assert cfg.resolve_model("big-pickle")[0] == "opencode/big-pickle"        # bare-id alias
     assert cfg.resolve_model("OpenCode/Big-Pickle")[0] == "opencode/big-pickle"  # case-insensitive
     assert cfg.resolve_model("")[0] == cfg.default_model                      # empty -> default
