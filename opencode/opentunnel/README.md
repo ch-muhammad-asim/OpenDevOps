@@ -14,7 +14,8 @@ This folder documents the working Ubuntu/Debian **OpenCode + [OpenTunnel](https:
 
 ## Files
 
-- [`setup.sh`](setup.sh) — install OpenCode, OpenTunnel and Herdr, run a local-only HTTP demo, create a public demo route, and test an optional free model.
+- [`setup.sh`](setup.sh) — install the **latest OpenCode v2 by default**, OpenTunnel and Herdr, run a local-only HTTP demo, create a public demo route, and test an optional free model.
+- [`vm-bridge-provision.sh`](vm-bridge-provision.sh) — provision the independent VM bridge for Hermes; **installs/refreshes OpenCode v2 on every provisioning run** (rather than using the v1 installer or skipping an existing binary).
 - [`hermes-bridge-gcp.md`](hermes-bridge-gcp.md) — full separate OpenAI-compatible bridge → Hermes setup on GCP (VM commands, auth, curl tests, optional Mac tunnel, GKE connectivity and security), **not yet deployed/verified**.
 - [`remote-desktop-gcp.md`](remote-desktop-gcp.md) — the verified Mac OpenCode Desktop → GCP OpenCode backend solution, with three Mermaid diagrams, commands, test results, and security boundaries.
 - This README — installer, GCP connectivity, SSH forwarding, OpenCode remote access, and troubleshooting.
@@ -28,7 +29,7 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The script needs `sudo` for apt packages. It downloads installer scripts from the **OpenCode/OpenTunnel/Herdr installer domains**: review those installer sources before using this on a sensitive machine. OpenCode CLI version defaults to `2.2.6` (override with `OPENCODE_VERSION`); OpenTunnel and Herdr installers install their currently published binaries. A successful setup should show:
+The script needs `sudo` for apt packages. It downloads installer scripts from the **OpenCode/OpenTunnel/Herdr installer domains**: review those installer sources before using this on a sensitive machine. **OpenCode defaults to the latest published v2 release at the time you run the installer** (`OPENCODE_VERSION=latest`). To pin an exact release for reproducible builds, set `OPENCODE_VERSION=2.x.y`. OpenTunnel and Herdr installers use their published installer defaults. The tested versions below are **historical observations**, not versions pinned by the current scripts. Example output **from the 2026-11-10 test** (new runs may install newer versions):
 
 ```text
 opencode v2.2.6
@@ -37,6 +38,19 @@ Hello from OpenTunnel!
 Added route ... -> 127.0.0.1:3000
 OK
 ```
+
+**Run again to update on demand:**
+
+```bash
+./setup.sh                              # latest OpenCode v2 on this run
+OPENCODE_VERSION=2.2.6 ./setup.sh      # optional pin; historical example
+
+# VM bridge provisioner (on the VM; review before running as root):
+sudo bash vm-bridge-provision.sh       # latest OpenCode v2, restarts bridge
+sudo env OPENCODE_VERSION=2.2.6 bash vm-bridge-provision.sh  # pin if needed
+```
+
+**Meaning of latest:** this means *latest at the moment the script is executed*, not automatic unattended upgrades. Re-run the installer/provisioner when an update is desired; test compatibility with the OpenAI bridge after version changes. The sample model `opencode/deepseek-v4.1-flash-free` is a **separate inference default**, not an OpenCode application-version pin. Its availability may change; check `opencode models` and `/v1/models` instead of assuming a named free model stays available.
 
 The public `https://<route>.<tunnel>.opentunnel.xyz` URL forwards to the **demo server only**. OpenTunnel's URL is public: anyone possessing it may reach the exposed service. The installer may print a different OpenTunnel version later.
 
