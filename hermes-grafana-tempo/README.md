@@ -14,10 +14,12 @@ official OpenTelemetry SDKs, with production-grade defaults and a small lab prof
 > journey through the whole stack, a glossary, and a card per technology (what it is, why it is here, alternatives,
 > version). Then [every Grafana dashboard explained](docs/dashboards/README.md).
 
-**Status:** ✅ lab profile live on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity,
-2026-11-08: `scripts/verify.sh` 0 failures on three
-consecutive runs, every planted issue found by its TraceQL query, `hermes/verify.sh` 31/31 (2026-11-08; Hermes runs
-its production overlay). The production profile
+**Status:** Lab profile deployed on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity.
+On 2026-11-09, in-cluster `scripts/verify.sh` checks pass, including app health, datasource access, trace ingestion
+and lookup, metrics and NetworkPolicy isolation. Hermes gateway telemetry, dashboard, read-only observability skill
+and the OpenCode free DeepSeek model listing also pass. Public HTTPS checks currently fail from the verification
+environment (Cloudflare/origin timeout); do not treat the live URLs below as externally verified. The earlier
+2026-11-08 lab run passed `scripts/verify.sh` three consecutive times and `hermes/verify.sh` 31/31. The production profile
 (tempo-distributed with GCS and Kafka, HA Prometheus, Collector HPA) renders and passes `helm lint` and
 `kubeconform -strict`; it has **not** been run on a cluster. See [Tests](#-tests).
 
@@ -323,7 +325,7 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 | Grafana | 1 replica | 2 replicas with an external database (Secret `grafana-db`); no anonymous access | [`helm/grafana/`](helm/grafana/README.md) |
 | Sample apps | Same manifests as production | 2 replicas, PDB, spread, SLO alerts (the app code itself is a demo) | [`apps/`](apps/README.md) |
 | Hermes Agent | Lab overlay `hermes/lab/` (`emptyDir` home, 50m / 256Mi): validated, not the one running | **Runs live on the lab cluster:** `hermes/base/` (10Gi PVC home, 100m / 384Mi, PDB, runbooks) | [`hermes/lab/`](hermes/lab/README.md), [`hermes/base/`](hermes/base/README.md) |
-| Edge TLS | Cloudflare edge TLS on every host (proxied records, SSL mode Full); Traefik serves its default certificate to Cloudflare; no cert-manager (`TLS_MODE=cloudflare`) | Cloudflare **Full (strict)** with validated origin certificates (`TLS_MODE=letsencrypt` or a Cloudflare Origin CA certificate) | [`k8s/`](k8s/README.md), [`scripts/`](scripts/README.md) |
+| Edge TLS | Cloudflare edge TLS on every host (proxied records, zone SSL mode **Full**); Traefik serves its default origin certificate; no cert-manager (`TLS_MODE=cloudflare`) | Cloudflare **Full (strict)** with validated origin certificates (`TLS_MODE=letsencrypt` or a Cloudflare Origin CA certificate) | [`k8s/`](k8s/README.md), [`scripts/`](scripts/README.md) |
 | Costs | All software is free and open source (no licences); billed: persistent disks, GCS storage and operations for the trace and metrics buckets, and the GKE nodes and load balancer | Same, at production size | [`helm/thanos/`](helm/thanos/README.md) |
 | Everywhere | Pinned chart versions. By digest: platform chart images, Hermes, the deployed sample-app images (`apps/deploy-apps.sh` resolves each tag to `@sha256`) and the apps' Node.js and Python base images. Requests/limits, Pod Security `restricted` where the workload allows, default-deny NetworkPolicies, PrometheusRules with runbooks | Same | each folder |
 

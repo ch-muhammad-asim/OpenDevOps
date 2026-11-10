@@ -7,8 +7,9 @@
 # with kubectl port-forward on free local ports (the API server's service proxy is blocked by the
 # default-deny ingress NetworkPolicies). Credentials are read from Secrets into variables and passed to
 # curl via files, never on the command line or to the terminal. Override the public host with HERMES_URL.
-# VERIFY_CHAT=1 also sends ONE chat request through the gateway's API server (a real model call; off by
-# default because the model key may be shared and rate-limited).
+# VERIFY_CHAT=1 sends ONE chat request through the gateway (a real model call).
+# VERIFY_BRIDGE_CHAT_MODEL=<id> sends ONE direct real inference request to that bridge model. Both are
+# opt-in because free-provider quotas and bridge capacity are shared; catalog checks do not prove inference.
 set -uo pipefail
 fails=0
 pass() { echo "PASS  $*"; }
@@ -128,8 +129,34 @@ else
 fi
 v="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'import json, os, urllib.request
 r = urllib.request.Request("http://opencode-bridge.hermes:18282/v1/models", headers={"Authorization": "Bearer " + os.environ["HERMES_MODEL_API_KEY"]})
-d = json.load(urllib.request.urlopen(r, timeout=20)); print(len(d["data"]), "free models, e.g.", d["data"][0]["id"])' 2>/dev/null)"
-if [[ "$v" =~ ^[1-9] ]]; then pass "Hermes -> bridge /v1/models: $v"; else fail "Hermes -> bridge /v1/models: ${v:-no answer} (MODEL_PROVIDER=opencode-bridge?)"; fi
+d = json.load(urllib.request.urlopen(r, timeout=20)); ids = [m["id"] for m in d["data"]]; non_default = [m for m in ids if m != os.environ.get("HERMES_MODEL")]; print(json.dumps({"count": len(ids), "non_default_count": len(non_default), "sample": non_default[:3]}))' 2>/dev/null)"
+if [[ -n "$v" ]] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d["count"] >= 2 and d["non_default_count"] >= 1 else 1)' "$v"; then pass "Hermes -> bridge /v1/models exposes multiple free models including alternatives: $v"; else fail "Hermes -> bridge /v1/models lacks model alternatives: ${v:-no answer} (MODEL_PROVIDER=opencode-bridge?)"; fi
+v="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'import json, os, urllib.request
+req = urllib.request.Request("http://127.0.0.1:8642/api/model/options", headers={"Authorization": "Bearer " + os.environ["API_SERVER_KEY"]})
+d = json.load(urllib.request.urlopen(req, timeout=20))
+expected = {"opencode/deepseek-v4.1-flash-free", "opencode/beam-free", "opencode/big-pickle", "opencode/crouton-alpha-free", "opencode/flint-40b-free", "opencode/glm-5.3-flash-free", "opencode/iceman-free", "opencode/inkling-2-small-free", "opencode/longcat-2.5-free", "opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-lightning-free", "opencode/nemotron-3.5-super-vl-free"}
+found = set()
+def walk(x):
+ if isinstance(x, dict):
+  if isinstance(x.get("models"), list):
+   for m in x["models"]:
+    found.add(m if isinstance(m, str) else str(m.get("id", "")) if isinstance(m, dict) else "")
+  for y in x.values(): walk(y)
+ elif isinstance(x, list):
+  for y in x: walk(y)
+walk(d)
+print(json.dumps({"count": len(found & expected), "missing": sorted(expected - found)}))' 2>/dev/null)"
+if [[ -n "$v" ]] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d["count"] == 12 else 1)' "$v"; then pass "Hermes model picker contains all 12 configured OpenCode free models: $v"; else fail "Hermes model picker is missing OpenCode free models: ${v:-no answer} (see custom_providers in base/config.yaml)"; fi
+if [[ -n "${VERIFY_BRIDGE_CHAT_MODEL:-}" ]]; then
+  b="$(kubectl -n hermes exec deploy/hermes-gateway -c gateway -- python3 -c 'import json, os, sys, urllib.request
+model = sys.argv[1]
+data = json.dumps({"model": model, "messages": [{"role": "user", "content": "Reply with exactly BRIDGE-MODEL-OK"}]}).encode()
+req = urllib.request.Request("http://opencode-bridge.hermes:18282/v1/chat/completions", data=data, headers={"Authorization": "Bearer " + os.environ["HERMES_MODEL_API_KEY"], "Content-Type": "application/json"})
+try:
+ d = json.load(urllib.request.urlopen(req, timeout=180)); print(d["choices"][0]["message"].get("content", ""))
+except Exception as e: print(type(e).__name__ + ": " + str(e))' "$VERIFY_BRIDGE_CHAT_MODEL" 2>/dev/null)"
+  if [[ "$b" == *BRIDGE-MODEL-OK* ]]; then pass "OpenCode bridge inference succeeded for $VERIFY_BRIDGE_CHAT_MODEL"; else fail "OpenCode bridge inference failed for $VERIFY_BRIDGE_CHAT_MODEL: ${b:0:160}"; fi
+fi
 
 # 8. Read-only observability skill: loaded, reads work through the NetworkPolicies, writes are refused
 OBS=/opt/skills/observability/grafana-tempo-observability/scripts/obs.py
