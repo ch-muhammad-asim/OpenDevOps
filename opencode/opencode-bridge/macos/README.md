@@ -1,4 +1,4 @@
-# macOS — OpenCode bridge for Hermes (launchd)
+# 🍎 macOS — OpenCode bridge for Hermes (launchd)
 
 [← Main bridge guide](../README.md) · [Existing script implementation](../../hermes-desktop/README.md)
 
