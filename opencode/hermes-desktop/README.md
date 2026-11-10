@@ -97,6 +97,29 @@ gtk-launch com.nousresearch.hermes
 
 ---
 
+## 📁 Local files versus a VM bridge
+
+OpenCode's tools run on the machine hosting the bridge. A local bridge can read local project folders and
+screenshots; a bridge on a VM sees the VM's filesystem. An SSH tunnel forwards API requests, not local files.
+Setting Hermes's `terminal.backend` to `local` does not relocate the OpenCode agent's tools.
+
+For desktop file access, start the bridge on the same computer as Hermes:
+
+```bash
+OPENCODE_BRIDGE_CWD="$HOME" ./run-bridge.sh install-service
+./run-bridge.sh models
+```
+
+Select that local endpoint in Hermes, using the port configured for the local service (default
+`http://127.0.0.1:18383/v1`). Keep a VM bridge as a separate custom endpoint for work on the VM.
+After changing endpoints, start a new chat or reselect the provider in the existing chat: a conversation can
+retain its previous endpoint override and remote working-directory context.
+
+Verify with an actual file read, not only `/health` or `/v1/models`: create a temporary local text file with
+unique contents and ask Hermes to read its absolute path without including those contents in the prompt.
+Confirm the returned contents and remove the test file afterwards. Listing a local screenshot folder should
+likewise return the filenames actually present on the desktop computer.
+
 ## 🔌 Test it directly
 
 ```bash
@@ -331,6 +354,7 @@ Every flag has a CLI equivalent — `python3 opencode_bridge.py --help`.
 | `/v1/models` works in the browser but Hermes sees nothing | Hermes probes `<base_url>/models` — the Endpoint URL must end in `/v1` (no trailing slash) |
 | Hermes shows `Unknown provider 'openai'` | Use a **Custom endpoint** entry, not `openai`/`auto` — those can't infer a localhost URL |
 | `Address already in use` | Something owns the port: `BRIDGE_PORT=18283 ./install-opencode-bridge.sh`, then update the Base URL in Hermes |
+| A local path is reported missing, or `pwd` shows a VM workspace | Select a bridge running on the desktop computer. A tunnel to a VM still runs OpenCode's tools on the VM. Start a new chat or reselect the provider to clear an old endpoint override; see [local files versus a VM bridge](#-local-files-versus-a-vm-bridge) |
 | Vision/image requests fail | The free models are text-only — set Hermes' **Vision** auxiliary model to an image-capable one |
 | Sessions piling up in `opencode session list` | You ran with `--keep-sessions`; drop it (cleanup is on by default) |
 
