@@ -168,4 +168,4 @@ kubectl apply -k "$dir"
 [[ -n "${bridge_changed:-}" ]] && kubectl -n hermes rollout restart deploy/opencode-bridge >/dev/null      # new bridge script
 kubectl -n hermes rollout status deploy/opencode-bridge --timeout=300s
 kubectl -n hermes rollout status deploy/hermes-gateway --timeout=300s
-echo "Dashboard: https://hermes-gke.saqlainmushtaq.com  (user and password: see hermes/README.md, 'Log in')"
+echo "Dashboard: https://hermes-gke.example.com  (user and password: see hermes/README.md, 'Log in')"

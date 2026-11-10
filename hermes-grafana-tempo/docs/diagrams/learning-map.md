@@ -2,8 +2,6 @@
 
 A beginner-friendly companion to the [detailed architecture](architecture.mmd), [telemetry flow](telemetry-flow.mmd), and [lab vs production diagram](lab-vs-production.mmd). This explains **what each component does, how a request becomes a trace, and how to study the repository**. The diagrams are conceptual: refer to the linked component READMEs for exact ports, replicas, and deployment commands.
 
-> **Deployment evidence:** The lab was deployed and verified on **2026-11-08**; it may be stopped now. The production profile was validated offline, **not deployed** as a live production cluster. These diagrams show the documented architecture, not a live health check.
-
 ## 1. Start here: system learning map
 
 Read **left to right**. Each group answers a different engineering question.
@@ -98,7 +96,7 @@ The **Hermes gateway also exports content-free health spans/metrics and diagnost
 
 ## 3. Lab profile versus proposed production profile
 
-| Area | Lab — tested on GKE (2026-11-08) | Production — configuration validated offline |
+| Area | Lab example | Production configuration |
 |---|---|---|
 | GKE | Zonal, 3 × `e2-standard-2` | Regional, larger node pools and higher availability |
 | Tempo | Single-binary deployment, PVC, GCS trace blocks | Distributed components; external Kafka-compatible queue required |
@@ -107,7 +105,6 @@ The **Hermes gateway also exports content-free health spans/metrics and diagnost
 | Thanos | Sidecar + Query + Store + Compactor | HA-oriented deployment of metrics components |
 | Storage | Separate GCS trace and metrics buckets, ~30-day application retention | Same separation, least-privilege bucket IAM |
 | TLS edge | Cloudflare Full; Traefik default origin certificate | Prefer validated origin TLS: Cloudflare Full (strict) |
-| Validation | Repository records platform + Hermes checks and k6 experiments | Helm render/lint/schema checks; **not live-tested** |
 
 **Security nuance:** The lab's Cloudflare **Full** mode encrypts traffic to the origin but does **not authenticate the origin certificate**. Full (strict) with a valid origin certificate is preferable for production.
 

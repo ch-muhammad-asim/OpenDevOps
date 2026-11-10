@@ -6,13 +6,6 @@ path the Next.js docs recommend, plus a few manual spans, attributes and events.
 issues are planted on purpose (two more table rows show how upstream problems look from here), so you can see how each one looks in a trace and which TraceQL query
 finds it.
 
-**Status:** tested locally with Docker Compose (`apps/local`) on 2026-11-08: Node.js 26.13.0,
-Next.js 16.4.5, `@vercel/otel` 2.3.0, Tempo 3.1.1, OTel Collector contrib 0.165.0. Every route and
-every TraceQL query below was run against that stack, including one trace that spans
-`nextjs-web -> nodejs-orders -> python-inventory`, and the image was run with a read-only root
-filesystem as UID 10001. The Kubernetes manifests pass `kubectl kustomize`; they were not applied to
-a cluster in this test.
-
 | Item | Value |
 |---|---|
 | OTel `service.name` | `nextjs-web` |
@@ -169,8 +162,6 @@ digest (`<registry>/nextjs@sha256:...`) and applies all three apps.
 | Traces arrive | Grafana Explore, Tempo, `{ resource.service.name = "nextjs-web" }` | Traces within a minute |
 | Propagation | `{ resource.service.name = "nextjs-web" } >> { resource.service.name = "nodejs-orders" }` | Traces with both services |
 | Probes not traced | `{ resource.service.name = "nextjs-web" && name = "GET /healthz" }` | No results |
-
-## 🧪 Tests (local, 2026-11-08)
 
 Docker Compose stack in `apps/local`; one request per route; times from `curl`.
 

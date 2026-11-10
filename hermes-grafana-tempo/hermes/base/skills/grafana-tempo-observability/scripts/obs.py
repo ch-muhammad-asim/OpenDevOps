@@ -53,7 +53,7 @@ def pick_metrics():
 SLO = float(os.environ.get("OBS_SLO", "0.99"))   # availability SLO of the apps (apps/monitoring/prometheusrule.yaml)
 TEMPO = os.environ.get("OBS_TEMPO_URL", "http://tempo.observability:3200")
 GRAFANA = os.environ.get("OBS_GRAFANA_URL", "http://grafana.observability")
-GRAFANA_PUBLIC = os.environ.get("OBS_GRAFANA_PUBLIC_URL", "https://grafana-tempo.saqlainmushtaq.com").rstrip("/")
+GRAFANA_PUBLIC = os.environ.get("OBS_GRAFANA_PUBLIC_URL", "https://grafana-tempo.example.com").rstrip("/")
 GRAFANA_TOKEN = os.environ.get("GRAFANA_TOKEN", "")
 DS = {"prometheus": {"type": "prometheus", "uid": "prometheus"}, "tempo": {"type": "tempo", "uid": "tempo"}}
 

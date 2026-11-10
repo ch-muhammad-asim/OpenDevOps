@@ -4,10 +4,6 @@ The official Tempo mixin dashboards from `grafana/tempo` tag `v3.1.1` (`operatio
 adapted to the single-binary Tempo of the lab and packed as one ConfigMap each. **Why:** Tempo's own health (ingest,
 queries, backend jobs, resources) next to the application traces, without hand-maintained JSON.
 
-**Status (2026-11-08, Grafana 13.3.0, Tempo 3.1.1):** the 8 dashboards run in the lab Grafana (folder "Tempo"). Every
-query of the rewritten Service Graph dashboard was run against the lab Prometheus and returns data (4 source nodes,
-4 target nodes, 6 edges over 6 hours).
-
 ## 🧩 Files
 
 | File | What it is (one line) |
@@ -52,14 +48,6 @@ python3 helm/grafana/dashboards/generate-tempo-mixin.py
 
 Review the diff (`git diff helm/grafana/dashboards/ helm/tempo/prometheusrule-tempo-mixin.yaml`), then apply as above.
 Do not edit the generated YAML by hand: the next run overwrites it.
-
-| Rewrite in the script | Why |
-|---|---|
-| `job="<namespace>/<component>"`, `container`, `deployment`/`statefulset`, `pod` selectors → `job="tempo"`, `container="tempo"`, `pod=~"tempo-.*"` | The upstream mixin targets the microservices deployment |
-| Every Prometheus data source → uid `prometheus` | Upstream hard-codes some UIDs |
-| `cluster` / `namespace` variables optional (`.*`) | This stack has no `cluster` label |
-| `cluster="$cluster"` / `namespace="$namespace"` → `=~` | With the variables on All (`.*`) an exact match matches nothing; checked 2026-11-08: Tempo Operational 58/98 PromQL targets (35/53 panels) return data through the Grafana proxy, the rest are Memcached, Kafka, Loki and other rows this stack does not run |
-| Service Graph: `traces_service_graph_connection_info` → `group by (client, server) (max_over_time(traces_service_graph_request_total{...}[$__range]))` | The connection-info gauge needs the opt-in processor `service-graphs-connection-info`; the request counter is always written |
 
 ## ✅ Verify
 

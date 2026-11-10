@@ -5,10 +5,6 @@ traces to the OpenTelemetry Collector, and Grafana Tempo shows each bug as spans
 query finds. `nodejs-orders` calls it; it calls nothing else (its database is in-process SQLite). **Why:** show what
 zero-code Python instrumentation gives you for free, and where a few manual spans make a trace easier to read.
 
-**Status:** ✅ tested locally on 2026-11-08 with the [`apps/local`](../local/) stack (Tempo 3.1.1, OpenTelemetry
-Collector contrib 0.165.0): every endpoint called, every TraceQL query below returned the expected traces, image runs as
-uid 10001 with a read-only root filesystem, manifests render with `kubectl kustomize`. Not yet tested: the GKE deploy.
-
 ## 🏗️ Architecture
 
 The project [architecture diagram](../../docs/diagrams/architecture.mmd) shows the Python app in the call chain; it renders in the [top-level README](../../README.md). The table below lists the parts.
@@ -138,27 +134,10 @@ curl -sG http://127.0.0.1:13200/api/search \
   --data-urlencode start=$(( $(date +%s) - 900 )) --data-urlencode end=$(date +%s)
 ```
 
-| Check | Result (2026-11-08, local stack) |
-|---|---|
-| `/healthz` not traced | `{ span.http.route = "/healthz" }` -> 0 traces |
-| Unhandled exception | 500 in 0.02 s; query matched the `GET /inventory/items/{sku}` trace, event `exception.type = KeyError` |
-| N+1 | Query matched 1 trace, `count() = 21` (1 + 20 SELECTs), 7 ms total |
-| Baseline | `/inventory/items` query matched with `count() = 1` |
-| Slow endpoint | `/inventory/slow` 3.00 s; `legacy_supplier_sync` > 2 s matched (3004 ms trace) |
-| CPU hog | `n=30` 0.21 s, `n=35` 2.3 s; a `/healthz` sent during `n=35` waited 2.0 s |
-| Read-only root, uid 10001 | `docker run --read-only --tmpfs /tmp -u 10001 --cap-drop ALL` served `/healthz` and `/inventory/report` |
-
 TraceQL metrics (p95 per route) also work: `{ resource.service.name = "python-inventory" && kind = server } |
 quantile_over_time(span:duration, .95) by (span.http.route)`.
 
 ## 🛡️ Security
-
-| Threat | Control | How it is enforced | Test that proves it |
-|---|---|---|---|
-| Container escape / privilege gain | Non-root uid 10001, no privilege escalation, all capabilities dropped, RuntimeDefault seccomp | Dockerfile `USER`, [`k8s/deployment.yaml`](k8s/deployment.yaml) | Local and GKE (2026-11-08): uid/gid 10001; live pod has `allowPrivilegeEscalation: false`, `drop: [ALL]`; namespace enforces Pod Security `restricted` |
-| Tampering with the image at runtime | Read-only root filesystem; only `/tmp` (emptyDir, 32Mi) is writable | `readOnlyRootFilesystem: true` | Local and GKE: writing to `/app` fails with "Read-only file system" |
-| Kubernetes API abuse | No service account token mounted | `automountServiceAccountToken: false` | GKE: no token at `/var/run/secrets/kubernetes.io/serviceaccount/token` in the live pod |
-| Unwanted inbound traffic | Ingress-only NetworkPolicies of namespace `tempo-apps` | [`k8s/networkpolicies.yaml`](../../k8s/networkpolicies.yaml) | GKE: `curl python.tempo-apps:8000` from namespace `default` times out; from `tempo-apps` returns 200 |
 
 Not protected (by design, it is a demo): no authentication on the API, `db.statement` is recorded in spans (fine
 here: parameters are bound, so values are not in the SQL text), stack traces are stored in Tempo.

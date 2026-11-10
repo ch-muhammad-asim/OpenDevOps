@@ -4,9 +4,6 @@ Alert rules for the parts of the stack that kube-prometheus-stack's default rule
 Collector, Traefik, cert-manager and Grafana. **Why:** a broken telemetry pipeline or edge must page someone before the
 dashboards silently go empty.
 
-**Status (2026-11-08, Prometheus 3.16.0, operator v0.95.1):** 4 files, 15 alerts, `promtool check rules` `SUCCESS`
-on each file's `spec`, `kubeconform -strict` valid; every alert has a `runbook_url`.
-
 ## 🧩 Files
 
 | File | What it is (one line) | Alerts |

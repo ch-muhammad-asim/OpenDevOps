@@ -4,11 +4,6 @@ Values files for the Helm releases that make up the observability stack. Every `
 **production** defaults; a `values-lab.yaml` next to it shrinks sizes for the small lab cluster. Every file starts
 with a header that gives the chart, chart version, app version and the exact `helm upgrade --install` command.
 
-**Status:** ✅ the lab profile runs on the lab cluster (2026-11-08, `PROFILE=lab scripts/verify.sh` 31 PASS,
-0 failures), including Thanos, with Tempo and Thanos blocks on GCS via Workload Identity. Every profile below renders with
-`helm template` and passes `helm lint` and `kubeconform -strict` (Kubernetes 1.36) against the pinned chart; the
-production profiles have not been run on a cluster. Each folder's README is authoritative for its chart.
-
 ## 🧩 Releases
 
 | Dir | Release / namespace | What it does (one line) |

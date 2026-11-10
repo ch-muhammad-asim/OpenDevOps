@@ -14,24 +14,18 @@ official OpenTelemetry SDKs, with production-grade defaults and a small lab prof
 > journey through the whole stack, a glossary, and a card per technology (what it is, why it is here, alternatives,
 > version). Then [every Grafana dashboard explained](docs/dashboards/README.md).
 
-**Status:** Lab profile deployed on GKE 1.36 (3 × `e2-standard-2`) with object storage on GCS via Workload Identity.
-On 2026-11-09, in-cluster `scripts/verify.sh` checks pass, including app health, datasource access, trace ingestion
-and lookup, metrics and NetworkPolicy isolation. Hermes gateway telemetry, dashboard, read-only observability skill
-and the OpenCode free DeepSeek model listing also pass. Public HTTPS checks currently fail from the verification
-environment (Cloudflare/origin timeout); do not treat the live URLs below as externally verified. The earlier
-2026-11-08 lab run passed `scripts/verify.sh` three consecutive times and `hermes/verify.sh` 31/31. The production profile
-(tempo-distributed with GCS and Kafka, HA Prometheus, Collector HPA) renders and passes `helm lint` and
-`kubeconform -strict`; it has **not** been run on a cluster. See [Tests](#-tests).
+This project is a reusable demo lab. Replace `example.com` consistently in the manifests, Helm values,
+scripts and documentation with a domain you control before deploying.
 
-## 🌐 Live URLs
+## 🌐 Example hostnames
 
 | URL | What | Login |
 |---|---|---|
-| <https://grafana-tempo.saqlainmushtaq.com> | Grafana: traces (Tempo), metrics (Prometheus), dashboards ([explained](docs/dashboards/README.md)), alerts | Grafana login; credentials in Secret `observability/grafana-admin` ([how](helm/grafana/README.md)) |
-| <https://tempo-nextjs.saqlainmushtaq.com> | Next.js sample app (`nextjs-web`), the entry point of the traced chain | None (demo) |
-| <https://tempo-nodejs.saqlainmushtaq.com> | Node.js sample app (`nodejs-orders`) | None (demo) |
-| <https://tempo-python.saqlainmushtaq.com> | Python sample app (`python-inventory`) | None (demo) |
-| <https://hermes-gke.saqlainmushtaq.com> | Hermes Agent web dashboard and chat | Hermes login; credentials in Secret `hermes/hermes-dashboard-auth` ([how](hermes/README.md#-log-in)) |
+| <https://grafana-tempo.example.com> | Grafana: traces (Tempo), metrics (Prometheus), dashboards ([explained](docs/dashboards/README.md)), alerts | Grafana login; credentials in Secret `observability/grafana-admin` ([how](helm/grafana/README.md)) |
+| <https://tempo-nextjs.example.com> | Next.js sample app (`nextjs-web`), the entry point of the traced chain | None (demo) |
+| <https://tempo-nodejs.example.com> | Node.js sample app (`nodejs-orders`) | None (demo) |
+| <https://tempo-python.example.com> | Python sample app (`python-inventory`) | None (demo) |
+| <https://hermes-gke.example.com> | Hermes Agent web dashboard and chat | Hermes login; credentials in Secret `hermes/hermes-dashboard-auth` ([how](hermes/README.md#-log-in)) |
 
 Every hostname is a proxied Cloudflare record (public TLS at Cloudflare) in front of one Traefik load balancer that
 accepts only Cloudflare's address ranges. Read a login without printing it anywhere else:
@@ -311,7 +305,7 @@ flowchart TB
 Production-grade settings are the defaults (`PROFILE=prod`); the lab profile (`PROFILE=lab`) only shrinks sizes to
 fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 
-| Component | Lab profile (`PROFILE=lab`, live unless noted) | Production default (rendered, not run live unless noted) | Defined in |
+| Component | Lab profile (`PROFILE=lab`) | Production configuration | Defined in |
 |---|---|---|---|
 | Cluster | Zonal, 3 × `e2-standard-2` (6 vCPU / 24 GB) | Regional (≥ 2 zones), larger node pool | [`infra/`](infra/README.md) |
 | Tempo | Single binary `grafana-community/tempo` 3.2.1, embedded metrics-generator, no Kafka | `grafana-community/tempo-distributed` 3.27.0: distributor, zone-aware live-stores, block-builder, metrics-generator, queriers | [`helm/tempo/`](helm/tempo/README.md), [`helm/tempo-distributed/`](helm/tempo-distributed/README.md) |
@@ -324,7 +318,7 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 | Alertmanager | 1 replica | 2 replicas, critical → paging, warning → channel (receivers from a Secret) | [`helm/kube-prometheus-stack/`](helm/kube-prometheus-stack/README.md) |
 | Grafana | 1 replica | 2 replicas with an external database (Secret `grafana-db`); no anonymous access | [`helm/grafana/`](helm/grafana/README.md) |
 | Sample apps | Same manifests as production | 2 replicas, PDB, spread, SLO alerts (the app code itself is a demo) | [`apps/`](apps/README.md) |
-| Hermes Agent | Lab overlay `hermes/lab/` (`emptyDir` home, 50m / 256Mi): validated, not the one running | **Runs live on the lab cluster:** `hermes/base/` (10Gi PVC home, 100m / 384Mi, PDB, runbooks) | [`hermes/lab/`](hermes/lab/README.md), [`hermes/base/`](hermes/base/README.md) |
+| Hermes Agent | Lab overlay `hermes/lab/` (`emptyDir` home, 50m / 256Mi): ephemeral demo profile | `hermes/base/` (10Gi PVC home, 100m / 384Mi, PDB, runbooks) | [`hermes/lab/`](hermes/lab/README.md), [`hermes/base/`](hermes/base/README.md) |
 | Edge TLS | Cloudflare edge TLS on every host (proxied records, zone SSL mode **Full**); Traefik serves its default origin certificate; no cert-manager (`TLS_MODE=cloudflare`) | Cloudflare **Full (strict)** with validated origin certificates (`TLS_MODE=letsencrypt` or a Cloudflare Origin CA certificate) | [`k8s/`](k8s/README.md), [`scripts/`](scripts/README.md) |
 | Costs | All software is free and open source (no licences); billed: persistent disks, GCS storage and operations for the trace and metrics buckets, and the GKE nodes and load balancer | Same, at production size | [`helm/thanos/`](helm/thanos/README.md) |
 | Everywhere | Pinned chart versions. By digest: platform chart images, Hermes, the deployed sample-app images (`apps/deploy-apps.sh` resolves each tag to `@sha256`) and the apps' Node.js and Python base images. Requests/limits, Pod Security `restricted` where the workload allows, default-deny NetworkPolicies, PrometheusRules with runbooks | Same | each folder |
@@ -334,13 +328,22 @@ fit 3 × `e2-standard-2`. Each folder's README is authoritative for its numbers.
 Run from this folder (`hermes-grafana-tempo/`). Each step is idempotent.
 
 ```bash
+# Confirm the intended sandbox project; create-cluster.sh replaces the kubectl context.
+gcloud config get-value project
+export CF_TOKEN_FILE=/path/to/cloudflare-dns-token   # chmod 600; Zone:DNS:Edit + Zone:Zone:Read
 infra/create-cluster.sh                     # 1. GKE cluster (lab: zonal, 3 x e2-standard-2, Dataplane V2)
 PROFILE=lab scripts/deploy.sh               # 2. Prometheus, edge, Tempo, Collector, Grafana, dashboards, routes, DNS
+gcloud artifacts repositories describe tempo-apps --location=us-central1 >/dev/null 2>&1 || \
+  gcloud artifacts repositories create tempo-apps --repository-format=docker --location=us-central1 --immutable-tags
 apps/build-push.sh && apps/deploy-apps.sh lab   # 3. build + push the sample apps, deploy them by digest (repo setup: apps/README.md)
 hermes/deploy.sh                            # 4. Hermes gateway, dashboard, OpenCode bridge; providers: hermes/README.md
 scripts/load.sh public                      # 5. traffic that triggers every planted issue
 PROFILE=lab scripts/verify.sh && hermes/verify.sh   # 6. PASS/FAIL checks; exit code = failures
 ```
+
+Restricted training projects may require `ACCESS_MODE=conditional` for the platform deployment; this still scopes
+each Workload Identity storage grant to its dedicated bucket. The default `ACCESS_MODE=bucket` needs permission to
+edit bucket IAM. DNS is updated only after Traefik has a load balancer address.
 
 Production: `PROFILE=prod KAFKA_BOOTSTRAP=... scripts/deploy.sh` after creating the bucket
 (`infra/create-tempo-bucket.sh`); see [`scripts/`](scripts/README.md) and [`helm/`](helm/README.md).
@@ -368,14 +371,8 @@ and runbooks are in [`hermes/README.md`](hermes/README.md).
 
 ### 💬 Chat
 
-Log in at <https://hermes-gke.saqlainmushtaq.com> and open **Chat**, or call the in-pod OpenAI-compatible API server.
+Log in at <https://hermes-gke.example.com> and open **Chat**, or call the in-pod OpenAI-compatible API server.
 Chat turns go to an external model provider over HTTPS; the gateway's telemetry stays content-free.
-
-| Provider | Status | Setup |
-|---|---|---|
-| OpenCode free models via the in-cluster bridge (default; `opencode/deepseek-v4.1-flash-free`, no OpenCode account key) | Deployed, `verify.sh` checks the bridge; chat **not proven yet**: OpenCode answered "Free usage limit reached" for every free model from this cluster (`hermes/chat-proof.sh` reruns it) | [`hermes/README.md`](hermes/README.md#opencode-free-via-bridge-default) |
-| Cloudflare Workers AI (alternative; `@cf/qwen/qwen3.8-27b`, tool calling, free daily quota) | ✅ chat live-tested 2026-11-08 | [`hermes/README.md`](hermes/README.md#-model-provider) |
-| OpenCode Zen / Go (`MODEL_PROVIDER=opencode`) | Supported alternative; Zen bills per token, Go is a subscription | [`hermes/README.md`](hermes/README.md#-model-provider) |
 
 ### 🧰 Observability skill
 
@@ -446,12 +443,9 @@ Component health checks, alerts and runbooks are in each folder's README ([`helm
 
 ## 🧪 Tests
 
-| Date | What | Result |
-|---|---|---|
-| 2026-11-08 | `PROFILE=lab scripts/verify.sh` (releases, pods, health, test trace through Collector → Tempo → Grafana, scraping, NetworkPolicy, public HTTPS) | ✅ 0 failures, three consecutive runs |
-| 2026-11-08 | Sample apps live (`scripts/load.sh public`, TraceQL per issue, alert rules) | ✅ every planted issue found; 200/500/502/504 mix as designed; 12 rules loaded |
-| 2026-11-08 | `hermes/verify.sh` (pod, Prometheus metrics and rules, Tempo, Grafana, public URL, Hermes login, model settings, OpenCode bridge Ready and `/v1/models`, observability skill: Thanos/Tempo/Grafana reads, Prometheus `:9090` blocked, Grafana write → 403, `diagnose`, `trends`) | ✅ 31/31 (no model call). Chat through the OpenCode bridge is not proven yet: every free model answered "Free usage limit reached" from this cluster; `hermes/chat-proof.sh` runs the two chat prompts when the limits reset. Earlier chats with Workers AI got model replies |
-| 2026-11-08 | Production profiles: `helm template`, `helm lint`, `kubeconform -strict` (Kubernetes 1.36) | ✅ render and validate; not run live |
+Run `PROFILE=lab scripts/verify.sh` for platform checks, `hermes/verify.sh` for Hermes checks,
+and `hermes/model-smoke.sh` to test the current free model catalogue in your own deployment.
+See [`tests/`](tests/README.md) for demo load and resilience scenarios.
 
 ## ✅ Production checklist
 

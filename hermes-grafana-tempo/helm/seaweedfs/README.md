@@ -9,14 +9,6 @@ disk, free and open source (Apache-2.0), in a single small pod.
 (`OBJECT_STORE=gcs`, see [`../thanos/`](../thanos/README.md), [`../tempo/`](../tempo/README.md) and
 [`../../infra/`](../../infra/README.md)); nothing in this directory runs by default.
 
-**Status:** no longer deployed in the lab (the lab moved to GCS on 2026-11-08; namespace `object-storage` removed).
-Earlier test record (2026-11-08, SeaweedFS 4.52): ✅ live on the lab cluster: `seaweedfs-0` Ready on its 100Gi PVC,
-both buckets created by the bootstrap Job, Tempo writing blocks to `tempo-traces` (S3 requests 2xx only), Thanos
-sidecar uploads to `thanos-metrics` succeeding and the store gateway loading them; `PROFILE=lab scripts/verify.sh`
-32 PASS, 0 failures at that time (includes "pods Ready in object-storage"). Also validated offline: `kubectl kustomize`
-+ kubeconform strict (Kubernetes 1.36, 12 resources valid), `promtool check rules` (6 rules) and Pod Security Standards
-`restricted`.
-
 ## 🏗️ Architecture
 
 | Flow | From → to | Port / protocol |
@@ -62,8 +54,6 @@ sidecar uploads to `thanos-metrics` succeeding and the store gateway loading the
 | `-master.defaultReplication` | `000` | One copy: single node, single disk |
 | Requests / limits | 100m / 256Mi, memory limit 1Gi, no CPU limit | Small lab load; no CPU throttling on uploads and vacuum |
 | Bootstrap Job | 10m / 64Mi, limit 256Mi | Runs once |
-
-Usage at the first live test (2026-11-08, a few hours of data): `tempo-traces` ~1.5 MB, `thanos-metrics` ~78 MB.
 
 Deleted objects (Tempo and Thanos retention) free disk only after SeaweedFS vacuums a volume (automatic every 14 min
 once 30% of a volume is garbage), so usage lags deletes.
@@ -229,10 +219,6 @@ Production and the lab do not use SeaweedFS (GCS with Workload Identity). If an 
 - [ ] Key rotation schedule for the S3 identities.
 
 ## 📌 Pinned versions
-
-| Item | Version | Digest (multi-arch index, read from the registry API on 2026-11-08) |
-|---|---|---|
-| `chrislusf/seaweedfs` (server and bootstrap Job) | 4.52 (latest release, 2026-11-02) | `sha256:57877e32bb90073b37dc109b438ba66e84fd5ed9ced5f5c04f56444ef243ce59` |
 
 The image is Alpine-based, starts as root by default and drops to user `seaweed` (UID/GID 1000) in its entrypoint.
 Here the entrypoint is skipped and `/usr/bin/weed` starts directly as 1000, so no root step runs at all.

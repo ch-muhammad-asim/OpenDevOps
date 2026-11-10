@@ -17,7 +17,7 @@ CM_RELEASE=""; CM_NS=""
 [ "$TLS_MODE" = letsencrypt ] && { CM_RELEASE="cert-manager:cert-manager"; CM_NS="cert-manager"; }
 # Tempo query API: single binary "tempo" (lab) or the query-frontend (prod, tempo-distributed).
 if [ "$PROFILE" = lab ]; then TEMPO_QUERY_SVC="${TEMPO_QUERY_SVC:-tempo}"; else TEMPO_QUERY_SVC="${TEMPO_QUERY_SVC:-tempo-query-frontend}"; fi
-ZONE="${ZONE:-saqlainmushtaq.com}"
+ZONE="${ZONE:-example.com}"
 GRAFANA_HOST="${GRAFANA_HOST:-grafana-tempo.$ZONE}"
 CURL_IMAGE="${CURL_IMAGE:-curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93}"
 # Probe pods must pass Pod Security "restricted" (observability, tempo-apps, hermes enforce it).

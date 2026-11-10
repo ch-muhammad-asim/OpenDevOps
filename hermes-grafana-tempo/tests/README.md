@@ -12,10 +12,6 @@ OTel Collector, so every run shows up in Prometheus and in the **Stress tests** 
 CPU, memory and restarts and the traces in Tempo. **Why:** see what each kind of overload and failure looks like in
 metrics and traces before it happens in production.
 
-**Status:** ✅ every test below ran live on 2026-11-08 on the lab cluster (3 × e2-standard-2, GKE, lab profile:
-1 replica per app, k6 image pinned by digest in [`run.sh`](run.sh), `SCALE=0.6`). Results with real numbers: [Results](#-results-2026-11-08-lab).
-Not run: a long soak (the lab ran 72 s; use `SOAK_DURATION=2h`), the production profile (2 replicas per app).
-
 > ⚠️ **Disruption warning.** `dependency` scales `nodejs` to 0 for 45 s (nextjs answers errors), `podkill` deletes an
 > app pod (with 1 replica: a few seconds of errors), `cpu`/`memory` restart the target Deployment to switch the stress
 > endpoints on, and `stress`/`spike` push the apps to errors on purpose. Run them on a test cluster or in a quiet window.
@@ -107,8 +103,6 @@ target Deployment (a rolling restart) and back to `false` on exit unless `KEEP_S
 **Tempo:** the dashboard links open Explore with `{ name =~ "stress.*" }`, slow server spans and errors. Under CPU
 stress, compare `{ resource.service.name = "python-inventory" && kind = server && duration > 500ms }` before and during
 the run: healthy requests queue behind the busy loop (python: GIL; Node.js: event loop).
-
-## 📊 Results (2026-11-08, lab)
 
 | Test | Peak VUs | Requests | RPS | p95 | p99 | Errors | Result |
 |---|---|---|---|---|---|---|---|

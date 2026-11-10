@@ -4,9 +4,6 @@ Runs the three sample apps with an OpenTelemetry Collector, Grafana Tempo and Pr
 see every planted issue in Tempo before deploying to Kubernetes. Same data path as the cluster:
 app → OTLP/HTTP → Collector → OTLP/gRPC → Tempo → metrics-generator → Prometheus.
 
-**Status:** tested 2026-11-08 with Docker 28.3.3 / Compose v2 on Linux x86_64 (Tempo 3.1.1, Collector contrib 0.165.0,
-Prometheus v3.16.0).
-
 ## 🧩 Components
 
 | Service | What it does (one line) | Defined in | Host port |

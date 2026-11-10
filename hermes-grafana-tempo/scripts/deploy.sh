@@ -21,7 +21,7 @@ chart() { local f="${CHART_CACHE:-}/${1#*/}-$2.tgz"; if [ -n "${CHART_CACHE:-}" 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 K8S="$ROOT/k8s"; HELM="$ROOT/helm"
 CF_TOKEN_FILE="${CF_TOKEN_FILE:-}"
-ZONE="${ZONE:-saqlainmushtaq.com}"
+ZONE="${ZONE:-example.com}"
 # PROFILE=prod (default): production values (each chart's values.yaml); Tempo = tempo-distributed
 #   (needs KAFKA_BOOTSTRAP, a Kafka-compatible queue) on GCS via Workload Identity scoped to the bucket.
 # PROFILE=lab: values.yaml + values-lab.yaml overlays sized for 3 x e2-standard-2; Tempo = single binary.
@@ -60,12 +60,18 @@ vals() { local d="$1"; printf '%s\n' -f "$d/values.yaml"
   if [ "$PROFILE" = lab ] && [ -f "$d/values-lab.yaml" ]; then printf '%s\n' -f "$d/values-lab.yaml"; fi; }
 
 repos() {
-  helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+  local names=(traefik prometheus-community grafana-community open-telemetry)
+  if [ "$TLS_MODE" = letsencrypt ]; then
+    helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+    names+=(jetstack)
+  fi
   helm repo add traefik https://traefik.github.io/charts >/dev/null 2>&1 || true
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo add grafana-community https://grafana-community.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts >/dev/null 2>&1 || true
-  helm repo update >/dev/null
+  # Unrelated user repositories (or optional cert-manager in Cloudflare mode) must
+  # not block deployment when their chart hosts are unreachable.
+  helm repo update "${names[@]}" >/dev/null
 }
 
 step_namespaces() {
@@ -229,7 +235,7 @@ step_grafana() {
     # Values come from files in a private temp dir (never on a command line).
     local d; d="$(mktemp -d)"; chmod 700 "$d"
     printf 'admin' > "$d/admin-user"
-    openssl rand -base64 30 | tr -d '/+=\n' | cut -c1-32 > "$d/admin-password"
+    python3 -I -c 'import secrets,sys; sys.stdout.write(secrets.token_urlsafe(24))' > "$d/admin-password"
     kubectl -n observability create secret generic grafana-admin \
       --from-file=admin-user="$d/admin-user" --from-file=admin-password="$d/admin-password" >/dev/null
     rm -rf "$d"

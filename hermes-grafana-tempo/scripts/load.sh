@@ -3,7 +3,7 @@
 # so traces, errors and the service graph show up in Grafana Tempo.
 #
 # Usage: scripts/load.sh [public|local] [rounds]
-#   public  https://tempo-{nextjs,nodejs,python}.<DOMAIN>   (default; DOMAIN=saqlainmushtaq.com)
+#   public  https://tempo-{nextjs,nodejs,python}.<DOMAIN>   (default; DOMAIN=example.com)
 #   local   the apps/local Docker Compose stack on 127.0.0.1
 #   rounds  number of rounds (default 20); a round takes ~0.5-3 s (longer while a timeout or CPU hog runs)
 # Override any target with NEXTJS_URL, NODEJS_URL, PYTHON_URL.
@@ -11,7 +11,7 @@ set -euo pipefail
 
 MODE="${1:-public}"
 ROUNDS="${2:-20}"
-DOMAIN="${DOMAIN:-saqlainmushtaq.com}"
+DOMAIN="${DOMAIN:-example.com}"
 
 case "$MODE" in
   public)

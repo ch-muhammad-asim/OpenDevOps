@@ -6,24 +6,16 @@ and the sample apps, and Pod Security admission plus quotas bound what can run. 
 is optional. **Why:** only Grafana and the sample apps are public, only through Cloudflare, and the telemetry backends
 stay internal.
 
-**Status:** ✅ lab profile running on GKE 1.36 (3 x e2-standard-2, one zone) with `TLS_MODE=cloudflare` and the Cloudflare zone in **Full** mode: routes
-`tls: {}`, Traefik's default certificate, Cloudflare SSL mode "Full", cert-manager not installed; tested end to end on
-2026-11-08. `TLS_MODE=letsencrypt` is optional; it was tested on the same cluster earlier on 2026-11-08 (4 certificates
-issued and `READY`, Cloudflare "Full (strict)"). 🚧 The production profile (HA values, PDBs, quota, opt-in egress
-policies) is validated offline only (2026-11-08: `kubeconform` strict on Kubernetes 1.36, `helm lint` + `helm template`
-for Traefik 42.3.1 and cert-manager v1.21.3, `kubectl apply --dry-run=server` for every manifest here). It has not run
-on a multi-zone cluster yet.
-
 ## 🏗️ Architecture
 
 The project [architecture diagram](../docs/diagrams/architecture.mmd) shows the edge (Cloudflare, Traefik) and every namespace; it renders in the [top-level README](../README.md). The table below lists the parts.
 
 | Public host | Namespace | Backend (Service:port) | Certificate (`TLS_MODE=letsencrypt` only) |
 |---|---|---|---|
-| `grafana-tempo.saqlainmushtaq.com` | observability | `grafana:80` | `grafana-tempo-tls` |
-| `tempo-nextjs.saqlainmushtaq.com` | tempo-apps | `nextjs:3000` | `tempo-nextjs-tls` |
-| `tempo-python.saqlainmushtaq.com` | tempo-apps | `python:8000` | `tempo-python-tls` |
-| `tempo-nodejs.saqlainmushtaq.com` | tempo-apps | `nodejs:3000` | `tempo-nodejs-tls` |
+| `grafana-tempo.example.com` | observability | `grafana:80` | `grafana-tempo-tls` |
+| `tempo-nextjs.example.com` | tempo-apps | `nextjs:3000` | `tempo-nextjs-tls` |
+| `tempo-python.example.com` | tempo-apps | `python:8000` | `tempo-python-tls` |
+| `tempo-nodejs.example.com` | tempo-apps | `nodejs:3000` | `tempo-nodejs-tls` |
 
 ## 🧩 Files
 
@@ -35,7 +27,7 @@ The project [architecture diagram](../docs/diagrams/architecture.mmd) shows the 
 | [`traefik-values-lab.yaml`](traefik-values-lab.yaml) | Lab overlay: 1 replica, no PDB/spread, small requests | Same security settings (inherits them) |
 | [`cert-manager-values.yaml`](cert-manager-values.yaml) | cert-manager v1.21.3 production values (`TLS_MODE=letsencrypt` only): 2 replicas each, PDBs, spread, digest-pinned images | Pod Security `restricted` settings pinned |
 | [`cert-manager-values-lab.yaml`](cert-manager-values-lab.yaml) | Lab overlay: 1 replica each, no PDBs | Same security settings (inherits them) |
-| [`cluster-issuer.yaml`](cluster-issuer.yaml) | Let's Encrypt staging + prod ClusterIssuers, DNS-01 via Cloudflare for `saqlainmushtaq.com` | Token read from Secret `cloudflare-api-token` |
+| [`cluster-issuer.yaml`](cluster-issuer.yaml) | Let's Encrypt staging + prod ClusterIssuers, DNS-01 via Cloudflare for `example.com` | Token read from Secret `cloudflare-api-token` |
 | [`certificates.yaml`](certificates.yaml) | One Certificate per public host, issuer `letsencrypt-prod`, ECDSA P-256 (`TLS_MODE=letsencrypt` only) | Publicly trusted origin TLS |
 | [`ingressroutes.yaml`](ingressroutes.yaml) | Default TLSOption, per-namespace Middlewares, IngressRoutes for the 4 hosts | Cloudflare-only allow-list, security headers, HTTP to HTTPS |
 | [`networkpolicies.yaml`](networkpolicies.yaml) | Default-deny ingress in every namespace above (hermes has its own) + explicit allows | East-west isolation |
@@ -82,7 +74,7 @@ The plain manifests (`*.yaml` without `values`) are the same in both profiles.
 | `kubectl`, `helm` | kubectl matching the cluster minor version (1.36 tested), Helm 3.x |
 | Helm charts | `traefik/traefik` 42.3.1 (Traefik v3.7.17), `jetstack/cert-manager` v1.21.3 |
 | Cluster | GKE with Dataplane V2 (NetworkPolicy enforcement). Production: 3+ nodes across 3 zones (Traefik needs one node per replica) |
-| Cloudflare | Zone `saqlainmushtaq.com`, proxied DNS records for the 4 hosts, SSL mode per [TLS modes](#-tls-modes) |
+| Cloudflare | Zone `example.com`, proxied DNS records for the 4 hosts, SSL mode per [TLS modes](#-tls-modes) |
 | Cloudflare token (letsencrypt only) | API token with **Zone: DNS: Edit**, saved in a file (`CF_TOKEN_FILE`) |
 | kube-prometheus-stack | Installed before Traefik (see [`../helm/`](../helm/)): the Traefik chart renders a ServiceMonitor and refuses to install without the `monitoring.coreos.com/v1` CRDs |
 
@@ -148,9 +140,9 @@ Verify:
 | Traefik scraped | Prometheus query `up{namespace="traefik"}` | `1` per pod |
 | LB address | `kubectl -n traefik get svc traefik` | `EXTERNAL-IP` set; the 4 proxied Cloudflare records point at it |
 | LB source ranges | `kubectl -n traefik get svc traefik -o jsonpath='{.spec.loadBalancerSourceRanges}'` | The 15 Cloudflare IPv4 ranges |
-| Public HTTPS | `curl -sI https://grafana-tempo.saqlainmushtaq.com/login` | `HTTP/2 200`, `strict-transport-security` header |
-| HTTP redirect | `curl -sI http://grafana-tempo.saqlainmushtaq.com/` | `301`/`308` to `https://` |
-| Origin bypass blocked | `curl -sk -m 10 --resolve grafana-tempo.saqlainmushtaq.com:443:$LB_IP https://grafana-tempo.saqlainmushtaq.com/` (`LB_IP` = the `EXTERNAL-IP` above) | Connection times out (L4 source ranges); `403 Forbidden` from Traefik if the source ranges are not applied |
+| Public HTTPS | `curl -sI https://grafana-tempo.example.com/login` | `HTTP/2 200`, `strict-transport-security` header |
+| HTTP redirect | `curl -sI http://grafana-tempo.example.com/` | `301`/`308` to `https://` |
+| Origin bypass blocked | `curl -sk -m 10 --resolve grafana-tempo.example.com:443:$LB_IP https://grafana-tempo.example.com/` (`LB_IP` = the `EXTERNAL-IP` above) | Connection times out (L4 source ranges); `403 Forbidden` from Traefik if the source ranges are not applied |
 | Issuers + certificates (letsencrypt) | `kubectl get clusterissuer; kubectl get certificate -A` | both issuers and 4 certificates `READY True` (DNS-01: 1-3 min) |
 | Pod Security | `kubectl label --dry-run=server --overwrite ns observability pod-security.kubernetes.io/enforce=restricted` | No `Warning:` lines (running pods comply) |
 | Quota | `kubectl -n tempo-apps describe resourcequota tempo-apps-budget` | `Used` well below `Hard` |
@@ -286,16 +278,6 @@ Rollback: `helm rollback <release> -n <namespace>`. Logs: `kubectl -n traefik lo
 request headers dropped).
 
 ## 🧪 Tests
-
-| Test (2026-11-08) | Command (from `k8s/`) | Result | What it proves |
-|---|---|---|---|
-| Schema, strict | `kubeconform -strict -kubernetes-version 1.36.0` + CRDs catalog on all manifests | 59/59 valid (8 files) | Manifests match the Kubernetes 1.36 and Traefik/cert-manager CRD schemas |
-| Charts, prod + lab | `helm lint` and `helm template` with `*-values.yaml` (+ `*-values-lab.yaml`; Traefik with `--api-versions monitoring.coreos.com/v1`), rendered output through `kubeconform` | 0 failures; all rendered objects valid | Values keys exist in Traefik 42.3.1 / cert-manager v1.21.3 and render valid objects |
-| Server-side dry run | `kubectl apply --dry-run=server -f <file>` for namespaces, both NetworkPolicy files, limitrange | Accepted | The API server admits every object |
-| Pod Security | `kubectl label --dry-run=server --overwrite ns <ns> pod-security.kubernetes.io/enforce=restricted` | No violations in traefik, observability, tempo-apps, hermes (and cert-manager while letsencrypt ran); node-exporter violates in monitoring | Running pods comply where `restricted` is enforced |
-| Lab overlay = live | `helm template` with the lab overlay vs `helm get manifest` | Same except the image digest pin and Traefik shutdown grace settings | The lab profile reproduces the running lab without growing requests |
-| Origin TLS in `cloudflare` mode | Route with `tls: {}` through Cloudflare "Full" | Origin presents Traefik's default certificate; `/api/health` 200 via Cloudflare | Mode `cloudflare` works without cert-manager |
-| End to end | `scripts/verify.sh` | See [`../scripts/`](../scripts/) | Routing, isolation and the trace pipeline on the live cluster |
 
 Schema gaps (reported by kubeconform as "could not find schema", not as invalid): the cert-manager chart's own
 CustomResourceDefinitions and Tempo's `ZoneAwarePodDisruptionBudget` (rollout-operator CRD, production Tempo) have no

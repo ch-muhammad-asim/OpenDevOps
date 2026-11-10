@@ -12,14 +12,6 @@ cloud object storage.
 **Cost:** All software is free and open source (Thanos, Prometheus: Apache-2.0; Tempo, Grafana: AGPL-3.0).
 Only GCS storage/operations and persistent disks are billed.
 
-**Status (2026-11-08, Thanos v0.42.5, kube-prometheus-stack 93.1.0):** ✅ **lab live on GCS** with Workload Identity
-(bucket `thanos-metrics-<suffix>`, Secret `thanos-objstore` = `type: GCS` + bucket name, no key); sidecar, store gateway
-and compactor reach GCS on 443; `PROFILE=lab scripts/verify.sh` 31 PASS, 0 failures. **Production** (HA
-sizing) is rendered and validated only: `kubectl kustomize` of [`kustomization.yaml`](kustomization.yaml) and
-[`overlays/lab/`](overlays/lab/kustomization.yaml) + kubeconform strict (Kubernetes 1.36), `helm lint` / `helm template`
-of kube-prometheus-stack and Grafana, `promtool check rules`. Earlier lab runs on SeaweedFS S3 are recorded in
-[`../seaweedfs/`](../seaweedfs/README.md).
-
 ## 🏗️ Architecture
 
 | Flow | From → to | Port / protocol |
@@ -74,9 +66,6 @@ rejected because it is a paid service (list price ~$533/month at the measured in
 
 ## 📐 Sizing and cost
 
-Measured on the lab cluster (2026-11-08, 1h rates, synthetic load plus Hermes): **3,429 samples/s**
-(`rate(prometheus_tsdb_head_samples_appended_total[1h])`), **150,952 head series**.
-
 | Quantity | Formula | Result |
 |---|---|---|
 | Samples per 30 days, one Prometheus replica | 3,429 × 2,592,000 s | **8.89 billion** |
@@ -91,10 +80,6 @@ Measured on the lab cluster (2026-11-08, 1h rates, synthetic load plus Hermes): 
 
 ### Production (GCS)
 
-**GCS Standard, us-central1, list prices on 2026-11-08** ([Cloud Storage pricing](https://cloud.google.com/storage/pricing)):
-storage **$0.020 per GB-month**, Class A operations **$0.005 per 1,000**, Class B operations **$0.0004 per 1,000**
-(regional bucket, flat namespace), no egress charge inside the region.
-
 | Cost item (per month) | Estimate | Assumption |
 |---|---|---|
 | Bucket storage | **$0.50–$2.05** | 25–102 GB × $0.020 |
@@ -105,9 +90,6 @@ storage **$0.020 per GB-month**, Class A operations **$0.005 per 1,000**, Class 
 | **Total, excluding node capacity** | **~$8.50–$11.80** | Node capacity: 1.35 vCPU / 5.5 GiB requests (query 2 × 250m/1Gi, store 2 × 250m/1Gi, compactor 250m/1Gi, sidecars 2 × 50m/256Mi) |
 
 ### Lab (GCS + persistent disks)
-
-**pd-balanced, us-central1, list price on 2026-11-08:** $0.000136986 per GiB-hour = **$0.10 per GiB-month**
-([Disk and image pricing](https://cloud.google.com/compute/disks-image-pricing), "Balanced provisioned space").
 
 | Disk (pd-balanced, `standard-rwo`) | Size | Per month |
 |---|---|---|
@@ -311,11 +293,6 @@ Grafana's own authentication is the user-facing control.
 - [ ] **Prometheus PVC:** with 2-day local retention the 100Gi PVC can be reduced (~20Gi) on a fresh install.
 
 ## 📌 Pinned versions
-
-| Item | Version | Digest (multi-arch index, read from the registry API on 2026-11-08) |
-|---|---|---|
-| `quay.io/thanos/thanos` (sidecar, query, store, compact) | v0.42.5 (latest release, 2026-10-27) | `sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7` |
-| kube-prometheus-stack (sidecar host) | 93.1.0 (operator v0.95.1) | see [`../kube-prometheus-stack/README.md`](../kube-prometheus-stack/README.md) |
 
 ## 🧹 Teardown
 

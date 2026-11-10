@@ -137,8 +137,8 @@ env:
 
 grafana.ini:
   server:
-    domain: grafana-tempo.saqlainmushtaq.com
-    root_url: https://grafana-tempo.saqlainmushtaq.com
+    domain: grafana-tempo.example.com
+    root_url: https://grafana-tempo.example.com
   security:
     cookie_secure: true
     cookie_samesite: lax

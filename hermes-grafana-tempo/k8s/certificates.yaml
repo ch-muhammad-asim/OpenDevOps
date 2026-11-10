@@ -17,7 +17,7 @@ metadata:
 spec:
   secretName: grafana-tempo-tls
   dnsNames:
-    - grafana-tempo.saqlainmushtaq.com
+    - grafana-tempo.example.com
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod   # letsencrypt-staging to test
@@ -34,7 +34,7 @@ metadata:
 spec:
   secretName: tempo-nextjs-tls
   dnsNames:
-    - tempo-nextjs.saqlainmushtaq.com
+    - tempo-nextjs.example.com
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod   # letsencrypt-staging to test
@@ -51,7 +51,7 @@ metadata:
 spec:
   secretName: tempo-python-tls
   dnsNames:
-    - tempo-python.saqlainmushtaq.com
+    - tempo-python.example.com
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod   # letsencrypt-staging to test
@@ -68,7 +68,7 @@ metadata:
 spec:
   secretName: tempo-nodejs-tls
   dnsNames:
-    - tempo-nodejs.saqlainmushtaq.com
+    - tempo-nodejs.example.com
   issuerRef:
     kind: ClusterIssuer
     name: letsencrypt-prod   # letsencrypt-staging to test

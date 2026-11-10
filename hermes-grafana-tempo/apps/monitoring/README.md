@@ -4,10 +4,6 @@ Alerting rules for the three sample apps, built from Tempo span metrics (`traces
 Prometheus by Tempo's metrics-generator) and from kube-state-metrics / cAdvisor. **Why:** traces show *what* broke;
 these rules tell you *when* to look, and every alert links back to a TraceQL query.
 
-**Status:** rules pass `promtool check rules` (Prometheus v3.16.0, 12 rules). The span-metrics expressions were
-evaluated on the [local stack](../local/) on 2026-11-08. After `scripts/load.sh` the planted bugs push the server
-error ratio to 11-35%, so `TempoAppsErrorBudgetFastBurn` **fires by design** in the demo.
-
 ## 🧩 Components
 
 | File | What it does (one line) |

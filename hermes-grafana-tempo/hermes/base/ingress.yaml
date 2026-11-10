@@ -1,4 +1,4 @@
-# Public route: https://hermes-gke.saqlainmushtaq.com -> hermes/hermes-dashboard:9119
+# Public route: https://hermes-gke.example.com -> hermes/hermes-dashboard:9119
 #
 # HTTPS is terminated by Cloudflare (proxied record, zone SSL mode "Full"). Cloudflare connects to
 # Traefik's websecure entry point (:443), which serves Traefik's default certificate for this host;
@@ -60,7 +60,7 @@ spec:
   entryPoints: [websecure]
   routes:
     - kind: Rule
-      match: Host(`hermes-gke.saqlainmushtaq.com`)
+      match: Host(`hermes-gke.example.com`)
       middlewares:
         - name: cloudflare-only
         - name: security-headers

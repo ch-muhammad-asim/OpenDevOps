@@ -42,8 +42,6 @@ Grafana's Alertmanager data source has no backend health endpoint in Grafana 13:
 `verify.sh` therefore checks it through the data source proxy (`/api/datasources/proxy/uid/alertmanager/api/v2/status`,
 HTTP 200), not `/health`. When Thanos is installed it also checks `thanos-query /-/ready` and that thanos-query sees the
 sidecar and the store gateway; with namespace `object-storage` present it checks its pods are Ready.
-Lab result 2026-11-08: 31 PASS, 0 failures (`PROFILE=lab`, `TLS_MODE=cloudflare`, `OBJECT_STORE=gcs`,
-cert-manager not installed).
 
 ## 🚦 load.sh
 
@@ -51,11 +49,8 @@ cert-manager not installed).
 |---|---|---|
 | `public` / `local` | `public` | `public`: `https://tempo-{nextjs,nodejs,python}.$DOMAIN`; `local`: the [apps/local](../apps/local/) stack on 127.0.0.1 |
 | `rounds` | `20` | Each round is ~13 requests, ~0.5-3 s (longer while the stock call waits for its 2 s timeout) |
-| `DOMAIN` | `saqlainmushtaq.com` | Public zone for the app hostnames |
+| `DOMAIN` | `example.com` | Public zone for the app hostnames |
 | `NEXTJS_URL`, `NODEJS_URL`, `PYTHON_URL` | per mode | Override any single target |
-
-Expected summary: mostly `200`, plus `500` (unhandled exceptions), `502` (order 7) and `504` (stock timeout).
-Example local run (2026-11-08, 5 rounds): `200: 32, 500: 15, 502: 5, 504: 1`, 7 s. Wait ~30 s before searching in Tempo.
 
 ## 🏭 Production checklist (deploy/verify/teardown)
 

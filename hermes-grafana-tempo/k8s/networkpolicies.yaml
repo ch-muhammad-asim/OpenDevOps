@@ -63,9 +63,9 @@ spec:
   ingress:
     - ports:
         - protocol: TCP
-          port: 80
+          port: web
         - protocol: TCP
-          port: 443
+          port: websecure
 ---
 # Prometheus scrapes Traefik metrics (entry point "metrics", 9100; ServiceMonitor from
 # traefik-values.yaml). Not exposed on the LoadBalancer.

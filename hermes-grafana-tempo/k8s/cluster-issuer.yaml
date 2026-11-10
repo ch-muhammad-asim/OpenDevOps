@@ -1,4 +1,4 @@
-# Let's Encrypt ClusterIssuers, DNS-01 via Cloudflare (zone saqlainmushtaq.com).
+# Let's Encrypt ClusterIssuers, DNS-01 via Cloudflare (zone example.com).
 # Token: Secret cloudflare-api-token (key api-token) in namespace cert-manager
 # (the cluster resource namespace for ClusterIssuers), created from a file
 # before this is applied; see README.md. The token needs Zone:DNS:Edit only.
@@ -17,7 +17,7 @@ spec:
     solvers:
       - selector:
           dnsZones:
-            - saqlainmushtaq.com
+            - example.com
         dns01:
           cloudflare:
             apiTokenSecretRef:
@@ -36,7 +36,7 @@ spec:
     solvers:
       - selector:
           dnsZones:
-            - saqlainmushtaq.com
+            - example.com
         dns01:
           cloudflare:
             apiTokenSecretRef:

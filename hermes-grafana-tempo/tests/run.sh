@@ -21,7 +21,7 @@ APP="${1:-}"; SCENARIO="${2:-}"
 NS=tempo-apps
 K6_IMAGE="${K6_IMAGE:-grafana/k6:2.3.0@sha256:2dd4756ec6e14e62778916e1eb850108e4b499304c02df56760fa0bdb0fba0b8}"
 CURL_IMAGE="${CURL_IMAGE:-curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93}"
-ZONE="${ZONE:-saqlainmushtaq.com}"
+ZONE="${ZONE:-example.com}"
 SCALE="${SCALE:-1}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-}"
 declare -A PORT=([nextjs]=3000 [nodejs]=3000 [python]=8000)

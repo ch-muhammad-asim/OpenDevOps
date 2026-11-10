@@ -9,7 +9,7 @@
 # runs its tools (bash, read, skill) in THIS pod. That is why the read-only observability skill is mounted here too
 # and why this pod may reach Thanos, Tempo and Grafana. File edits are denied by OpenCode's policy (opencode.json),
 # the pod has no Kubernetes API token, runs non-root with a read-only root filesystem (Pod Security restricted), and
-# installs the pinned OpenCode CLI into an emptyDir at start (init container, no root).
+# installs the checksum-verified OpenCode release into an emptyDir at start (init container, no root).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -72,15 +72,33 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
-        # Install the pinned OpenCode CLI with the image's own Node/npm into an emptyDir (non-root, needs only HTTPS
-        # to the npm registry). Bump OPENCODE_VERSION to upgrade.
+        # The v1.19.5 npm Linux package lacks its executable. Install the official release
+        # into an emptyDir and verify its published SHA-256 before extracting it.
         - name: install-opencode
           image: nousresearch/hermes-agent:v0.23.0@sha256:adb7890916de63245523492be8f68f9d2095fecbec4e2a6dab7960381f0fc002
-          command: ["/bin/sh", "-c"]
+          command: ["/opt/hermes/.venv/bin/python3", "-c"]
           args:
-            - npm install -g --prefix /opt/opencode --no-audit --no-fund "opencode-ai@${OPENCODE_VERSION}" && /opt/opencode/bin/opencode --version
+            - |
+              import hashlib, io, os, pathlib, platform, subprocess, tarfile, urllib.request
+              if platform.machine() != "x86_64":
+                  raise SystemExit("OpenCode release is pinned for linux/amd64 nodes")
+              url = "https://github.com/anomalyco/opencode/releases/download/v" + os.environ["OPENCODE_VERSION"] + "/opencode-linux-x64.tar.gz"
+              data = urllib.request.urlopen(url, timeout=180).read()
+              if hashlib.sha256(data).hexdigest() != os.environ["OPENCODE_SHA256"]:
+                  raise SystemExit("OpenCode release checksum mismatch")
+              target = pathlib.Path("/opt/opencode/bin")
+              target.mkdir(parents=True, exist_ok=True)
+              with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+                  member = archive.getmember("opencode")
+                  if not member.isfile():
+                      raise SystemExit("OpenCode archive does not contain an executable file")
+                  executable = target / "opencode"
+                  executable.write_bytes(archive.extractfile(member).read())
+                  executable.chmod(0o755)
+              subprocess.run([str(executable), "--version"], check=True)
           env:
             - {name: OPENCODE_VERSION, value: "1.19.5"}
+            - {name: OPENCODE_SHA256, value: "588310a336fa3b9df36b3f0225b26f679d453efaad0cf3d66c3651ef3ec1647a"}
             - {name: HOME, value: /tmp}
             - {name: npm_config_cache, value: /tmp/npm-cache}
             - {name: PATH, value: "/opt/hermes/tools/node-26.12.1-linux-x64/bin:/usr/local/bin:/usr/bin:/bin"}

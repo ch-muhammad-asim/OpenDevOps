@@ -5,12 +5,6 @@ OpenTelemetry (automatic HTTP/Express/fetch spans plus a few manual spans, attri
 exports to Grafana Tempo through the OpenTelemetry Collector. Five realistic code issues are planted on
 purpose, so you can see how each one looks in a trace and which TraceQL query finds it.
 
-**Status:** tested locally with Docker Compose (`apps/local`) on 2026-11-08: Node.js 26.13.0, Express
-5.3.0, OpenTelemetry JS SDK 0.301.0, Tempo 3.1.1, OTel Collector contrib 0.165.0. Every endpoint and
-every TraceQL query below was run against that stack, and the image was run with a read-only root
-filesystem as UID 10001. The Kubernetes manifests pass `kubectl kustomize`; the memory PromQL is for
-the cluster (cAdvisor) and was not run locally.
-
 | Item | Value |
 |---|---|
 | OTel `service.name` | `nodejs-orders` |
