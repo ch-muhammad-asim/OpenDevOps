@@ -27,6 +27,14 @@
 > gcloud compute ssh hermes-bridge-vm -- -N -L 127.0.0.1:28383:127.0.0.1:18383
 > curl -s -H "Authorization: Bearer $OPENCODE_BRIDGE_API_KEY" http://127.0.0.1:28383/health
 > ```
+>
+> 🔐 **The token never appears in `ps`.** It is passed to the bridge only through
+> `EnvironmentFile=/etc/opencode-bridge.env` (`root:root 0600`); the unit does **not** put
+> `--api-key` on the command line. Rotate it with:
+>
+> ```bash
+> sudo rm /etc/opencode-bridge.env && sudo bash vm-bridge-provision.sh   # new key + restart
+> ```
 
 For the working, bridge-free Mac Desktop solution, see [remote-desktop-gcp.md](remote-desktop-gcp.md).
 

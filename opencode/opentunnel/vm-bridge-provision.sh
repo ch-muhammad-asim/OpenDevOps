@@ -84,6 +84,8 @@ if [ ! -s "$ENV_FILE" ]; then
 fi
 
 log "7/8 systemd service"
+# 🔐 The bearer token is supplied through EnvironmentFile only — never on the command
+# line, where `ps aux` would expose it to every local user.
 cat >/etc/systemd/system/opencode-bridge.service <<EOF
 [Unit]
 Description=OpenCode bridge (OpenAI-compatible) for Hermes
@@ -101,7 +103,6 @@ ExecStart=/usr/bin/python3 $SRC_DIR/run/opencode_bridge.py \\
   --host 127.0.0.1 --port $PORT \\
   --cwd $WORKSPACE \\
   --model $MODEL \\
-  --api-key \${OPENCODE_BRIDGE_API_KEY} \\
   --max-concurrency 2 --timeout 300
 Restart=always
 RestartSec=3
