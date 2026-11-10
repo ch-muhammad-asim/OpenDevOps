@@ -19,6 +19,8 @@ WORKSPACE="$BRIDGE_HOME/workspace"
 SRC_DIR="/opt/bridge"
 ENV_FILE="/etc/opencode-bridge.env"
 PORT="${BRIDGE_PORT:-18383}"
+# Latest OpenCode v2 on each provisioning run; optionally pin for controlled rollouts.
+OPENCODE_VERSION="${OPENCODE_VERSION:-latest}"
 MODEL="${BRIDGE_MODEL:-opencode/deepseek-v4.1-flash-free}"
 REPO_URL="https://github.com/ch-muhammad-asim/OpenDevOps.git"
 SOURCE_PATH="opencode/hermes-desktop/opencode_bridge.py"
@@ -37,11 +39,18 @@ fi
 install -d -o "$BRIDGE_USER" -g "$BRIDGE_USER" -m 0755 "$WORKSPACE"
 
 log "3/8 OpenCode CLI (as $BRIDGE_USER)"
-if [ ! -x "$BRIDGE_HOME/.opencode/bin/opencode" ]; then
-  sudo -u "$BRIDGE_USER" env HOME="$BRIDGE_HOME" bash -c \
-    'curl -fsSL https://opencode.ai/install | bash' >/tmp/opencode-install.log 2>&1 \
-    || { tail -30 /tmp/opencode-install.log; exit 1; }
-fi
+# Always run the v2 installer so re-provisioning upgrades an existing binary.
+# The old URL (/install) targets the v1 release line; v2 has a dedicated installer.
+# A running service is restarted later in this script after the new binary is installed.
+sudo -u "$BRIDGE_USER" env HOME="$BRIDGE_HOME" OPENCODE_VERSION="$OPENCODE_VERSION" bash -c '
+  set -euo pipefail
+  if [ "$OPENCODE_VERSION" = latest ]; then
+    curl -fsSL https://opencode.ai/v2/install | bash
+  else
+    curl -fsSL https://opencode.ai/v2/install | bash -s -- --version "$OPENCODE_VERSION"
+  fi
+' >/tmp/opencode-install.log 2>&1 \
+  || { tail -30 /tmp/opencode-install.log; exit 1; }
 OC_BIN="$BRIDGE_HOME/.opencode/bin/opencode"
 "$OC_BIN" --version
 
