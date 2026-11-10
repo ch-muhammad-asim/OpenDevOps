@@ -1,4 +1,4 @@
-# Linux / Ubuntu — OpenCode bridge for Hermes (systemd user service)
+# 🐧 Linux / Ubuntu — OpenCode bridge for Hermes (systemd user service)
 
 [← Main bridge guide](../README.md) · [Existing Linux-capable installer](../../hermes-desktop/install-opencode-bridge.sh)
 
