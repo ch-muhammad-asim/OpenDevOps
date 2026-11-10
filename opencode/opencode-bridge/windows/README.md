@@ -1,4 +1,4 @@
-# Windows — OpenCode bridge via WSL2 (Linux compatibility path; not yet tested)
+# 🪟 Windows — OpenCode bridge via WSL2 (Linux compatibility path; not yet tested)
 
 [← Main bridge guide](../README.md)
 
