@@ -1,6 +1,6 @@
-# OpenTunnel + OpenCode on a cloud VM
+# OpenTunnel + OpenCode + Herdr on a cloud VM
 
-This folder documents the working Ubuntu/Debian **OpenCode + [OpenTunnel](https://opentunnel.xyz/)** demo and secure ways to access services on a GCP VM from a local laptop.
+This folder documents the working Ubuntu/Debian **OpenCode + [OpenTunnel](https://opentunnel.xyz/) + [Herdr](https://herdr.dev/)** demo and secure ways to access services on a GCP VM from a local laptop.
 
 **Observed on 2026-11-10:** In a fresh GCP browser-SSH session, OpenCode **v2.2.6**, OpenTunnel **v0.6.2**, a demo HTTP server on `127.0.0.1:3000`, and an OpenTunnel route were successfully created. The example `opencode/deepseek-v4.1-flash-free` prompt returned **`OK`**. Older attempts on other GCP/AWS VMs returned **“Free usage limit reached”**. That is consistent with a transient/upstream provider restriction, but the exact cause has **not** been independently established. Neither the script nor OpenTunnel guarantees free-model availability.
 
@@ -8,7 +8,7 @@ This folder documents the working Ubuntu/Debian **OpenCode + [OpenTunnel](https:
 
 ## Files
 
-- [`setup.sh`](setup.sh) — install OpenCode and OpenTunnel, run a local-only HTTP demo, create a public demo route, and test an optional free model.
+- [`setup.sh`](setup.sh) — install OpenCode, OpenTunnel and Herdr, run a local-only HTTP demo, create a public demo route, and test an optional free model.
 - This README — GCP connectivity, SSH forwarding, OpenCode remote access, and troubleshooting.
 
 ## 1. Install on a fresh Ubuntu VM
@@ -20,7 +20,7 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The script needs `sudo` for apt packages. It downloads installer scripts from the **official OpenCode/OpenTunnel domains**: review those installer sources before using this on a sensitive machine. OpenCode CLI version defaults to `2.2.6` (override with `OPENCODE_VERSION`); OpenTunnel's official installer installs its current published binary. A successful setup should show:
+The script needs `sudo` for apt packages. It downloads installer scripts from the **OpenCode/OpenTunnel/Herdr installer domains**: review those installer sources before using this on a sensitive machine. OpenCode CLI version defaults to `2.2.6` (override with `OPENCODE_VERSION`); OpenTunnel and Herdr installers install their currently published binaries. A successful setup should show:
 
 ```text
 opencode v2.2.6
@@ -38,7 +38,16 @@ To check locally on the VM:
 curl -fsS http://127.0.0.1:3000/
 opentunnel --version
 opencode --version
+command -v herdr || echo 'Check Herdr installer output for PATH setup'
 ```
+
+Herdr is installed using:
+
+```bash
+curl -fsSL https://herdr.dev/install.sh | sh
+```
+
+Herdr was **not part of the earlier successful GCP screenshot test**; the combined installer has not yet been run end-to-end. Reopen the terminal if the installer adds a new binary directory to your PATH. This script does not automatically run or expose Herdr.
 
 ## 2. Connect to the GCP VM using gcloud
 
