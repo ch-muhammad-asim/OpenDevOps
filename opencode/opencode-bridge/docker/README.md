@@ -1,4 +1,4 @@
-# Docker / containers — OpenCode bridge (Kubernetes implementation available)
+# 🐳 Docker / containers — OpenCode bridge (Kubernetes implementation available)
 
 [← Main bridge guide](../README.md) · [Existing Kubernetes sidecar](../../kubernetes/README.md)
 
