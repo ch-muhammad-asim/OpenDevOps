@@ -1,4 +1,4 @@
-# Kubernetes / GKE — Hermes defaults to OpenCode bridge and all free catalog models
+# ☸️ Kubernetes / GKE — Hermes defaults to OpenCode bridge and all free catalog models
 
 [← Main bridge guide](../README.md) · [Existing full deployment](../../kubernetes/README.md)
 
