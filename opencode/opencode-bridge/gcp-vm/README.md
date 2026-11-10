@@ -1,4 +1,4 @@
-# GCP VM — OpenCode bridge for Hermes (separate from OpenCode Desktop)
+# ☁️ GCP VM — OpenCode bridge for Hermes (separate from OpenCode Desktop)
 
 [← Main bridge guide](../README.md) · [Full GCP runbook and diagrams](../../opentunnel/hermes-bridge-gcp.md) · [Already verified Desktop/Web path](../../opentunnel/remote-desktop-gcp.md)
 
