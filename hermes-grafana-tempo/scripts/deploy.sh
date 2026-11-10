@@ -19,9 +19,21 @@ set -euo pipefail
 chart() { local f="${CHART_CACHE:-}/${1#*/}-$2.tgz"; if [ -n "${CHART_CACHE:-}" ] && [ -f "$f" ]; then echo "$f"; else echo "$1"; fi; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-K8S="$ROOT/k8s"; HELM="$ROOT/helm"
+K8S="$ROOT/k8s"; HELM="$ROOT/helm"; GRAFANA_HELM="$HELM/grafana"
 CF_TOKEN_FILE="${CF_TOKEN_FILE:-}"
-ZONE="${ZONE:-example.com}"
+# Public domain for the five hostnames. Manifests and values keep the reusable example.com placeholders, so a
+# private copy is rendered with DOMAIN before it is applied: a deploy never edits tracked files. ZONE is accepted
+# as the older name for the same value.
+DOMAIN="${DOMAIN:-${ZONE:-example.com}}"
+if [ "$DOMAIN" != example.com ]; then
+  RENDER="$(mktemp -d)"; trap 'rm -rf "$RENDER"' EXIT
+  render() { local src="$1" dst="$2"; cp -a "$src" "$dst"
+    grep -rlZ 'example\.com' "$dst" 2>/dev/null | xargs -0 -r sed -i "s/example\.com/${DOMAIN}/g"; }
+  render "$ROOT/k8s" "$RENDER/k8s"
+  render "$HELM/grafana" "$RENDER/grafana"
+  K8S="$RENDER/k8s"; GRAFANA_HELM="$RENDER/grafana"
+  echo "rendered manifests for $DOMAIN in $RENDER"
+fi
 # PROFILE=prod (default): production values (each chart's values.yaml); Tempo = tempo-distributed
 #   (needs KAFKA_BOOTSTRAP, a Kafka-compatible queue) on GCS via Workload Identity scoped to the bucket.
 # PROFILE=lab: values.yaml + values-lab.yaml overlays sized for 3 x e2-standard-2; Tempo = single binary.
@@ -229,7 +241,7 @@ step_collector() {
 }
 
 step_grafana() {
-  local V; mapfile -t V < <(vals "$HELM/grafana")
+  local V; mapfile -t V < <(vals "$GRAFANA_HELM")
   log "grafana $GRAFANA_VERSION"
   if ! kubectl -n observability get secret grafana-admin >/dev/null 2>&1; then
     # Values come from files in a private temp dir (never on a command line).
@@ -278,7 +290,7 @@ step_dns() {
   [ -n "$ip" ] || { echo "error: Traefik has no load balancer address yet" >&2; exit 1; }
   [ -n "$CF_TOKEN_FILE" ] || { echo "error: the dns step needs CF_TOKEN_FILE" >&2; exit 2; }
   for h in "${HOSTS[@]}"; do
-    CF_TOKEN_FILE="$CF_TOKEN_FILE" CF_ZONE="$ZONE" "$ROOT/scripts/update-dns.sh" "$h.$ZONE" "$ip"
+    CF_TOKEN_FILE="$CF_TOKEN_FILE" CF_ZONE="$DOMAIN" "$ROOT/scripts/update-dns.sh" "$h.$DOMAIN" "$ip"
   done
 }
 

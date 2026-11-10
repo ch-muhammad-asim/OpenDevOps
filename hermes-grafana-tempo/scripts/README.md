@@ -4,8 +4,10 @@ Operational scripts for hermes-grafana-tempo. Run them from the repository folde
 
 | Script | What it does (one line) | Usage |
 |---|---|---|
+| [up.sh](up.sh) | One command for the whole lab: cluster, platform, apps, Hermes, DNS, SSL mode, demo traffic, `verify.sh`, `hermes/verify.sh`, `e2e.sh`; idempotent, exits non-zero on any failed check | `PROJECT_ID=... DOMAIN=... CF_TOKEN_FILE=... scripts/up.sh` |
 | [deploy.sh](deploy.sh) | Installs the platform in order (object store, Prometheus + Thanos, edge, Tempo, Collector, Grafana, dashboards, routes, DNS); idempotent | `PROFILE=lab scripts/deploy.sh [step ...]` |
 | [verify.sh](verify.sh) | End-to-end PASS/FAIL checks: releases, pods, health (incl. Thanos query and its stores), Grafana datasources, project alert rules loaded, test trace through Collector to Tempo and Grafana, scraping, NetworkPolicy, public HTTPS | `PROFILE=lab scripts/verify.sh [--read-only]` |
+| [e2e.sh](e2e.sh) | End-to-end through public DNS: Cloudflare -> Traefik -> apps, then OpenTelemetry Collector span counters, a real sample-app trace read back from Tempo, Prometheus, Hermes telemetry and Grafana datasources/dashboards | `DOMAIN=<domain> scripts/e2e.sh` |
 | [teardown.sh](teardown.sh) | Uninstalls releases and the project namespaces (incl. `hermes` and `object-storage`) and CRDs; safe to re-run; `--cluster` also offers to delete the Tempo and Thanos buckets (`TEMPO_BUCKET`, `THANOS_BUCKET`; each confirmed, IAM bindings left in place) and the cluster (confirmed by name) | `scripts/teardown.sh [--cluster]` |
 | [update-dns.sh](update-dns.sh) | Creates or updates one proxied Cloudflare A record (used by the `dns` step) | `CF_TOKEN_FILE=... scripts/update-dns.sh <host> <ipv4>` |
 | [load.sh](load.sh) | Sends traffic that triggers every planted issue in the three sample apps, then prints a status-code summary | `scripts/load.sh [public\|local] [rounds]` |
