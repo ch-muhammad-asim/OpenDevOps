@@ -26,12 +26,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="hermes-desktop"                      # desktop-file / icon basename
 APP_NAME="${APP_NAME:-Hermes Desktop}"       # human-readable menu name
 HERMES_BIN="${HERMES_BIN:-$HOME/.local/bin/hermes}"
+# Electron sets the Wayland app_id (and X11 StartupWMClass fallback) to this, so the
+# desktop file must carry this basename or GNOME/the dock cannot match the running
+# window and falls back to a generic gear icon.
+APP_WM_ID="${APP_WM_ID:-com.nousresearch.hermes}"
 
 # XDG base dirs (respect overrides, fall back to spec defaults)
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APPS_DIR="$DATA_HOME/applications"
 ICON_BASE="$DATA_HOME/icons/hicolor"
-DESKTOP_FILE="$APPS_DIR/$APP_ID.desktop"
+DESKTOP_FILE="$APPS_DIR/$APP_WM_ID.desktop"
+# Previous revisions wrote $APP_ID.desktop; the app_id-named file supersedes it.
+LEGACY_DESKTOP_FILE="$APPS_DIR/$APP_ID.desktop"
 
 # Electron's SUID sandbox helper. `hermes desktop` expects this to be
 # root:root mode 4755; otherwise it tries to `sudo chown/chmod` it on every
@@ -242,7 +248,7 @@ configure_sandbox() {
 }
 
 uninstall() {
-  rm -f "$DESKTOP_FILE"
+  rm -f "$DESKTOP_FILE" "$LEGACY_DESKTOP_FILE"
   for s in "${ICON_SIZES[@]}"; do
     rm -f "$ICON_BASE/${s}x${s}/apps/$APP_ID.png"
   done
@@ -339,11 +345,12 @@ Terminal=false
 Categories=Development;
 Keywords=hermes;agent;ai;
 StartupNotify=true
-StartupWMClass=Hermes
+StartupWMClass=$APP_WM_ID
 SingleMainWindow=true
 DBusActivatable=false
 EOF
 chmod 644 "$DESKTOP_FILE"
+rm -f "$LEGACY_DESKTOP_FILE"
 log "Installed launcher -> $DESKTOP_FILE"
 
 # --- configure Electron sandbox so the GUI launch needs no sudo ------------

@@ -26,7 +26,7 @@
 #
 # Config (env or a .env next to this script) — baked into the service at install:
 #   BRIDGE_HOST  default 127.0.0.1     BRIDGE_PORT default 18383
-#   OPENCODE_BRIDGE_MODEL         default opencode/mimo-v2.5-free
+#   OPENCODE_BRIDGE_MODEL         default opencode/deepseek-v4.1-flash-free
 #   OPENCODE_BRIDGE_CWD           default $HOME  (where opencode's tools operate)
 #   OPENCODE_BRIDGE_API_KEY       (empty -> unauthenticated)
 #   OPENCODE_BRIDGE_MAX_CONCURRENCY default 2    OPENCODE_BRIDGE_TIMEOUT default 300
@@ -44,7 +44,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 BRIDGE_HOST="${BRIDGE_HOST:-127.0.0.1}"
 BRIDGE_PORT="${BRIDGE_PORT:-18383}"
-MODEL="${OPENCODE_BRIDGE_MODEL:-opencode/mimo-v2.5-free}"
+MODEL="${OPENCODE_BRIDGE_MODEL:-opencode/deepseek-v4.1-flash-free}"
 API_KEY="${OPENCODE_BRIDGE_API_KEY:-}"
 BRIDGE_CWD="${OPENCODE_BRIDGE_CWD:-$HOME}"
 MAX_CONCURRENCY="${OPENCODE_BRIDGE_MAX_CONCURRENCY:-2}"

@@ -15,7 +15,7 @@
 #   ./install-opencode-bridge.sh              # full install + start the service
 #   ./install-opencode-bridge.sh --no-service # install deps only, don't register the service
 #
-# Endpoint after install: http://127.0.0.1:18383/v1  (model: opencode/mimo-v2.5-free)
+# Endpoint after install: http://127.0.0.1:18383/v1  (model: opencode/deepseek-v4.1-flash-free)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +29,7 @@ BRIDGE_HOST="${BRIDGE_HOST:-127.0.0.1}"
 # Must match run-bridge.sh's default — install-service inherits that script's value,
 # so a mismatch here would print an endpoint the service isn't actually listening on.
 BRIDGE_PORT="${BRIDGE_PORT:-18383}"
-MODEL="${OPENCODE_BRIDGE_MODEL:-opencode/mimo-v2.5-free}"
+MODEL="${OPENCODE_BRIDGE_MODEL:-opencode/deepseek-v4.1-flash-free}"
 
 info() { printf '\033[36m[install]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[32m[ok]\033[0m      %s\n' "$*"; }
