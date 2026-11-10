@@ -4,18 +4,40 @@ This is the **central entry point** for the OpenCode → OpenAI-compatible bridg
 
 The bridge translates requests such as `GET /v1/models` and `POST /v1/chat/completions` into `opencode run` calls. It is **not** an official OpenCode service, not the same as `opencode web`, and not the same as OpenTunnel.
 
-## 1. Choose the correct deployment
+## 1. Platform directories — Hermes is the default client
 
-| Target | Existing implementation | Install / deploy | Bridge endpoint | Evidence |
-|---|---|---|---|---|
-| **macOS** | [`../hermes-desktop/`](../hermes-desktop/README.md) | [`install-opencode-bridge.sh`](../hermes-desktop/install-opencode-bridge.sh) | `http://127.0.0.1:18383/v1` | Existing project documents installer, launchd service and tests |
-| **Ubuntu / other Linux** | [`../hermes-desktop/`](../hermes-desktop/README.md) | Same Bash installer and [`run-bridge.sh`](../hermes-desktop/run-bridge.sh) | `http://127.0.0.1:18383/v1` | Existing script uses systemd user service; test on each distro |
-| **GCP VM + Mac SSH** | [VM bridge runbook](../opentunnel/hermes-bridge-gcp.md) + [Python source](../kubernetes/bridge/opencode_bridge.py) | Manual Python process, optional private SSH forward | VM loopback `:18282/v1`; optionally Mac forwarded `:18282/v1` | **Bridge on this VM not yet verified**; native Mac Desktop → GCP Web on `:8443` **was** verified |
-| **Kubernetes / GKE** | [`../kubernetes/`](../kubernetes/README.md) | `kubectl apply -k .` after prerequisites and Secrets | Bridge loopback `:18282` in the deployment pod | Existing manifests and documented offline validation; verify live environment independently |
-| **Windows** | No OpenCode PowerShell installer verified in this repo | Use supported Linux environment/WSL2 **only after testing**, or port Python bridge manually | Configuration-dependent | **Not claimed as tested**. Root [`../../windows/`](../../windows/README.md) scripts are for the *Claude Code* bridge, not this OpenCode bridge |
-| **Docker** | No standalone OpenCode Docker deployment verified here | Review Kubernetes sidecar approach, or build/test a dedicated image | Configuration-dependent | Root `docker-bridge/` targets *Claude Code*, not OpenCode |
+**Default client = Hermes Agent**, not the name of an LLM model. Configure Hermes as a **Custom Endpoint** with provider ID `opencode-bridge`. The existing bridge returns the dynamically discovered catalogue of **all OpenCode Zen models whose published input and output cost are zero**. It is not restricted to MiMo or DeepSeek; the list changes as upstream providers add and retire models. A *single* currently available free model must still be selected as the **initial Hermes model**.
 
-**Do not confuse the ports:** `8443` = custom **OpenCode Web/native server** in the verified GCP experiment; `18383` = existing macOS/Linux script default **bridge**; `18282` = chosen **bridge** port for GCP VM / Kubernetes examples. None is a globally mandated OpenCode bridge port.
+| Directory | Platform | Included files | Status |
+|---|---|---|---|
+| [`macos/`](macos/) | macOS | [`install.sh`](macos/install.sh), [README](macos/README.md) | Thin wrapper around existing launchd installer |
+| [`linux/`](linux/) | Ubuntu / Linux | [`install.sh`](linux/install.sh), [README](linux/README.md) | Thin wrapper around existing systemd --user installer |
+| [`windows/`](windows/) | Windows + WSL2 Ubuntu | [README](windows/README.md) | WSL2 compatibility approach; not yet end-to-end verified |
+| [`gcp-vm/`](gcp-vm/) | GCP Ubuntu VM | [README](gcp-vm/README.md) | Manual secured Python bridge, separate from verified Desktop server |
+| [`kubernetes/`](kubernetes/) | Kubernetes / GKE | [README](kubernetes/README.md) | Existing full Hermes + OpenCode sidecar Kustomize root |
+| [`docker/`](docker/) | Docker / container environments | [README](docker/README.md) | Existing Kubernetes container workflow; no tested standalone OpenCode Compose |
+
+**Existing implementation is the source of truth:** [OpenCode bridge Python code](../kubernetes/bridge/opencode_bridge.py), [macOS/Linux scripts](../hermes-desktop/README.md), and [Kubernetes manifests](../kubernetes/README.md). These platform directories **reuse** the existing scripts rather than maintain diverging copies.
+
+### All free OpenCode models, not a hard-coded selection
+
+The Python bridge already supports:
+- `--free-only` (**default**) and provider `opencode`.
+- `--models` omitted or empty to discover all currently advertised free IDs; don't set a comma-separated allowlist if you want all of them.
+- `GET /v1/models` to expose the discovered catalogue to Hermes.
+- `GET /v1/models` is a discovery test, **not** proof of successful inference or unlimited free quotas.
+- The Kubernetes environment also configures automatic rediscovery every 3600 seconds. The standalone Python bridge has its own catalogue refresh default.
+
+```bash
+# After starting the local bridge. macOS/Linux script default is :18383;
+# GCP/Kubernetes examples use :18282. Send Bearer credentials when configured.
+curl -fsS http://127.0.0.1:18383/v1/models | python3 -c \
+  'import json,sys; print("\\n".join(m["id"] for m in json.load(sys.stdin)["data"]))'
+```
+
+**Hermes first-run defaults in existing Kubernetes manifests:** `HERMES_DEFAULT_PROVIDER=opencode-bridge`, `HERMES_DEFAULT_BASE_URL=http://127.0.0.1:18282/v1`, `HERMES_DEFAULT_MODEL=opencode/mimo-v2.5-free`. This is just the **initial model**; it does not limit the discoverable free model catalog.
+
+**Port distinctions:** `:8443` is the separately verified OpenCode Web/native server on GCP; `:18383/v1` is the existing desktop/Linux script's OpenAI-compatible bridge default; `:18282/v1` is the bridge port used in the GCP manual example and existing Kubernetes manifests.
 
 ## 2. Architecture
 
