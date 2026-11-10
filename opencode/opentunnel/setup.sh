@@ -3,7 +3,7 @@
 # OpenTunnel 0.6.2, local HTTP demo, route creation, and model reply "OK".
 set -euo pipefail
 
-OPENCODE_VERSION="${OPENCODE_VERSION:-2.2.6}"
+OPENCODE_VERSION="${OPENCODE_VERSION:-latest}"
 DEMO_PORT="${DEMO_PORT:-3000}"
 DEMO_DIR="${DEMO_DIR:-$HOME/opentunnel-demo}"
 export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.cargo/bin:$PATH"
@@ -12,8 +12,14 @@ echo "=== Installing dependencies ==="
 sudo apt-get update -qq
 sudo apt-get install -y curl ca-certificates python3
 
-echo "=== Installing OpenCode $OPENCODE_VERSION ==="
-curl -fsSL https://opencode.ai/v2/install | bash -s -- --version "$OPENCODE_VERSION"
+echo "=== Installing OpenCode v2 ($OPENCODE_VERSION) ==="
+# The official v2 installer without --version selects the latest published v2 release.
+# Set OPENCODE_VERSION=2.x.y only when you intentionally need a reproducible install.
+if [[ "$OPENCODE_VERSION" == "latest" ]]; then
+  curl -fsSL https://opencode.ai/v2/install | bash
+else
+  curl -fsSL https://opencode.ai/v2/install | bash -s -- --version "$OPENCODE_VERSION"
+fi
 
 echo "=== Installing OpenTunnel ==="
 curl -fsSL https://opentunnel.xyz/install | sh
