@@ -17,6 +17,9 @@ curl -fsSL https://opencode.ai/v2/install | bash -s -- --version "$OPENCODE_VERS
 
 echo "=== Installing OpenTunnel ==="
 curl -fsSL https://opentunnel.xyz/install | sh
+
+echo "=== Installing Herdr ==="
+curl -fsSL https://herdr.dev/install.sh | sh
 hash -r
 export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.cargo/bin:$PATH"
 
@@ -25,6 +28,11 @@ command -v opencode
 command -v opentunnel
 opencode --version
 opentunnel --version
+if command -v herdr >/dev/null 2>&1; then
+  echo "Herdr installed at: $(command -v herdr)"
+else
+  echo "Herdr installer completed. Start a new shell or follow installer PATH instructions."
+fi
 
 echo "=== Starting local demo HTTP server ==="
 mkdir -p "$DEMO_DIR"
