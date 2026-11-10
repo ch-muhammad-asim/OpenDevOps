@@ -129,6 +129,39 @@ unique contents and ask Hermes to read its absolute path without including those
 Confirm the returned contents and remove the test file afterwards. Listing a local screenshot folder should
 likewise return the filenames actually present on the desktop computer.
 
+### VM inference with local Hermes tools
+
+Use [`local_tools_proxy.py`](local_tools_proxy.py) when the model must run on a VM but files and commands must
+remain on the desktop. The adapter translates Hermes's OpenAI tool schemas into a model transport protocol,
+then returns native `tool_calls` to Hermes. **The adapter never executes tools.** Hermes executes them locally
+and sends their results back to the VM model for the next turn, retaining Hermes's approval controls.
+
+```text
+Hermes + local tools → local_tools_proxy :18383 → SSH forward :18283 → VM OpenCode bridge → model
+```
+
+Keep the VM backend's native shell and write tools denied and external-directory access denied; the OpenCode
+runtime can retain read-only initialization tools inside its own isolated workspace. Requested desktop actions
+must use the caller tools in the transport protocol, rather than the VM's filesystem. Do not enable auto-approval.
+
+After forwarding a protected VM bridge to local port 18283, start the adapter on the desktop:
+
+```bash
+export VM_MODEL_BASE_URL=http://127.0.0.1:18283/v1
+read -rs -p 'VM bridge API key: ' VM_MODEL_API_KEY; echo
+export VM_MODEL_API_KEY
+python3 local_tools_proxy.py
+```
+
+It binds to loopback only. Set `LOCAL_TOOLS_PORT` to another port if 18383 is occupied. In Hermes, select the
+adapter URL with `terminal.backend=local`, then start a new chat or reselect the provider. The adapter buffers
+each model reply before emitting OpenAI streaming frames so transport JSON is never displayed as answer text.
+Provider rate limits are returned as errors; an error does not establish that a local path is missing.
+
+Run `python3 test_local_tools_proxy.py` for schema/result round trips, unavailable-tool rejection, tool-choice
+constraints and streaming-wire regression checks. Validate a live deployment with a randomly populated file
+that exists only on the desktop, and confirm Hermes returns its contents using native tool calls.
+
 ## 🔌 Test it directly
 
 ```bash
