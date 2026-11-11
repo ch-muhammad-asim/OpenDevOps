@@ -177,8 +177,9 @@ step_prometheus() {
     [ "${ACCESS_MODE:-bucket}" != gsa ] || { echo "error: ACCESS_MODE=gsa is Tempo-only; use bucket or conditional for Thanos" >&2; exit 2; }
     out="$(BUCKET="${THANOS_BUCKET:-thanos-metrics-$PROJECT_ID_FOR_BUCKETS}" LIFECYCLE_DAYS=35 \
       KSAS="monitoring/prometheus-kube-prometheus-prometheus monitoring/thanos-store monitoring/thanos-compact" \
-      "$ROOT/infra/create-gcs-bucket.sh"; echo .)"   # "." keeps the (empty) last line: $() strips trailing newlines
-    bucket="$(printf '%s\n' "$out" | tail -n3 | head -n1)"
+      "$ROOT/infra/create-gcs-bucket.sh")"
+    bucket="$(printf '%s\n' "$out" | head -n1)"   # contract: line 1 = bucket, line 2 = GSA
+    [ "${#bucket}" -ge 3 ] || { echo "error: could not parse the Thanos bucket from infra/create-gcs-bucket.sh (got '$bucket')" >&2; exit 2; }
     d="$(mktemp -d)"; chmod 700 "$d"
     printf 'type: GCS\nconfig:\n  bucket: %s\n' "$bucket" > "$d/objstore.yml"   # no key: Workload Identity
     old="$(kubectl -n monitoring get secret thanos-objstore -o jsonpath='{.data.objstore\.yml}' 2>/dev/null || true)"
@@ -211,8 +212,9 @@ step_tempo() {
   if [ "$TEMPO_STORAGE" = gcs ]; then
     # Dedicated bucket + roles/storage.objectUser on it for observability/tempo via Workload Identity
     # (ACCESS_MODE=bucket|conditional|gsa, see infra/create-gcs-bucket.sh). No keys, no broad roles.
-    out="$("$ROOT/infra/create-tempo-bucket.sh"; echo .)"   # "." keeps the empty GSA line: $() strips trailing newlines
-    bucket="$(printf '%s\n' "$out" | tail -n3 | head -n1)"; gsa="$(printf '%s\n' "$out" | tail -n2 | head -n1)"
+    out="$("$ROOT/infra/create-tempo-bucket.sh")"   # contract: line 1 = bucket, line 2 = GSA (may be empty)
+    bucket="$(printf '%s\n' "$out" | head -n1)"; gsa="$(printf '%s\n' "$out" | sed -n 2p)"
+    [ "${#bucket}" -ge 3 ] || { echo "error: could not parse the Tempo bucket from infra/create-tempo-bucket.sh (got '$bucket')" >&2; exit 2; }
     # Only ACCESS_MODE=gsa returns a (dedicated) Google service account to impersonate.
     [ -n "$gsa" ] && wi=(--set-string "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=$gsa")
   fi

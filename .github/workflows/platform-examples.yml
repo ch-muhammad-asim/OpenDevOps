@@ -56,6 +56,10 @@ jobs:
           find hermes-grafana-tempo herdr/hermes-herdr -type f -name '*.sh' -print0 \
             | xargs -0 -r -n 1 bash -n
           echo "PASS: shell script syntax"
+      - name: Check the GCS bucket script stdout contract (offline stub, no cloud)
+        run: |
+          set -euo pipefail
+          hermes-grafana-tempo/scripts/test-bucket-contract.sh
       - name: Check Node.js source syntax without installing dependencies
         run: |
           set -euo pipefail
