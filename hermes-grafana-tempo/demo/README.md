@@ -34,11 +34,13 @@ No diagram on this page: the full set lives in [`../docs/diagrams/`](../docs/dia
 - [ ] The platform checks pass (0 failures):
       `PROFILE=lab DOMAIN=<domain> scripts/verify.sh`
 - [ ] The Hermes checks pass (0 failures): `DOMAIN=<domain> hermes/verify.sh`
-- [ ] There is fresh traffic — run `DOMAIN=<domain> scripts/load.sh public`, wait about 30 s for ingest, then open
+- [ ] There is fresh traffic — run `DOMAIN=<your-domain> scripts/load.sh public`, wait about 30 s for ingest, then open
       Grafana → Explore → Tempo to confirm traces exist.
 
 `<domain>` is the domain you deployed with (`example.com` in the manifests). Everything below runs from
 `hermes-grafana-tempo/`.
+
+Set `DOMAIN` to your own domain before running any `load.sh` command — `load.sh` defaults to `example.com` and will fail otherwise.
 
 ## 🔐 How to log in to Hermes
 
@@ -228,7 +230,7 @@ Honest notes:
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Free usage limit reached`, or HTTP 429 in the answer | The free model tier is shared and rate-limited | Wait for the limit to reset, or pick another free model in the Hermes model picker. Do not switch the demo to a paid model |
-| "No traces" / empty answers for the apps | No traffic yet, or ingest has not flushed | `DOMAIN=<domain> scripts/load.sh public`, wait ~30 s, ask again |
+| "No traces" / empty answers for the apps | No traffic yet, or ingest has not flushed | `DOMAIN=<your-domain> scripts/load.sh public`, wait ~30 s, ask again |
 | Hermes seems down (login or chat fails) | Gateway, dashboard or bridge not ready | `DOMAIN=<domain> hermes/verify.sh`, then `kubectl -n hermes get pods` |
 | Skill answers "endpoint not reachable" | The Thanos querier or Tempo is down, or a NetworkPolicy changed | `kubectl -n monitoring get pods -l app.kubernetes.io/name=thanos-query`, and see [`../hermes/README.md`](../hermes/README.md#-operations-and-troubleshooting) |
 | Skill calls return 401 from Grafana | Grafana restarted without a database, so the Viewer token is gone | Re-run `hermes/deploy.sh`, which re-creates the account and token |

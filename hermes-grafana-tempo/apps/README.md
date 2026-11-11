@@ -92,7 +92,7 @@ apps/build-push.sh
 # 3. Apply all three apps pinned by digest (tag resolved to sha256), waits for rollout
 apps/deploy-apps.sh          # production profile; use `apps/deploy-apps.sh lab` on a 3 x e2-standard-2 cluster
 # 4. Generate traffic that triggers every issue
-scripts/load.sh public 20
+DOMAIN=<your-domain> scripts/load.sh public 20
 ```
 
 | Script | What it does |

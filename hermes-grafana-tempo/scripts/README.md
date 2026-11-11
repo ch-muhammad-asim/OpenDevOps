@@ -11,7 +11,7 @@ Operational scripts for hermes-grafana-tempo. Run them from the repository folde
 | [test-bucket-contract.sh](test-bucket-contract.sh) | Offline regression test for the `create-gcs-bucket.sh` stdout contract (line 1 = bucket, line 2 = GSA) against a stub `gcloud`, including the fresh-project "Creating gs://..." chatter that used to corrupt the Thanos bucket name | `scripts/test-bucket-contract.sh` |
 | [teardown.sh](teardown.sh) | Uninstalls releases and the project namespaces (incl. `hermes` and `object-storage`) and CRDs; safe to re-run; `--cluster` also offers to delete the Tempo and Thanos buckets (`TEMPO_BUCKET`, `THANOS_BUCKET`; each confirmed, IAM bindings left in place) and the cluster (confirmed by name) | `scripts/teardown.sh [--cluster]` |
 | [update-dns.sh](update-dns.sh) | Creates or updates one proxied Cloudflare A record (used by the `dns` step) | `CF_TOKEN_FILE=... scripts/update-dns.sh <host> <ipv4>` |
-| [load.sh](load.sh) | Sends traffic that triggers every planted issue in the three sample apps, then prints a status-code summary | `scripts/load.sh [public\|local] [rounds]` |
+| [load.sh](load.sh) | Sends traffic that triggers every planted issue in the three sample apps, then prints a status-code summary | `DOMAIN=<your-domain> scripts/load.sh [public\|local] [rounds]` |
 
 ## 🚀 deploy.sh / verify.sh
 

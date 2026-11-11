@@ -218,7 +218,7 @@ data source.
 | Backend: requests and latency by operation | Object storage calls (local disk in the lab, GCS in production) | `rate(tempodb_backend_request_duration_seconds_count)` | Low latency, 2xx / errors, rising latency |
 | Compactor: objects/bytes written, blocks compacted | Compaction progress | `rate(tempodb_compaction_objects_written_total)`, `increase(tempodb_compaction_blocks_total[5m])` | Steady activity / none while blocks pile up |
 
-**Try it:** run `scripts/load.sh public 20` and watch *Spans Received* and *Generator Spans/second* rise together.
+**Try it:** run `DOMAIN=<your-domain> scripts/load.sh public 20` and watch *Spans Received* and *Generator Spans/second* rise together.
 
 ### Tempo / Writes
 
@@ -265,7 +265,7 @@ In the lab only *Live traces*, *Live trace memory* and the resource row have dat
 | Live traces and tenant pressure | `tempo_live_store_live_traces`, `tempo_live_store_live_trace_bytes`, top tenants | Follows traffic / runaway growth (memory risk) |
 | Resource pressure, Autoscaling/KEDA | CPU, memory, restarts, desired replicas | Below limits; KEDA rows empty unless KEDA is installed |
 
-**Try it:** run `scripts/load.sh public 20`; *Live traces* rises with traffic and falls back after the run.
+**Try it:** run `DOMAIN=<your-domain> scripts/load.sh public 20`; *Live traces* rises with traffic and falls back after the run.
 
 ### Tempo / Resources
 
@@ -278,7 +278,7 @@ and when a component is OOM-killed or throttled. In the lab every row shows the 
 | Memory (working set) | `container_memory_working_set_bytes{container="tempo"}` | Below the limit (lab: 2Gi) / approaching it |
 | Memory (Go heap in use) | `go_memstats_heap_inuse_bytes` | Saw-tooth / only rising |
 
-**Try it:** compare the Tempo CPU line before and during `scripts/load.sh public 50`.
+**Try it:** compare the Tempo CPU line before and during `DOMAIN=<your-domain> scripts/load.sh public 50`.
 
 ### Tempo / Tenants
 
@@ -293,7 +293,7 @@ and when a component is OOM-killed or throttled. In the lab every row shows the 
 | Storage: blocklist length, outstanding compactions | `tempodb_blocklist_length`, `tempodb_compaction_outstanding_blocks` | Flat / growing backlog |
 | Metrics generator: bytes/s, active series | `tempo_metrics_generator_registry_active_series` | Stable / exploding series (high-cardinality span names) |
 
-**Try it:** check *Active series* after `scripts/load.sh`; low-cardinality span names keep it stable.
+**Try it:** check *Active series* after `DOMAIN=<your-domain> scripts/load.sh`; low-cardinality span names keep it stable.
 
 ### Tempo - Backend Work
 
@@ -323,7 +323,7 @@ when a page was expected but did not come.
 | Alerts receive rate | `rate(alertmanager_alerts_received_total)`, `rate(alertmanager_alerts_invalid_total)` | Invalid 0 |
 | Notifications send rate / duration (per integration) | `rate(alertmanager_notifications_total)`, `..._failed_total`, p99 of `alertmanager_notification_latency_seconds_bucket` | Failed 0, seconds / any failed (bad receiver secret or URL) |
 
-**Try it:** `scripts/load.sh public 50` drives the apps' error ratio up (the planted 500/502/504s);
+**Try it:** `DOMAIN=<your-domain> scripts/load.sh public 50` drives the apps' error ratio up (the planted 500/502/504s);
 `TempoAppsErrorBudgetFastBurn` goes pending in Prometheus (Alerting) and, if the load lasts long enough, fires and
 reaches Alertmanager (receive rate rises).
 

@@ -30,7 +30,7 @@ cd apps/local
 docker compose up -d --build          # builds the 3 app images, starts all 6 services
 docker compose ps                     # all services "running"
 curl -s 127.0.0.1:13200/ready         # Tempo answers "ready" after ~15 s
-../../scripts/load.sh local 5         # traffic that triggers every planted issue
+DOMAIN=<your-domain> ../../scripts/load.sh local 5   # traffic that triggers every planted issue
 ```
 
 Then query Tempo (allow ~30 s after the load):

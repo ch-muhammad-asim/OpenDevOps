@@ -358,7 +358,7 @@ infra/create-cluster.sh                     # 1. GKE cluster (lab: zonal, 3 x e2
 PROFILE=lab DOMAIN=<domain> scripts/deploy.sh   # 2. platform + DNS
 apps/build-push.sh && apps/deploy-apps.sh lab   # 3. sample apps by digest (repo setup: apps/README.md)
 DOMAIN=<domain> hermes/deploy.sh            # 4. Hermes; providers: hermes/README.md
-scripts/load.sh public                      # 5. traffic that triggers every planted issue
+DOMAIN=<your-domain> scripts/load.sh public   # 5. traffic that triggers every planted issue
 PROFILE=lab DOMAIN=<domain> scripts/verify.sh && DOMAIN=<domain> hermes/verify.sh   # 6. PASS/FAIL checks
 ```
 
