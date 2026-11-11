@@ -13,6 +13,9 @@ official OpenTelemetry SDKs, with production-grade defaults and a small lab prof
 > 📘 **New to these tools?** Start with [**Every technology explained**](docs/technologies/README.md): one request's
 > journey through the whole stack, a glossary, and a card per technology (what it is, why it is here, alternatives,
 > version). Then [every Grafana dashboard explained](docs/dashboards/README.md).
+>
+> 🎥 **Running a demo?** [**Ask Hermes what is going on**](demo/README.md) — copy-paste prompts with what to look for,
+> grouped by health, incidents, latency, service graph, trends and fixes, plus the tested results.
 
 This project is a reusable demo lab. Replace `example.com` consistently in the manifests, Helm values,
 scripts and documentation with a domain you control before deploying.
