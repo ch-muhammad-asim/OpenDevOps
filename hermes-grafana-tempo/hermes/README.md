@@ -10,7 +10,8 @@ shows the gateway's health with a link to its traces, and Prometheus alerts fire
 **Why:** watch an AI agent's gateway with the same open tooling as every other service, without exporting any
 conversation content.
 
-Part of [hermes-grafana-tempo](../README.md).
+Part of [hermes-grafana-tempo](../README.md). Copy-paste demo prompts for the chat and the
+[tested answers](../demo/README.md) are in [`../demo/`](../demo/README.md).
 
 ## 🔭 What Hermes exports (and what it doesn't)
 
