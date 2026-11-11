@@ -8,8 +8,11 @@ The remote Desktop/server connection uses the **native OpenCode server protocol*
 |--------|--------|----------|
 | [`opencode-bridge/`](opencode-bridge/README.md) | 📘 **Start here:** unified OpenAI-compatible bridge guide with existing macOS/Linux scripts, GCP VM, Kubernetes, Hermes and support caveats | Default `:18383/v1`; VM/K8s examples `:18282/v1` |
 | [`hermes-desktop/`](hermes-desktop) | 🖥️ Hermes desktop app on macOS / Linux (custom endpoint) | `http://127.0.0.1:18383/v1` |
+| [`session-management.md`](session-management.md) | 🧵 Find, join and move a **specific session by ID** (TUI / `mini` / `run`), multi-client and documentation-gap notes | — |
 | [`opentunnel/`](opentunnel) | ✅ [Verified Mac OpenCode Desktop → GCP OpenCode server](opentunnel/remote-desktop-gcp.md), with SSH forwarding, architecture diagrams; optional OpenTunnel/Herdr install | Private SSH `http://127.0.0.1:8443` |
 | [`kubernetes/`](kubernetes) | ☸️ Production: Hermes + bridge sidecar on GKE, read-only SRE agent, Traefik dashboard | in-pod loopback `:18282` |
+
+**To reattach to one specific session:** `opencode -s ses_…` (full TUI) · `opencode mini -s ses_…` · `opencode run -s ses_… "next prompt"` — see [session-management.md](session-management.md) for finding the ID, the typo-creates-a-session footgun and multi-client behaviour.
 
 ```bash
 # laptop
