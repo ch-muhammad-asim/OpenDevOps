@@ -198,6 +198,10 @@ What does the service graph look like, and which edge is failing?
 - **What to look for:** the request chain and one named edge with failed-per-second and a percentage, plus the
   judgement that the deepest failing hop is the origin, not a symptom.
 
+The dashboard draws the topology from span metrics (one node per service, one edge per `client → server` pair, layered
+layout). For a single request's path there is a built-in alternative: Explore → Tempo → query type **Service Graph**,
+which builds the same picture from the spans of the traces in the time range.
+
 **🔎 Verify in Grafana**
 - 📊 Dashboard: Dashboards → Tempo → **Tempo Service Graph** → panel *Service Topology* (time range: Last 15 minutes)
 - 🧮 Query (Explore → Prometheus): `sum by (client, server) (rate(traces_service_graph_request_failed_total[5m]))`

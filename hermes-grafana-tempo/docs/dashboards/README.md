@@ -195,6 +195,11 @@ system, or during an incident to see which hop fails.
 **How to read it:** you should see `nextjs-web → nodejs-orders → python-inventory`. A missing edge means one service
 stopped sending spans or stopped propagating `traceparent`. For call rates and failures per edge, use Explore → Tempo →
 **Service Graph**, which colours failing edges red.
+
+The panel draws one node per service and one edge per `client → server` pair, with the layered layout (a call chain that
+does not move) — a service that is both client and server appears once. If you only need the path of one request, Explore
+→ Tempo → query type **Service Graph** is the built-in alternative: it builds the graph from the spans of the traces in
+the range you already filtered.
 **Try it:** open <https://tempo-nextjs.example.com/api/dashboard> a few times and refresh the dashboard after
 ~1 minute.
 
