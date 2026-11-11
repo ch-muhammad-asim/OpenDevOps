@@ -76,6 +76,11 @@ Is the Hermes gateway healthy, and which alerts are firing right now?
 - **What to look for:** `gateway_up=1`, state `running`, platform `api_server` up, then a list of alert names with
   their severity. Blur or hide the Grafana/Alertmanager URLs if you record it.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Dashboards → Hermes → **Hermes Agent gateway** → panels *Gateway* and *State* (time range: Last 15 minutes)
+- 🧮 Query (Explore → Prometheus): `max(hermes_gateway_up)` and `ALERTS{alertstate="firing"}`
+- ✅ Hermes is correct if: *Gateway* = 1 and *State* = `running`, and every alert name + service in the answer appears in the `ALERTS` result — nothing missing, nothing extra.
+
 ### 🔥 Incidents
 
 "This is the question an on-call engineer actually asks at 02:00."
@@ -90,6 +95,14 @@ Diagnose the platform and suggest the top issues, with Grafana links.
 - **What to look for:** a short ranked list, each item with a number (p95, error ratio), a **trace ID**, the file to
   look at, a suggested fix and a Grafana link.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Dashboards → Tempo → **Tempo Service Graph** → panel *Service Topology*, plus Alerting → **Alert rules**
+  (time range: Last 15 minutes)
+- 🧮 Query (Explore → Prometheus): `sum by (service) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m])) / sum by (service) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER"}[5m]))`
+- ✅ Hermes is correct if: each service it ranks has that error ratio in Prometheus (within a few points), the failing
+  edge it names is the red one in *Service Topology*, and every trace ID it quotes opens with an error span at the
+  service it blames.
+
 ```text
 Which service has the highest error rate in the last 15 minutes, and why?
 ```
@@ -99,6 +112,13 @@ Which service has the highest error rate in the last 15 minutes, and why?
 - **What to look for:** one service named with an error ratio in percent, the route that drives it, the exception and
   the file to change.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Prometheus**, split by `service` and then by `span_name` (time range: Last 15 minutes)
+- 🧮 Query (Explore → Prometheus): `sum by (span_name) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m]))`
+- ✅ Hermes is correct if: `nextjs-web` is the top series of the per-service ratio (~35% in a loaded lab, against ~19%
+  and ~18% for nodejs and python), and the per-route errors load onto the routes it names (`POST /api/checkout`, then
+  `GET /api/stock/[id]`).
+
 ```text
 Show me the errors in nodejs-orders in the last 15 minutes with example trace IDs.
 ```
@@ -107,6 +127,13 @@ Show me the errors in nodejs-orders in the last 15 minutes with example trace ID
   IDs.
 - **What to look for:** several trace IDs you can paste into Grafana → Explore → Tempo, grouped by cause instead of
   one flat list.
+
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Tempo** → paste one of the trace IDs from the answer (time range: Last 15 minutes)
+- 🧮 Query (Explore → Tempo): `{ resource.service.name = "nodejs-orders" && status = error }`
+- ✅ Hermes is correct if: the query returns about as many error traces as it claims (10 in 15 minutes in the recorded
+  run) in the three groups it names — `POST /orders` TypeError, `GET /orders/:id` 502 from SKU-999,
+  `GET /orders/:id/stock` 2 s timeout — and the quoted trace IDs open with a red span.
 
 ### 🐢 Latency
 
@@ -121,6 +148,12 @@ Find the slowest traces for the nextjs app in the last 30 minutes and explain th
 - **What to look for:** a table of trace IDs with durations, then the span where the time actually goes — usually one
   hop below the app the question named — with a Grafana link.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Tempo** → the slowest trace ID from the answer, waterfall view (time range: Last 30 minutes)
+- 🧮 Query (Explore → Tempo): `{ resource.service.name = "nextjs-web" && duration > 2s }`
+- ✅ Hermes is correct if: the query lists the same slow requests with the same trace IDs and ~2.2-2.3 s durations,
+  and in the slowest trace the time sits in the nodejs `orders.build_report` span, not in the nextjs span above it.
+
 ```text
 Show me the request path from nextjs-web to python-inventory and where time is spent.
 ```
@@ -130,6 +163,14 @@ Show me the request path from nextjs-web to python-inventory and where time is s
 - **What to look for:** the full chain Next.js → Node.js → Python with milliseconds per hop, the failing hop and the
   timeout that cuts it short.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Dashboards → Tempo → **Tempo Service Graph** → panel *Service Topology*; the trace itself in
+  Explore → **Tempo** (time range: Last 15 minutes)
+- 🧮 Query (Explore → Tempo): `{ resource.service.name = "python-inventory" && name = "legacy_supplier_sync" }`
+- ✅ Hermes is correct if: *Service Topology* shows `nextjs-web → nodejs-orders → python-inventory`, and in the trace
+  the `legacy_supplier_sync` span is ~3 s while nodejs gives up at 2 s — so the upper hops are errors and python's own
+  span is not.
+
 ```text
 Which endpoint is slowest in python-inventory, and which file should I change to fix it?
 ```
@@ -137,6 +178,12 @@ Which endpoint is slowest in python-inventory, and which file should I change to
 - **What Hermes should do:** `obs.py slowest python --since 30m`, then `obs.py issue python` for the known pattern.
 - **What to look for:** one endpoint, about 3 s per request, the span inside it (for example a synchronous supplier
   sync) and the file to change.
+
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Tempo** → the trace ID from the answer, span tree (time range: Last 30 minutes)
+- 🧮 Query (Explore → Tempo): `{ resource.service.name = "python-inventory" && name = "GET /inventory/slow" }`
+- ✅ Hermes is correct if: the spans come back at ~3.0 s, the child `legacy_supplier_sync` holds almost all of that
+  time, and the file it names is `apps/python/main.py` with a `PLANTED ISSUE:` comment on that sync.
 
 ### 🕸️ Service graph
 
@@ -151,6 +198,13 @@ What does the service graph look like, and which edge is failing?
 - **What to look for:** the request chain and one named edge with failed-per-second and a percentage, plus the
   judgement that the deepest failing hop is the origin, not a symptom.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Dashboards → Tempo → **Tempo Service Graph** → panel *Service Topology* (time range: Last 15 minutes)
+- 🧮 Query (Explore → Prometheus): `sum by (client, server) (rate(traces_service_graph_request_failed_total[5m]))`
+- ✅ Hermes is correct if: `nodejs-orders → python-inventory` is the edge with the largest failed/s (≈0.27 of
+  ≈1.55 req/s, ~17% in a loaded lab), the user-facing edges fail at a similar or lower rate, and the graph names
+  python-inventory as the origin rather than a downstream symptom.
+
 ### 📈 Trends
 
 "Yesterday's p95, this hour's memory: the questions that need 30 days of metrics."
@@ -164,6 +218,14 @@ Is anything throttled or running out of memory? Check CPU and memory trends.
 - **What to look for:** a plain answer — throttling total or not — and a memory curve with numbers, the limit, and an
   estimate of how long until it is reached.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Dashboards → Kubernetes / Compute Resources / **Namespace (Pods)**, namespace `tempo-apps`,
+  panels *Memory Usage (w/o cache)* and *Memory Quota* (time range: Last 6 hours)
+- 🧮 Query (Explore → Prometheus): `sum by (namespace, pod) (container_memory_working_set_bytes{namespace="tempo-apps", container!=""})`
+- ✅ Hermes is correct if: the nodejs pod is the only rising line (~165 MB against a 256 MB limit, ~62% and climbing),
+  nextjs and python stay flat, and `sum by (namespace, pod) (rate(container_cpu_cfs_throttled_periods_total{namespace="tempo-apps"}[5m])) / sum by (namespace, pod) (rate(container_cpu_cfs_periods_total{namespace="tempo-apps"}[5m]))`
+  stays near zero.
+
 ```text
 Compare today's latency with yesterday for each service.
 ```
@@ -171,6 +233,13 @@ Compare today's latency with yesterday for each service.
 - **What Hermes should do:** `obs.py trends --range 1d` and report which comparison it could actually make.
 - **What to look for:** per-service p95 numbers, and an honest note when the history is too short for day-over-day
   (a fresh lab has hours, not days) with the closest window instead.
+
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Prometheus**, range *Last 24 hours* (time range: Last 24 hours)
+- 🧮 Query (Explore → Prometheus): `histogram_quantile(0.95, sum by (le, service) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[1h])))`
+- ✅ Hermes is correct if: it says it cannot compare day-over-day because the backend holds hours, not days, and the
+  p95 values it does report match the same query over the last hour against the hour before; a confident
+  "yesterday was X%" with no yesterday data is the wrong answer.
 
 ### 🛠️ Fixes
 
@@ -184,6 +253,12 @@ Summarise the planted issues you can find and how to fix each one.
 - **What to look for:** one short section per app, each bug with evidence, root cause, file and fix, and a suggested
   order of work.
 
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Tempo** → the trace IDs in the answer, plus the file on disk (time range: Last 15 minutes)
+- 🧮 Query (Explore → Tempo): `{ status = error }`
+- ✅ Hermes is correct if: every bug it lists has a matching `PLANTED ISSUE:` comment in the file it names, and the
+  query shows the error or slow span it describes — 14 bugs across the three apps is the full set in this repo.
+
 ## 🧑‍✈️ Verify like a lead DevOps engineer (not vibe testing)
 
 Hermes's answer is a lead, not proof. Every number, trace ID, file and alert it names is a claim you confirm against
@@ -191,6 +266,24 @@ the telemetry **before** you act on it.
 
 **Trust, then verify:** ask → read the evidence Hermes cites → open the same thing in Grafana → confirm the numbers →
 confirm the cause in code → decide.
+
+**🗺️ Where to look in Grafana:**
+
+| Where (folder → title) | What it shows in one line | Verifies |
+|---|---|---|
+| Hermes → **Hermes Agent gateway** | Gateway up/state, platform, cron and Hermes spans in one place | 🩺 health |
+| Tempo → **Tempo Service Graph** | The `client → server` topology built from span metrics | 🔥 diagnose, 🐢 path, 🕸️ graph, 🛠️ fixes |
+| Tempo → **Tempo / Writes**, **Tempo / Reads** | Tempo's own ingest and query path, when a trace never arrives | 🩺 health, 📈 trends |
+| Explore → **Prometheus** | Any PromQL: RED per service and route, service-graph edges, container CPU/memory | 🔥, 🐢, 📈, 🕸️ |
+| Explore → **Tempo** | TraceQL and trace-ID search: span trees, error spans, slow spans | 🐢 latency, 🛠️ fixes, errors |
+| Alerting → **Alert rules** | What is firing or pending, for how long, on which service | 🩺 health, 🔥 diagnose |
+| Alertmanager / **Overview** | Active alert groups and notifications sent | 🩺 health |
+| Grafana Overview | Firing alerts plus Grafana's own request and latency stats | 🩺 health |
+| Kubernetes / Compute Resources / **Namespace (Pods)**, namespace `tempo-apps` | CPU and memory against limits, throttling and restarts per pod | 📈 trends |
+
+No app RED/span-metrics dashboard is installed in this stack (the Grafana dashboard list has the Tempo mixin set, the
+Hermes and Kubernetes dashboards, and nothing per-app): those span metrics are one PromQL query away in Explore →
+Prometheus, and every block below gives that query.
 
 | Prompt group | What to open | What to confirm | Red flags |
 |---|---|---|---|
