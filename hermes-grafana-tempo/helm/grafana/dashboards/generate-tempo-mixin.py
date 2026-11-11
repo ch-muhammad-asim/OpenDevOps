@@ -162,6 +162,30 @@ def service_graph_panels(d):
         opts.setdefault("nodes", {})
 
 
+def single_binary_panels(d):
+    """Panels that assume a component this stack does not run. The data volume panel matches a PVC
+    named after the component (cortex PVCs are <component>-<n>); the single Tempo process keeps its
+    data on storage-tempo-0, so accept that name too. The latency panels default to native
+    histograms, which this Prometheus does not scrape: the classic bucket series exist, the
+    native ones do not, so the dashboard variable starts on classic."""
+    def walk(items):
+        for p in items or []:
+            yield p
+            yield from walk(p.get("panels"))
+
+    for p in walk(d.get("panels")):
+        for t in p.get("targets") or []:
+            expr = t.get("expr") or ""
+            if "kubelet_volume_stats_available_bytes" in expr:
+                t["expr"] = expr.replace('persistentvolumeclaim=~"$component.*"',
+                                         'persistentvolumeclaim=~"$component.*|storage-tempo.*"')
+    for v in d.get("templating", {}).get("list", []):
+        if v.get("name") == "latency_metrics":
+            v["current"] = {"text": "classic", "value": "1"}
+            for o in v.get("options") or []:
+                o["selected"] = o.get("value") == "1"
+
+
 def pin_datasources(node):
     """Upstream panels sometimes hard-code Grafana Labs' own Prometheus UIDs; use ours."""
     if isinstance(node, dict):
@@ -181,11 +205,16 @@ def dashboard(name):
         text = service_graph(text)
     d = json.loads(text)
     pin_datasources(d.get("panels", []))
+    single_binary_panels(d)
     if name == "service-graph":
         service_graph_panels(d)
     d.pop("id", None)
     d["uid"] = d.get("uid") or f"tempo-{name}"
     d["tags"] = sorted(set(d.get("tags", [])) | {"tempo", "tempo-mixin"})
+    if name == "service-graph":
+        # Span metrics and the service graph go stale a few minutes after traffic stops, so this
+        # dashboard opens on the last hour instead of upstream's shorter default.
+        d["time"] = {"from": "now-1h", "to": "now"}
     for v in d.get("templating", {}).get("list", []):
         if v.get("type") == "datasource" and v.get("query") == "prometheus":
             v["current"] = {"text": "Prometheus", "value": "prometheus"}

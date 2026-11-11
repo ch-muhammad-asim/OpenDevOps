@@ -120,6 +120,45 @@ source file for them in this repository; change them through the chart version o
 
 There is no CoreDNS dashboard: GKE runs kube-dns, and its metrics are not scraped in this stack.
 
+## 🧪 Check every panel at once
+
+[`scripts/verify-dashboards.sh`](../../scripts/verify-dashboards.sh) answers "is any panel broken?" without clicking
+through 30 dashboards. It reads every dashboard through the Grafana API, expands collapsed rows, fills each template
+variable (the first value, or `All`), and runs each panel's Prometheus targets as instant queries over 15 minutes —
+then again over 1 hour when a query returns nothing, because a 1-minute `rate()` on a sparse counter is `NaN`.
+It is read-only and safe to re-run:
+
+```bash
+scripts/verify-dashboards.sh                                   # port-forward svc/grafana, admin Secret read in-cluster
+GRAFANA_URL=https://grafana-tempo.<your-domain> scripts/verify-dashboards.sh
+scripts/verify-dashboards.sh --dashboard tempo-service-graph   # one dashboard, repeatable
+```
+
+One line is printed per panel, then a summary, and the exit code is the number of `ERROR` panels, so CI can use it
+directly. On this lab, after `load.sh public 10`:
+
+```text
+summary: 414 panels - OK 321, EXPECTED(empty by design) 42, NO_DATA 0, SKIP 50, ERROR 0
+```
+
+| Result | Meaning | What to do |
+|---|---|---|
+| `OK` | The query returned at least one row | — |
+| `EXPECTED` | Empty by design, and the printed reason says why: a component this stack does not run, a counter Tempo 3.1 does not export, or a panel that filters `> 0` when there is nothing to show | Add a rule with its reason if you add another intentionally empty panel |
+| `NO_DATA` | Empty without a rule | A real bug: fix the query, the selector or the dashboard variable |
+| `SKIP` | Row, text, annotation and list panels: no data source behind them | — |
+| `ERROR` | The data source returned an error: a stale data source uid, invalid PromQL, or a `nodeGraph` panel with duplicate node ids | A real bug; the summary must end with `ERROR 0` |
+
+Run `DOMAIN=<your-domain> scripts/load.sh public` first: most application panels read span metrics and the service
+graph, which exist only while spans arrive. **The Tempo metrics-generator writes those counters as spans arrive**, so
+a few minutes after traffic stops the newest sample is older than a 15-minute window and the service-graph and
+span-metric panels go empty — which is why *Tempo Service Graph* now opens on *Last 1 hour*, and why a demo re-runs
+`load.sh` just before showing it.
+
+The rules live in `EXPECTED_EMPTY` in the script, keyed on `<dashboard> / <panel> / <query>` and printed with their
+reason, so an empty panel is never confused with a broken one. The per-dashboard version of the same list is in
+[`helm/grafana/README.md`](../../helm/grafana/README.md).
+
 ---
 
 ## 🤖 Hermes folder
@@ -200,8 +239,12 @@ The panel draws one node per service and one edge per `client → server` pair, 
 does not move) — a service that is both client and server appears once. If you only need the path of one request, Explore
 → Tempo → query type **Service Graph** is the built-in alternative: it builds the graph from the spans of the traces in
 the range you already filtered.
-**Try it:** open <https://tempo-nextjs.example.com/api/dashboard> a few times and refresh the dashboard after
-~1 minute.
+
+**Stale series:** the metrics-generator writes `traces_service_graph_*` and `traces_spanmetrics_*` only while spans
+arrive, so a few minutes after `load.sh` stops the latest sample falls outside a 15-minute window and the graph says
+"No data found in response". The dashboard therefore opens on **Last 1 hour**; re-run `load.sh` before a demo, or pick
+a wider range. **Try it:** open <https://tempo-nextjs.example.com/api/dashboard> a few times and refresh the dashboard
+after ~1 minute.
 
 ### Tempo Operational
 

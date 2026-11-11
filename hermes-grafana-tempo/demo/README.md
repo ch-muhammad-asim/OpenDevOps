@@ -40,6 +40,14 @@ No diagram on this page: the full set lives in [`../docs/diagrams/`](../docs/dia
 - [ ] The Hermes checks pass (0 failures): `DOMAIN=<domain> hermes/verify.sh`
 - [ ] There is fresh traffic — run `DOMAIN=<your-domain> scripts/load.sh public`, wait about 30 s for ingest, then open
       Grafana → Explore → Tempo to confirm traces exist.
+- [ ] The dashboards answer: `scripts/verify-dashboards.sh` prints `ERROR 0` and `NO_DATA 0` (start it before recording;
+      it reads the admin password from the Secret and never prints it).
+
+> ⏱️ **Span metrics and the service graph go stale.** The Tempo metrics-generator writes
+> `traces_service_graph_*` and `traces_spanmetrics_*` while spans arrive; a few minutes after `load.sh` stops, the
+> latest sample is older than a 15-minute window and *Tempo Service Graph* says "No data found in response". Run
+> `DOMAIN=<your-domain> scripts/load.sh public` just before you open the service-graph or span-metric panels, or widen
+> the time range (the Service Graph dashboard now opens on *Last 1 hour*, which covers a short gap).
 
 `<domain>` is the domain you deployed with (`example.com` in the manifests). Everything below runs from
 `hermes-grafana-tempo/`.
@@ -80,6 +88,24 @@ Is the Hermes gateway healthy, and which alerts are firing right now?
 - 📊 Dashboard: Dashboards → Hermes → **Hermes Agent gateway** → panels *Gateway* and *State* (time range: Last 15 minutes)
 - 🧮 Query (Explore → Prometheus): `max(hermes_gateway_up)` and `ALERTS{alertstate="firing"}`
 - ✅ Hermes is correct if: *Gateway* = 1 and *State* = `running`, and every alert name + service in the answer appears in the `ALERTS` result — nothing missing, nothing extra.
+
+```text
+Can you see the application traces? Show me recent traces for each app.
+```
+
+- **What Hermes should do:** run the observability skill once per service — `obs.py traceql` with
+  `{ resource.service.name = "nextjs-web" }`, then `nodejs-orders`, then `python-inventory` — and quote a few recent
+  traces per service with their trace IDs and links.
+- **What to look for:** three groups, each with a trace ID, a service and a route, and a link that opens the trace — not
+  one flat list and never "no traces".
+
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Tempo** → Search, *Service Name* `nextjs-web` (time range: Last 15 minutes)
+- 🧮 Query (Explore → Tempo): `{ resource.service.name = "nextjs-web" }`, then the same with `nodejs-orders` and
+  `python-inventory`
+- ✅ Hermes is correct if: every trace ID it quotes opens with a root span in the service it named, and the three queries
+  show roughly the traffic `load.sh` sent. The trace table lists the **root** span, so a `python-inventory` query shows
+  rows whose Service column says `nextjs-web` — see [Troubleshooting](#-troubleshooting) for why.
 
 ### 🔥 Incidents
 
@@ -184,6 +210,23 @@ Which endpoint is slowest in python-inventory, and which file should I change to
 - 🧮 Query (Explore → Tempo): `{ resource.service.name = "python-inventory" && name = "GET /inventory/slow" }`
 - ✅ Hermes is correct if: the spans come back at ~3.0 s, the child `legacy_supplier_sync` holds almost all of that
   time, and the file it names is `apps/python/main.py` with a `PLANTED ISSUE:` comment on that sync.
+
+```text
+Show me p99 and p95 latency and the error rate per service and route for the last 15 minutes, and explain the cause.
+```
+
+- **What Hermes should do:** run `obs.py prom` for the percentiles and `obs.py red` for the error ratio — both grouped by
+  `service` and `span_name` — rank the routes, then open a trace of the worst one.
+- **What to look for:** p95 and p99 side by side with an error ratio per route, then one named cause with a trace ID,
+  and the judgement whether the slowness is the whole route or only its tail.
+
+**🔎 Verify in Grafana**
+- 📊 Dashboard: Explore → **Prometheus**, two queries, *Table* view (time range: Last 15 minutes)
+- 🧮 Query (Explore → Prometheus): `histogram_quantile(0.99, sum by (le, service, span_name) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[5m])))`
+  and `sum by (service, span_name) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m])) / sum by (service, span_name) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER"}[5m]))`
+- ✅ Hermes is correct if: its p95 and p99 match those queries per route, and it reads p99 ≈ p95 on `GET /inventory/slow`
+  (~3 s) and `GET /api/stock/[id]` (~2 s) as *every request on this route is slow*, not a few outliers — that is the
+  baseline-vs-tail distinction from [📚 Concepts to know](#-concepts-to-know-15-minute-video).
 
 ### 🕸️ Service graph
 
@@ -312,6 +355,123 @@ straight after `load.sh` (wait ~30 s); a confident root cause with no evidence.
 
 In Slack the same rules apply: paste the Grafana link in the thread so everyone can verify the claim themselves.
 
+## 📚 Concepts to know (15-minute video)
+
+Every prompt above is one observability idea in practice. These are the ideas, two or three lines each, with the place
+in this lab where you can see them. The deeper glossary (terms, tools, links) is
+[`../docs/technologies/README.md`](../docs/technologies/README.md).
+
+**📊 p50 / p95 / p99 — why the average lies.** A percentile is the value that share of requests stay under: p99 is the
+slowest 1%. The average hides the tail, because one 3 s request among a hundred 100 ms requests barely moves it. *In
+this lab:* `GET /inventory/slow` takes ~3.0 s for every request, so its p50, p95 and p99 sit on top of each other — the
+whole route is slow. When p99 jumps far above p95 instead, only a few requests are slow (a timeout, a lock, a cold
+start). *See:* Explore → Prometheus,
+`histogram_quantile(0.99, sum by (le, service) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[5m])))`
+and the alert `TempoAppsHighLatencyP95` in Alerting → Alert rules.
+
+**⚖️ Latency, throughput and error rate.** Three independent numbers: how long one request takes, how many arrive per
+second, and what share fail. High throughput with rising latency is overload; steady throughput with a high error rate
+is a broken dependency. *In this lab:* `load.sh public` sends 10 rounds; nextjs answers at the same rate while ~35% of
+the responses are 5xx, so the problem is a dependency, not capacity. *See:* the RED queries below in Explore →
+Prometheus.
+
+**🔴 RED method.** Rate, Errors, Duration — one row per service or route, the three numbers that describe a
+request-driven system. *In this lab:* rate is
+`sum by (service) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER"}[5m]))`, errors are the same
+counter with `status_code="STATUS_CODE_ERROR"`, duration is the percentile query above. *See:* Explore → Prometheus (no
+per-app dashboard is installed in this stack, so every block in this page gives the query).
+
+**🟡 USE method.** Utilization, Saturation, Errors — one row per resource (CPU, memory, disk, network). RED says what
+the users feel, USE says what the machine is doing. *In this lab:* the namespace dashboard shows memory against the
+limit (utilization), CPU throttling (saturation) and restarts (errors) for `tempo-apps`. *See:* Dashboards →
+Kubernetes / Compute Resources / **Namespace (Pods)**, namespace `tempo-apps`;
+`container_memory_working_set_bytes`, `kube_pod_container_resource_limits`,
+`container_cpu_cfs_throttled_periods_total / container_cpu_cfs_periods_total`.
+
+**🎯 SLI, SLO, error budget, burn rate.** The SLI is the measured number (the share of server requests that did not
+fail), the SLO is the target (99% over 30 days), and the error budget is the 1% you are allowed to spend. Burn rate is
+how fast you spend it: 1x uses the budget in exactly 30 days, 14.4x uses 2% of it in one hour. *In this lab:*
+`TempoAppsErrorBudgetFastBurn` fires above 14.4x over 1 h and 5 m, `TempoAppsErrorBudgetSlowBurn` above 6x over 6 h
+and 30 m, both computed from `service:spanmetrics_server_error_ratio:rate1h` and `:rate6h`. *See:* Alerting → Alert
+rules, group `tempo-apps.alerts`; the rules are in
+[`apps/monitoring/prometheusrule.yaml`](../apps/monitoring/prometheusrule.yaml).
+
+**🧵 Trace, span, root span, context propagation.** One request is one **trace**; each unit of work inside it (a query,
+an HTTP call) is a **span**, with a start, a duration and a parent. The **root span** is the first one — the inbound
+request — and `traceparent` is the header that carries the trace ID between services, which is why nextjs, nodejs and
+python appear in one trace. *In this lab:* `{ resource.service.name = "python-inventory" }` returns the traces that
+*contain* a python span, but the trace table shows the root span, so rows read `nextjs-web GET /api/stock/[id]`; open
+the trace to see the python span in the waterfall, or set Search Options → *Table Format* to `Spans`. *See:* Explore →
+Tempo.
+
+**🕸️ Span metrics and the service graph.** The Collector's spanmetrics connector turns spans into counters and
+histograms (`traces_spanmetrics_calls_total`, `traces_spanmetrics_latency_bucket`) so you can alert on them without
+opening a trace; the Tempo metrics-generator writes the `client → server` pairs
+`traces_service_graph_request_total` / `..._failed_total`. *In this lab:* that is what draws
+`nextjs-web → nodejs-orders → python-inventory → sqlite`. *See:* Dashboards → Tempo → **Tempo Service Graph**.
+
+**💎 Exemplars — from a metric to the trace.** An exemplar is a metric sample that carries a trace ID, so a spike on a
+chart has a link to the request behind it. *In this lab:* the Prometheus data source points exemplars at Tempo
+(`trace_id` → *View trace*), so a p99 spike opens the slow trace in one click. *See:* Explore → Prometheus with
+*Exemplars* enabled.
+
+**💧 Memory leak.** Working-set memory climbs request after request and never returns to its baseline, until the
+container hits its limit, is OOMKilled and restarts — and the restart hides the leak for a while. *In this lab:*
+`GET /orders` in nodejs copies a 1 MiB buffer per request (the planted leak), and `/stress/memory?mb=32&hold_s=5`
+makes it visible in seconds. *See:* Dashboards → Kubernetes / Compute Resources / **Namespace (Pods)** → *Memory Usage
+(w/o cache)* against *Memory Quota*; `container_memory_working_set_bytes`, and
+`kube_pod_container_status_restarts_total` for the restart.
+
+**🔥 CPU throttling.** When a container uses its whole CPU limit inside a 100 ms period, the kernel pauses it for the
+rest of the period, so latency rises while CPU usage looks flat at the limit. *In this lab:* `GET /orders/report` runs
+`pbkdf2Sync` on the event loop (the planted CPU hog) and `/stress/cpu?ms=500` does the same on demand. *See:* the same
+dashboard, *CPU Utilisation (from limits)*;
+`rate(container_cpu_cfs_throttled_periods_total[5m]) / rate(container_cpu_cfs_periods_total[5m])`.
+
+**⏳ Timeouts and cascading failure.** A caller that gives up before its dependency answers turns a slow call into an
+error one hop up, and the user sees the last hop's status. *In this lab:* python's `legacy_supplier_sync` takes 3 s,
+nodejs aborts `/inventory/slow` after 2 s, and nextjs `/api/stock/[id]` passes that `504` to the user. *See:* Explore →
+Tempo, `{ resource.service.name = "nextjs-web" && name = "GET /api/stock/[id]" }`.
+
+**🪜 N+1 calls.** One request triggers one call per item instead of one batched call: the trace shows a staircase of
+similar child spans, and the route gets slower as the list grows. *In this lab:* `GET /api/dashboard` makes 11
+sequential `fetch` calls (1 list + 10 details, `app.orders.requests=11`). *See:* Explore → Tempo,
+`{ resource.service.name = "nextjs-web" && kind = server } >> { resource.service.name = "nextjs-web" && kind = client } | count() > 10`.
+
+**🔁 Retries.** Repeating a failed call hides the symptom and multiplies load: the failing dependency sees more
+requests than the callers above it, and every retry waits out the same timeout again. *In this lab:* there is no retry
+today, which is why one slow call is one `504`; add one and the 3 s supplier sync is hit three times per user request.
+*See:* **Tempo Service Graph**, compare `traces_service_graph_request_total` on the failing edge with the user-facing
+edge.
+
+**🔢 Cardinality.** Every distinct label combination is a separate time series, so a label with unbounded values (a
+trace ID, a user, a URL with an ID) multiplies series and memory in Prometheus and Grafana. *In this lab:* span metrics
+stay bounded because the route template `/api/stock/[id]` is recorded instead of each concrete URL. *See:* Explore →
+Prometheus, `count by (__name__) ({__name__=~"traces_spanmetrics.*"})` and the `span_name` values.
+
+**🎲 Sampling.** Keeping a fraction of traces (head sampling at the start, tail sampling after the whole trace is
+visible) cuts cost and storage, and can hide rare failures. *In this lab:* every span is kept and retention is what
+bounds the volume; the tail-sampling pipeline is an opt-in example under [`helm/otel-collector/`](../helm/otel-collector/).
+
+**🗄️ Retention.** How long data survives: Prometheus keeps 2 days locally, Thanos keeps 30 days on GCS, Tempo keeps
+30 days (720 h) of blocks. A day-over-day question needs the Thanos window, not the local one — which is why prompt 7
+in the tested run answered honestly that the lab had only hours of history. *See:* Explore → Prometheus over *Last 7
+days*, and `retention: 720h` in [`helm/tempo/values.yaml`](../helm/tempo/values.yaml).
+
+## 🎥 Suggested 15-minute video outline
+
+| Time | Segment | What to show |
+|---|---|---|
+| 0:00–2:00 | Intro and architecture | The problem (four dashboards, no answer), the three apps, Collector → Tempo + Prometheus/Thanos, Hermes in the cluster, the diagram from [`../docs/diagrams/`](../docs/diagrams/) |
+| 2:00–4:00 | Load the traffic | `DOMAIN=<your-domain> scripts/load.sh public`; expected mix of `200`, `500`, `502` and `504`; wait ~30 s; one Tempo search to prove traces arrive |
+| 4:00–9:00 | The prompts | 🩺 health, 🩺 recent traces, 🔥 highest error rate, 🐢 slowest nextjs trace, 🕸️ failing edge — one per minute, read the answer aloud, no editing |
+| 9:00–13:00 | Verify in Grafana | **Tempo Service Graph** (the chain), **Namespace (Pods)** with `tempo-apps` (memory and throttling), one trace waterfall, Alert rules; then `scripts/verify-dashboards.sh` printing `ERROR 0` |
+| 13:00–15:00 | Concepts recap and Slack | p95 vs p99, RED vs USE, trace vs span, span metrics and the graph, error budget and burn rate; close on [💼 Slack in production](#-slack-in-production) |
+
+Tips for the recording: run one prompt at a time (the free model tier rate-limits), keep the Service Graph on *Last
+1 hour* or re-run `load.sh` just before the graph segment, and blur alertmanager/Grafana URLs if you show the Slack
+thread.
+
 ## 💼 Slack in production
 
 Nothing above is Grafana-specific: Hermes is the same agent, and Slack is one of its gateway platforms. Connect the
@@ -365,6 +525,45 @@ Honest notes:
 | Skill answers "endpoint not reachable" | The Thanos querier or Tempo is down, or a NetworkPolicy changed | `kubectl -n monitoring get pods -l app.kubernetes.io/name=thanos-query`, and see [`../hermes/README.md`](../hermes/README.md#-operations-and-troubleshooting) |
 | Skill calls return 401 from Grafana | Grafana restarted without a database, so the Viewer token is gone | Re-run `hermes/deploy.sh`, which re-creates the account and token |
 | Answers are slow but correct | Several tool calls per turn on a free model | Normal; ask one question at a time |
+| A TraceQL query returns *nothing*, but the apps clearly sent traffic | `=` is an exact match on the whole value | Use the exact service name from the table below, `=~ "python.*"` for a prefix, or the Search tab's **Service Name** dropdown |
+| The trace table shows nextjs rows for a python query | The table lists one row per trace and shows the **root** span | Open the trace for the waterfall, or set *Table Format* to `Spans` (below) |
+
+### 🔤 Exact service names — `=` matches the whole value
+
+The `service.name` values are exact strings, and TraceQL `=` is an exact match, not a substring match:
+
+| Component in the waterfall | `service.name` to query |
+|---|---|
+| Next.js frontend | `nextjs-web` |
+| Node.js orders API | `nodejs-orders` |
+| Python inventory API | `python-inventory` |
+| Hermes gateway's own spans | `hermes-gateway` |
+
+`{ resource.service.name = "python" }` returns **nothing**: no service reports that name (the Kubernetes Service is
+called `python`, but the SDK sets `service.name` to `python-inventory` from `OTEL_SERVICE_NAME`). Use one of:
+
+- `{ resource.service.name = "python-inventory" }` — the exact name
+- `{ resource.service.name =~ "python.*" }` — a regex, when you only remember part of the name
+- Explore → **Tempo** → Search → *Service Name* dropdown — it lists the values that exist, so a typo cannot happen
+
+### 🧵 A service query returns traces, and the table shows the root span
+
+`{ resource.service.name = "python-inventory" }` returns every trace that **contains** a python-inventory span — not
+only the spans python produced. The Search table has one row per trace and its Service and Name columns describe the
+**root** span, so the row reads `nextjs-web | GET /api/stock/[id] | 3.01 s`: the user's request, which travelled
+nextjs-web → nodejs-orders → python-inventory. Open the trace and the python span is there in the waterfall.
+
+To list python's own spans instead, open Search → *Search options* (the Options tab) and set *Table Format* to
+`Spans`. Each row is then a single span with its own service, name and duration — the fastest way to see that
+`legacy_supplier_sync` alone holds ~3 s of that 3.01 s.
+
+### 🎯 One query per app, and what you click into
+
+| App | Query | Root rows you will see | Planted issue to open |
+|---|---|---|---|
+| `nextjs-web` | `{ resource.service.name = "nextjs-web" }` | `GET /api/dashboard`, `GET /api/stock/[id]`, `POST /api/checkout` — nextjs is the entry point, so these traces start in nextjs | `GET /api/dashboard`: 11 sequential `fetch` spans under `dashboard.load_orders` (N+1); `POST /api/checkout` with an empty body: 500 and a `TypeError` exception event |
+| `nodejs-orders` | `{ resource.service.name = "nodejs-orders" }` | Its own roots (`GET /orders`, `GET /orders/7`, `GET /orders/report`, `POST /orders`, sent by `load.sh`), plus the `nextjs-web` traces it serves as `GET /api/dashboard` and `GET /api/stock/[id]` | `GET /orders` (1 MiB copied per request, the memory leak), `GET /orders/7` (502 from `SKU-999`), `GET /orders/report` (~1.3 s CPU hog) |
+| `python-inventory` | `{ resource.service.name = "python-inventory" }` | Its own roots (`GET /inventory/items`, `GET /inventory/report`, `GET /inventory/fib`), plus the `nextjs-web` roots `GET /api/dashboard` and `GET /api/stock/[id]`, plus the `nodejs-orders` root `GET /orders/7` | `GET /api/stock/[id]` or `GET /orders/7/stock` → the `legacy_supplier_sync` span (~3 s) beside nodejs's 2 s timeout; `GET /inventory/items/SKU-999` → `KeyError`; `GET /inventory/report` → 21 `SELECT` spans |
 
 More: [`../README.md`](../README.md#-operations-and-troubleshooting) and
 [`../hermes/README.md`](../hermes/README.md#-operations-and-troubleshooting).

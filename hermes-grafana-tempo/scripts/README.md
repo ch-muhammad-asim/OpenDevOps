@@ -12,6 +12,7 @@ Operational scripts for hermes-grafana-tempo. Run them from the repository folde
 | [teardown.sh](teardown.sh) | Uninstalls releases and the project namespaces (incl. `hermes` and `object-storage`) and CRDs; safe to re-run; `--cluster` also offers to delete the Tempo and Thanos buckets (`TEMPO_BUCKET`, `THANOS_BUCKET`; each confirmed, IAM bindings left in place) and the cluster (confirmed by name) | `scripts/teardown.sh [--cluster]` |
 | [update-dns.sh](update-dns.sh) | Creates or updates one proxied Cloudflare A record (used by the `dns` step) | `CF_TOKEN_FILE=... scripts/update-dns.sh <host> <ipv4>` |
 | [load.sh](load.sh) | Sends traffic that triggers every planted issue in the three sample apps, then prints a status-code summary | `DOMAIN=<your-domain> scripts/load.sh [public\|local] [rounds]` |
+| [verify-dashboards.sh](verify-dashboards.sh) | Checks every panel of every Grafana dashboard through the Grafana API (collapsed rows included): runs each Prometheus target as an instant query, names the panels that are empty by design, and exits with the number of `ERROR` panels | `scripts/verify-dashboards.sh [--dashboard <uid>]` |
 
 ## 🚀 deploy.sh / verify.sh
 
