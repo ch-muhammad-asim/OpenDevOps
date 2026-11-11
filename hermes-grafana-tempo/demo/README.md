@@ -28,6 +28,10 @@ No diagram on this page: the full set lives in [`../docs/diagrams/`](../docs/dia
 
 ## ✅ Before you start
 
+> ⚠️ **Set `DOMAIN` first:** `export DOMAIN=<your-domain>`. `scripts/load.sh` defaults to `example.com` and fails with
+> `not healthy: https://tempo-nextjs.example.com/healthz` if you forget it. The full command is
+> `cd hermes-grafana-tempo && DOMAIN=<your-domain> scripts/load.sh public`.
+
 - [ ] The GKE cluster is up: `kubectl get nodes` shows 3 `Ready`.
 - [ ] Every hostname answers: `https://grafana-tempo.<domain>` → `200`/`302`,
       `https://hermes-gke.<domain>` → `302` to the Hermes login, the three `tempo-*` app hosts → `200`.
@@ -39,8 +43,6 @@ No diagram on this page: the full set lives in [`../docs/diagrams/`](../docs/dia
 
 `<domain>` is the domain you deployed with (`example.com` in the manifests). Everything below runs from
 `hermes-grafana-tempo/`.
-
-Set `DOMAIN` to your own domain before running any `load.sh` command — `load.sh` defaults to `example.com` and will fail otherwise.
 
 ## 🔐 How to log in to Hermes
 
@@ -181,6 +183,37 @@ Summarise the planted issues you can find and how to fix each one.
 - **What Hermes should do:** `obs.py diagnose` plus `obs.py issue <app>` per app, then group the findings by service.
 - **What to look for:** one short section per app, each bug with evidence, root cause, file and fix, and a suggested
   order of work.
+
+## 🧑‍✈️ Verify like a lead DevOps engineer (not vibe testing)
+
+Hermes's answer is a lead, not proof. Every number, trace ID, file and alert it names is a claim you confirm against
+the telemetry **before** you act on it.
+
+**Trust, then verify:** ask → read the evidence Hermes cites → open the same thing in Grafana → confirm the numbers →
+confirm the cause in code → decide.
+
+| Prompt group | What to open | What to confirm | Red flags |
+|---|---|---|---|
+| 🩺 Health | Grafana → Dashboards → **Hermes** → **Hermes Agent gateway** (*Gateway UP* and *State* panels); Alerting → firing alerts | Gateway UP = 1 and state `running`; the firing list matches what Hermes said, name for name; `max(hermes_gateway_up)` = 1 | an alert Hermes "sees" that Alertmanager does not show, or the reverse |
+| 🔥 Incidents | the trace ID in the answer: Explore → Tempo → paste it; then `sum by (service) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m])) / sum by (service) (rate(traces_spanmetrics_calls_total{span_kind="SPAN_KIND_SERVER"}[5m]))` over the same window | the error span is in that trace with `status = error`, the exception event and the service Hermes named; the error ratio is the one in the answer | a trace ID that does not exist; a service that is not in this repo; an error ratio you cannot reproduce |
+| 🐢 Latency | the slowest trace in the answer (Explore → Tempo waterfall); `histogram_quantile(0.95, sum by (le, service) (rate(traces_spanmetrics_latency_bucket{span_kind="SPAN_KIND_SERVER"}[5m])))` | the span Hermes names is the one holding the time — usually one hop below the app in the question — and p95 matches | a "slow" span that takes a few ms; a p95 that does not match the dashboard |
+| 🕸️ Service graph | **Tempo Service Graph** dashboard, and Explore → Tempo → **Service Graph**; `sum by (client, server) (rate(traces_service_graph_request_failed_total[5m]))` | the failing edge Hermes named is the one with errors, and it is the deepest failing hop, not a symptom | an edge that is not in the graph; a "root cause" that is really the caller |
+| 📈 Trends | the same query over 24 h and 7 d; long windows are answered by the Thanos querier (Prometheus keeps 2 days locally, Thanos 30 days) | the direction and the size of the change; a day-over-day claim needs days of history — a fresh lab has hours | a window you did not ask for; a large percentage computed from two data points |
+| 🛠️ Fixes | the file Hermes names, for example `apps/nodejs/server.js` | the `PLANTED ISSUE:` comment at that line, and that the root cause in the answer matches the code, before you change anything | a file or line that does not exist; a root cause the code does not support |
+
+**Red flags — stop and re-check:** no trace ID or link in the answer; numbers that do not match the dashboard; a
+service, file or metric that does not exist in this repo; a window different from the one you asked for; "no data"
+straight after `load.sh` (wait ~30 s); a confident root cause with no evidence.
+
+**Before you act:**
+
+- [ ] The evidence is confirmed in Grafana, in the window you asked about.
+- [ ] The blast radius is known: which services and users are affected, and what the change touches.
+- [ ] The fix is reviewed in the code, not just described in the chat answer.
+- [ ] The change goes through a PR and review — never applied straight from a chat answer.
+- [ ] In production Hermes stays read-only (Viewer token, read-only skill) and a human approves every change.
+
+In Slack the same rules apply: paste the Grafana link in the thread so everyone can verify the claim themselves.
 
 ## 💼 Slack in production
 
