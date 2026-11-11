@@ -41,8 +41,10 @@ principal() { echo "principal://iam.googleapis.com/projects/$PROJECT_NUMBER/loca
 COND="expression=resource.name == 'projects/_/buckets/$BUCKET' || resource.name.startsWith('projects/_/buckets/$BUCKET/objects/'),title=only-$BUCKET"
 
 if ! gcloud storage buckets describe "gs://$BUCKET" >/dev/null 2>&1; then
+  # Progress goes to stderr: stdout carries only the machine-readable result (bucket, then gsa) so callers
+  # can parse it safely. On a fresh project `gcloud storage buckets create` prints "Creating gs://..." here.
   gcloud storage buckets create "gs://$BUCKET" --project="$PROJECT_ID" --location="$REGION" \
-    --uniform-bucket-level-access --public-access-prevention
+    --uniform-bucket-level-access --public-access-prevention >&2
 fi
 lc="$(mktemp)"; trap 'rm -f "$lc"' EXIT
 printf '{"rule":[{"action":{"type":"Delete"},"condition":{"age":%s}}]}\n' "$LIFECYCLE_DAYS" > "$lc"
@@ -52,7 +54,12 @@ gsa=""
 case "$ACCESS_MODE" in
   bucket)
     for k in $KSAS; do for r in $ROLES; do
-      gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member="$(principal "$k")" --role="$r" >/dev/null
+      # Some lab/student accounts are denied storage.buckets.getIamPolicy, so bucket-level bindings are
+      # impossible there: say so plainly instead of leaking a raw gcloud error.
+      gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member="$(principal "$k")" --role="$r" >/dev/null \
+        || { echo "error: this account cannot set bucket-level IAM on gs://$BUCKET (needs storage.buckets.getIamPolicy)." >&2
+             echo "       re-run with ACCESS_MODE=conditional (project-level bindings scoped to this bucket)" >&2
+             exit 2; }
     done; done ;;
   conditional)
     for k in $KSAS; do for r in $ROLES; do
@@ -76,5 +83,6 @@ case "$ACCESS_MODE" in
 esac
 
 echo "gs://$BUCKET ready: $ROLES for [$KSAS] via $ACCESS_MODE, lifecycle ${LIFECYCLE_DAYS}d, versioning off" >&2
+# stdout contract (parsed by scripts/deploy.sh): line 1 = bucket, line 2 = GSA (empty unless ACCESS_MODE=gsa).
 echo "$BUCKET"
 echo "$gsa"
