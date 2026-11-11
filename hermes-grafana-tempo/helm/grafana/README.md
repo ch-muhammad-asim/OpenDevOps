@@ -108,7 +108,13 @@ Upstream "Tempo Service Graph" reads `traces_service_graph_connection_info`, a p
 writes with the opt-in processor `service-graphs-connection-info`, which this stack does not enable. The script
 rewrites it to `group by (client, server) (max_over_time(traces_service_graph_request_total{...}[$__range]))`: the
 default `service-graphs` processor always writes that counter, `max_over_time` keeps pairs that were idle for part of
-the range, and `group by` merges the series of several metrics-generator replicas into one edge.
+the range, and `group by` merges the series of several metrics-generator replicas into one edge. It also opens on
+`now-1h`: the generator only writes while spans arrive, so the upstream 15-minute default is empty a few minutes
+after `load.sh` stops.
+
+To check every panel (including the rows that are empty by design) in one command, run
+[`../../scripts/verify-dashboards.sh`](../../scripts/verify-dashboards.sh); it exits with the number of `ERROR` panels
+and prints the expected-empty reason next to each one.
 
 Not shipped: **Block builder** (Kafka-based microservices path only) and **Rollout progress** (per-component
 microservices rollout). Panels written for a separate gateway (`cortex-gw`) now read Tempo's own HTTP/gRPC routes.

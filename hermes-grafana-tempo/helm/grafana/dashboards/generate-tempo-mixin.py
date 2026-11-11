@@ -8,8 +8,9 @@ stack runs Tempo as one process (job="tempo", container="tempo", pod "tempo-0"),
 so the script rewrites those selectors, points every Prometheus data source at uid
 "prometheus" (upstream also hard-codes some UIDs), makes the cluster/namespace variables
 optional (".*"), rewrites the Service Graph dashboard from the opt-in
-traces_service_graph_connection_info gauge to traces_service_graph_request_total, pins UIDs
-and writes:
+traces_service_graph_connection_info gauge to traces_service_graph_request_total, replaces its
+two per-side node queries with one deduplicated node query (the merge produced two nodes with the
+same id and the force layout never finished), pins UIDs and writes:
 
   helm/grafana/dashboards/tempo-mixin-<name>.yaml     ConfigMaps for the Grafana sidecar
   helm/tempo/prometheusrule-tempo-mixin.yaml          PrometheusRule (recording + alerts)
@@ -107,6 +108,84 @@ def service_graph(text):
     return text.replace("service-graphs connection_info gauge", "service-graphs request counter")
 
 
+def service_graph_panels(d):
+    """Upstream feeds the nodeGraph panel two node queries, one grouped by client and one by server,
+    and merges them. A service that is both a client and a server arrives twice under the same node
+    id, which the force layout cannot settle: the panel stays on "Computing layout" with nodes hidden
+    for performance. Build one deduplicated node frame from a single query, keep the edge query, and
+    use the layered layout, which draws a call chain top-down without a physics simulation."""
+    for p in d.get("panels", []):
+        if p.get("type") != "nodeGraph":
+            continue
+        targets = {t.get("refId"): t for t in p.get("targets", [])}
+        src = targets.get("nodes_src") or {}
+        m = re.search(r'group by \(client, server\) \(max_over_time\('
+                      r'traces_service_graph_request_total(\{[^}]*\})\[\$__range\]\)\)', src.get("expr", ""))
+        if not m:
+            raise SystemExit("service-graph: unexpected node query upstream, update service_graph_panels()")
+        pairs = ("group by (client, server) (max_over_time("
+                 f"traces_service_graph_request_total{m.group(1)}[$__range]))")
+        # One series per service, whichever side of a pair it appears on; count by (service) collapses
+        # the duplicate ids into a single row per node.
+        node = (
+            'label_replace(label_replace(count by (service) ('
+            f'label_replace({pairs}, "service", "$1", "client", "(.*)") or '
+            f'label_replace({pairs}, "service", "$1", "server", "(.*)")'
+            '), "id", "$1", "service", "(.*)"), "title", "$1", "service", "(.*)")'
+        )
+        ds = src.get("datasource", {"type": "prometheus", "uid": "prometheus"})
+        p["targets"] = [
+            {"datasource": ds, "expr": node, "format": "table", "instant": True,
+             "legendFormat": "", "refId": "nodes"},
+            targets["edges"],
+        ]
+        # The Prometheus data source returns one frame per series with the labels attached to the
+        # value field, so lift the labels into columns (labelsToFields) before selecting the node and
+        # edge fields; nodeGraph reads frames with id+title as nodes and id+source+target as edges.
+        p["transformations"] = [
+            {"id": "labelsToFields", "options": {}},
+            {"filter": {"id": "byRefId", "options": "nodes"},
+             "id": "filterFieldsByName", "options": {"include": {"names": ["id", "title"]}}},
+            {"filter": {"id": "byRefId", "options": "edges"},
+             "id": "filterFieldsByName", "options": {"include": {"names": ["id", "source", "target"]}}},
+            {"filter": {"id": "byRefId", "options": "nodes"}, "id": "merge", "options": {}},
+            {"filter": {"id": "byRefId", "options": "edges"}, "id": "merge", "options": {}},
+            {"filter": {"id": "byRefId", "options": "edges"},
+             "id": "filterByValue",
+             "options": {"filters": [{"config": {"id": "equal", "options": {"value": "tempo-all->tempo-all"}},
+                                      "fieldName": "id"}],
+                         "match": "any", "type": "exclude"}},
+        ]
+        opts = p.setdefault("options", {})
+        opts["layoutAlgorithm"] = "layered"
+        opts.setdefault("edges", {})
+        opts.setdefault("nodes", {})
+
+
+def single_binary_panels(d):
+    """Panels that assume a component this stack does not run. The data volume panel matches a PVC
+    named after the component (cortex PVCs are <component>-<n>); the single Tempo process keeps its
+    data on storage-tempo-0, so accept that name too. The latency panels default to native
+    histograms, which this Prometheus does not scrape: the classic bucket series exist, the
+    native ones do not, so the dashboard variable starts on classic."""
+    def walk(items):
+        for p in items or []:
+            yield p
+            yield from walk(p.get("panels"))
+
+    for p in walk(d.get("panels")):
+        for t in p.get("targets") or []:
+            expr = t.get("expr") or ""
+            if "kubelet_volume_stats_available_bytes" in expr:
+                t["expr"] = expr.replace('persistentvolumeclaim=~"$component.*"',
+                                         'persistentvolumeclaim=~"$component.*|storage-tempo.*"')
+    for v in d.get("templating", {}).get("list", []):
+        if v.get("name") == "latency_metrics":
+            v["current"] = {"text": "classic", "value": "1"}
+            for o in v.get("options") or []:
+                o["selected"] = o.get("value") == "1"
+
+
 def pin_datasources(node):
     """Upstream panels sometimes hard-code Grafana Labs' own Prometheus UIDs; use ours."""
     if isinstance(node, dict):
@@ -126,9 +205,16 @@ def dashboard(name):
         text = service_graph(text)
     d = json.loads(text)
     pin_datasources(d.get("panels", []))
+    single_binary_panels(d)
+    if name == "service-graph":
+        service_graph_panels(d)
     d.pop("id", None)
     d["uid"] = d.get("uid") or f"tempo-{name}"
     d["tags"] = sorted(set(d.get("tags", [])) | {"tempo", "tempo-mixin"})
+    if name == "service-graph":
+        # Span metrics and the service graph go stale a few minutes after traffic stops, so this
+        # dashboard opens on the last hour instead of upstream's shorter default.
+        d["time"] = {"from": "now-1h", "to": "now"}
     for v in d.get("templating", {}).get("list", []):
         if v.get("type") == "datasource" and v.get("query") == "prometheus":
             v["current"] = {"text": "Prometheus", "value": "prometheus"}
