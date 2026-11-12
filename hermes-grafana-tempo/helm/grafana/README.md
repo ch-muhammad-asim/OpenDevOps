@@ -69,6 +69,7 @@ The chart's `sha:` fields take the hex only (the chart adds `@sha256:`).
 | `env.TEMPO_QUERY_URL` | per profile (table above) | Grafana expands `${TEMPO_QUERY_URL}` in the provisioned Tempo data source |
 | `persistence.enabled` | `false` (production); lab `true`, 1Gi | State is in the database (production) or in SQLite on a small PVC (lab) |
 | Tempo `tracesToMetrics` | `service.name` → `service`; rate, error rate, p95 from `traces_spanmetrics_*` | Span → RED metrics of its service |
+| Tempo `traceQuery` | `timeShiftEnabled: false`, both shifts `0s` | A non-zero shift widens every trace search beyond the range the user picked (`-30m`/`+30m` before this fix), so Explore Traces showed nothing for services that were sending |
 | Tempo `streamingEnabled` | search + metrics | Needs `stream_over_http_enabled` in Tempo (set in both Tempo profiles) |
 | CPU limit | not set (requests + memory limit) | CPU throttling slows dashboards; the chart sets `GOMEMLIMIT` from the memory limit |
 

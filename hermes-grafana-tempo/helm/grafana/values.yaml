@@ -221,9 +221,13 @@ datasources:
           search:
             hide: false
           traceQuery:
-            timeShiftEnabled: true
-            spanStartTimeShift: "-30m"
-            spanEndTimeShift: "30m"
+            # No search time shift. A shift widens every trace search on top of the range the user
+            # picked, so "Last 5 minutes" also returns spans from an hour ago; with Tempo's small
+            # default search page that pushed the newest traces off the result, and Explore Traces
+            # reported no traces for services that were actively sending.
+            timeShiftEnabled: false
+            spanStartTimeShift: "0s"
+            spanEndTimeShift: "0s"
           spanBar:
             type: Duration
           streamingEnabled:

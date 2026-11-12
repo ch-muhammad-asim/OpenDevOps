@@ -1,0 +1,75 @@
+# loadgen: one small container that keeps demo traffic flowing through the sample apps, so
+# traces keep arriving and the Tempo service graph never empties between demos. `scripts/load.sh`
+# is a one-shot; this is the same idea as a Deployment. It only calls healthy endpoints (no
+# exceptions, no timeouts) so it does not inflate the planted-error alerts. PSS "restricted".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: tempo-apps
+  labels:
+    app.kubernetes.io/name: loadgen
+    app.kubernetes.io/part-of: tempo-apps
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loadgen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadgen
+        app.kubernetes.io/part-of: tempo-apps
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loadgen
+          image: curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: INTERVAL_SECONDS         # one round every 8 s: ~12 traces/min, the rate Explore defaults to
+              value: "8"
+            - name: NEXTJS_URL
+              value: http://nextjs:3000
+            - name: NODEJS_URL
+              value: http://nodejs:3000
+            - name: PYTHON_URL
+              value: http://python:8000
+          # Every hop of the chain: nextjs -> nodejs -> python, plus a direct call to each service,
+          # so the service graph keeps all five nodes (user, nextjs-web, nodejs-orders,
+          # python-inventory, sqlite) and their edges.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -u
+              hit() { curl -fsS -o /dev/null -m 10 "$1" || echo "loadgen: $1 failed"; }
+              while true; do
+                hit "$NEXTJS_URL/"
+                hit "$NEXTJS_URL/api/dashboard"
+                hit "$NODEJS_URL/orders"
+                hit "$PYTHON_URL/inventory/items"
+                sleep "$INTERVAL_SECONDS"
+              done
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            capabilities:
+              drop: ["ALL"]
