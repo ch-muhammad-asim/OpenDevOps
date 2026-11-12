@@ -60,6 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           hermes-grafana-tempo/scripts/test-bucket-contract.sh
+      - name: Check the Grafana service-graph and Tempo search settings (offline)
+        run: |
+          set -euo pipefail
+          hermes-grafana-tempo/scripts/test-grafana-contract.sh
       - name: Check Node.js source syntax without installing dependencies
         run: |
           set -euo pipefail

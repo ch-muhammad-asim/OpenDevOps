@@ -3,9 +3,10 @@
 #   scripts/verify.sh                 # PROFILE=prod (default) or PROFILE=lab, same as deploy.sh
 #   scripts/verify.sh --read-only     # no probe pods: skips the test span and the NetworkPolicy check
 # Checks: nodes, Helm releases, pods Ready, certificates (letsencrypt mode), Tempo/Grafana/Prometheus
-# health, Grafana datasources (Prometheus, Tempo, Alertmanager), project PrometheusRules loaded,
-# an OTLP test span through the Collector into Tempo, Prometheus scraping the Collector,
-# NetworkPolicy enforcement, and the public HTTPS endpoint through Cloudflare.
+# health, Grafana datasources (Prometheus, Tempo, Alertmanager), Grafana trace-search/service-graph
+# settings, project PrometheusRules loaded, an OTLP test span through the Collector into Tempo,
+# Prometheus scraping the Collector, live service-graph edges, NetworkPolicy enforcement, and the
+# public HTTPS endpoint through Cloudflare.
 # Side effects (default mode only): two short-lived curl pods, `otlp-probe` in tempo-apps and
 # `netpol-probe` in default, deleted on exit; one test span with service.name=verify-probe.
 set -uo pipefail
@@ -120,6 +121,19 @@ if [ -n "$found" ]; then pass "test trace found in Tempo"; else fail "test trace
 [ -n "$found" ] && check "test trace visible through Grafana" sh -c \
   "curl -fsS -m 20 --netrc-file '$netrc' http://127.0.0.1:$GRAFANA_PORT/api/datasources/proxy/uid/tempo/api/v2/traces/$tid | grep -q verify-probe"
 fi
+
+# 6b. Grafana settings that decide whether Explore and the service graph show anything (see
+# helm/grafana/README.md): trace search must not shift the user's time range, and the nodeGraph
+# panel must not use the "force" layout, which never finishes in Grafana 13 (empty graph).
+check "grafana tempo datasource has no trace search time shift" sh -c \
+  "curl -fsS -m 20 --netrc-file '$netrc' http://127.0.0.1:$GRAFANA_PORT/api/datasources/uid/tempo \
+   | python3 -c 'import json,sys; t=json.load(sys.stdin)[\"jsonData\"].get(\"traceQuery\") or {}; \
+                 sys.exit(0 if t.get(\"timeShiftEnabled\") is False else 1)'"
+check "service graph panel uses the layered layout" sh -c \
+  "curl -fsS -m 20 --netrc-file '$netrc' http://127.0.0.1:$GRAFANA_PORT/api/dashboards/uid/tempo-service-graph \
+   | python3 -c 'import json,sys; \
+                 ps=json.load(sys.stdin)[\"dashboard\"][\"panels\"]; \
+                 sys.exit(0 if [p for p in ps if p.get(\"type\")==\"nodeGraph\" and p.get(\"options\",{}).get(\"layoutAlgorithm\")==\"layered\"] else 1)'"
 rm -f "$netrc"
 
 # 7. Prometheus scrapes the Collector and receives Tempo span metrics
@@ -127,6 +141,11 @@ check "prometheus scrapes otel-collector" sh -c \
   "curl -fsS -m 10 'http://127.0.0.1:$PROM_PORT/api/v1/query?query=up%7Bservice%3D%22otel-collector%22%7D' | grep -q '\"1\"\\]'"
 check "tempo metrics-generator remote write active" sh -c \
   "curl -fsS -m 10 'http://127.0.0.1:$PROM_PORT/api/v1/query?query=count(traces_spanmetrics_calls_total)' | grep -q '\"result\":\\[{'"
+# Service graph: the sample apps must be producing client/server edges (apps/loadgen keeps them
+# flowing). Without recent traffic the nodeGraph panel has no nodes, which looks like a UI bug.
+check "tempo service graph has live client/server edges" sh -c \
+  "curl -fsS -m 10 'http://127.0.0.1:$PROM_PORT/api/v1/query?query=sum(rate(traces_service_graph_request_total%7Bclient!%3D%22tempo-all%22%7D%5B5m%5D))' \
+   | grep -Eq '\"value\":\\[[0-9.]+,\"[0-9]*\\.?[1-9]'"
 
 # 7b. Project PrometheusRules loaded (Prometheus rule groups by rule-file name)
 for r in monitoring/otel-collector monitoring/traefik monitoring/grafana monitoring/cert-manager observability/tempo-mixin; do

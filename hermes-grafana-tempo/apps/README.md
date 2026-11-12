@@ -23,6 +23,7 @@ The project [architecture diagram](../docs/diagrams/architecture.mmd) shows the 
 | `nextjs` | `nextjs-web` | Next.js 16 storefront: dashboard, checkout, stock and report routes | `@vercel/otel` in `instrumentation.ts` + manual spans | 3000 | [nextjs/](nextjs/README.md) |
 | `nodejs` | `nodejs-orders` | Express 5 orders API; calls python for stock | Auto-instrumentations (`--require`) + manual spans | 3000 | [nodejs/](nodejs/README.md) |
 | `python` | `python-inventory` | FastAPI inventory API on SQLite | Zero-code `opentelemetry-instrument` + manual spans | 8000 | [python/](python/README.md) |
+| `loadgen/` | - | Continuous demo traffic (one `curl` pod) so traces and the Tempo service graph never go empty between demos | - | - | [loadgen/](loadgen/README.md) |
 | `local/` | - | Docker Compose stack: apps + Collector + Tempo + Prometheus | - | - | [local/](local/README.md) |
 | `monitoring/` | - | PrometheusRule: 99% availability SLO burn-rate alerts, p95 latency, no spans, restarts, memory | - | - | [monitoring/](monitoring/README.md) |
 | `lab/` | - | Kustomize overlay: production manifests with 1 replica per app for a small cluster | - | - | [lab/](lab/README.md) |

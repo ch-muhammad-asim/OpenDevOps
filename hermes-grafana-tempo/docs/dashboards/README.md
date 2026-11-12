@@ -246,6 +246,19 @@ arrive, so a few minutes after `load.sh` stops the latest sample falls outside a
 a wider range. **Try it:** open <https://tempo-nextjs.example.com/api/dashboard> a few times and refresh the dashboard
 after ~1 minute.
 
+**Two settings this panel depends on** (both asserted by [`scripts/test-grafana-contract.sh`](../../scripts/test-grafana-contract.sh)):
+
+- **Layout `layered`, not `force`, and one node frame.** The upstream mixin ships
+  `layoutAlgorithm: "force"`, whose Web Worker never finishes in Grafana 13: the panel stays on *Computing
+  layout* and says *"N nodes are hidden for performance reasons."* with an empty canvas — for any data,
+  including Grafana's own TestData node-graph scenario. It also feeds two node queries (one grouped by
+  client, one by server), so a service that is both arrives twice under the same node id.
+  `generate-tempo-mixin.py` builds one deduplicated node frame from a single query and rewrites the panel to
+  `layered`, which draws the same nodes and edges synchronously.
+- **Continuous traffic.** Edges come from recent calls, so an idle stack has an empty graph. The
+  [`loadgen`](../../apps/loadgen/README.md) Deployment calls the healthy app endpoints every 8 s to keep all five
+  nodes warm between demos (`kubectl -n tempo-apps scale deployment/loadgen --replicas=0` to stop it).
+
 ### Tempo Operational
 
 **What it is for:** Tempo's overall health on one page: Go runtime, maintenance, reads, writes, storage, compaction.

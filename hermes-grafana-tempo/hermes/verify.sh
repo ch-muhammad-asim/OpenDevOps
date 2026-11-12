@@ -62,11 +62,20 @@ firing="$(get "$PROM/api/v1/alerts" 2>/dev/null \
   | json '",".join(a["labels"]["alertname"] for a in d["data"]["alerts"] if a["labels"]["alertname"].startswith("Hermes") and a["state"] == "firing")' 2>/dev/null)"
 if [[ -z "$firing" ]]; then pass "no Hermes alerts firing"; else fail "Hermes alerts firing: $firing"; fi
 
-# 4. Tempo: TraceQL finds the gateway lifecycle span (last 6 hours)
+# 4. Tempo: TraceQL finds the gateway's live health spans, and its startup lifecycle span.
+#    `hermes.gateway_health` spans arrive continuously, so a short window proves telemetry end to
+#    end. The `gateway.lifecycle` span is emitted once per gateway start: keep it in a fixed 6 h
+#    window and it silently expires on a long-running gateway (it did, at 6 h 26 m uptime), so look
+#    for it across Tempo's retention window instead and skip it when the gateway has not restarted.
 now="$(date +%s)"
-tn="$(get "$TEMPO/api/search?q=$(enc "$TRACEQL")&start=$((now - 21600))&end=$now&limit=20" 2>/dev/null \
+live='{ resource.service.name = "hermes-gateway" }'
+ln="$(get "$TEMPO/api/search?q=$(enc "$live")&start=$((now - 900))&end=$now&limit=20" 2>/dev/null \
       | json 'len(d.get("traces", []))' 2>/dev/null || echo 0)"
-if [[ "$tn" -ge 1 ]]; then pass "Tempo TraceQL $TRACEQL -> $tn trace(s)"; else fail "Tempo TraceQL $TRACEQL -> $tn traces"; fi
+if [[ "$ln" -ge 1 ]]; then pass "Tempo TraceQL $live (last 15 m) -> $ln trace(s)"; else fail "Tempo TraceQL $live (last 15 m) -> $ln traces"; fi
+tn="$(get "$TEMPO/api/search?q=$(enc "$TRACEQL")&start=$((now - 86400))&end=$now&limit=20" 2>/dev/null \
+      | json 'len(d.get("traces", []))' 2>/dev/null || echo 0)"
+if [[ "$tn" -ge 1 ]]; then pass "Tempo TraceQL $TRACEQL -> $tn trace(s)"
+else echo "SKIP  no $TRACEQL span in Tempo's retention window (the gateway has not restarted)"; fi
 
 # 5. Grafana: dashboard provisioned, and both data sources answer through Grafana
 gu="$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-user}' | base64 -d)"
@@ -78,7 +87,7 @@ body='{"from":"now-15m","to":"now","queries":[{"refId":"A","datasource":{"uid":"
 gv="$(gcurl -X POST --data "$body" "$GRAFANA/api/ds/query" 2>/dev/null \
       | json 'd["results"]["A"]["frames"][0]["data"]["values"][1][-1]' 2>/dev/null)"
 if [[ "$gv" == 1 || "$gv" == 1.0 ]]; then pass "Grafana -> Prometheus max(hermes_gateway_up) = 1"; else fail "Grafana -> Prometheus returned '$gv'"; fi
-tq="$(python3 -I -c 'import json, sys; print(json.dumps({"from": "now-6h", "to": "now", "queries": [{"refId": "A", "datasource": {"uid": "tempo"}, "queryType": "traceql", "query": sys.argv[1], "limit": 20, "tableType": "traces"}]}))' "$TRACEQL")"
+tq="$(python3 -I -c 'import json, sys; print(json.dumps({"from": "now-15m", "to": "now", "queries": [{"refId": "A", "datasource": {"uid": "tempo"}, "queryType": "traceql", "query": sys.argv[1], "limit": 20, "tableType": "traces"}]}))' "$live")"
 gt="$(gcurl -X POST --data "$tq" "$GRAFANA/api/ds/query" 2>/dev/null \
       | json 'len(d["results"]["A"]["frames"][0]["data"]["values"][0]) if d["results"]["A"].get("frames") else 0' 2>/dev/null || echo 0)"
 if [[ "$gt" -ge 1 ]]; then pass "Grafana -> Tempo TraceQL -> $gt trace(s)"; else fail "Grafana -> Tempo TraceQL -> $gt traces"; fi

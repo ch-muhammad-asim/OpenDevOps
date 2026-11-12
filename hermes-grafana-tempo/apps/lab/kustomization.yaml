@@ -6,6 +6,7 @@ resources:
   - ../python/k8s
   - ../nodejs/k8s
   - ../nextjs/k8s
+  - ../loadgen/k8s
   - ../monitoring
 patches:
   - target:
